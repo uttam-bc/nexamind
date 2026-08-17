@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.database import Base, engine
-from app.routers import auth, workspaces
+from app.routers import auth, channels, documents, files, finance, projects, workspaces
 from app.services.auth_service import AuthError
 
 settings = get_settings()
@@ -54,3 +54,8 @@ async def health_check() -> dict[str, str]:
 
 app.include_router(auth.router)
 app.include_router(workspaces.router)
+app.include_router(documents.router)
+app.include_router(projects.router)
+app.include_router(files.router)
+app.include_router(finance.router)
+app.include_router(channels.router)

@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: nexamind-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: LOG_LEVEL
+        value: INFO
+
+databases:
+  - name: nexamind-db
+    plan: free
+    databaseName: nexamind
+    user: nexamind

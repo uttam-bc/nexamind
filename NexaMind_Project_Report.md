@@ -121,3 +121,166 @@ The logged-in homepage is dashboard-first: a sidebar for workspace switching and
 7. **Create Report** — reuses retrieval + Gemini from the Assistant
 8. **Mobile app** — Expo client wired to the same deployed backend, 3–4 modules scoped
 9. **Live video conferencing** — added on top of the working upload pipeline
+
+# NexaMind — Build Instructions
+
+Read the attached `NexaMind_Project_Report.md` completely before doing anything.
+
+The Markdown file is the **source of truth for the project's requirements, architecture, technology stack, database schema, modules, AI architecture, meeting pipeline, and build order.**
+
+Your job is to implement the project described in that document.
+
+## Critical Rules
+
+### 1. Build in phases
+
+Follow the **Recommended Build Order** in the Markdown document.
+
+Do NOT implement the entire project in one go.
+
+Start with the first phase only.
+
+After completing a phase:
+
+* run the application
+* run relevant tests
+* verify the implementation
+* fix errors
+* summarize what was implemented
+* list files changed/created
+* explain how I can test it
+
+Then **STOP**.
+
+Do not continue automatically.
+
+I will tell you:
+
+`NEXT PHASE`
+
+when I want you to continue.
+
+---
+
+### 2. The Markdown is the source of truth
+
+Do not unnecessarily repeat or redefine requirements that already exist in the Markdown.
+
+Before implementing anything, inspect the relevant section of the document.
+
+If something is ambiguous or you think the architecture needs to change, **ask me before making a major architectural decision.**
+
+Do not silently replace technologies or architectural decisions from the document.
+
+---
+
+### 3. FRONTEND DESIGN IS NOT PART OF THIS PHASE
+
+**Do NOT work on frontend design yet.**
+
+This is extremely important.
+
+Do not spend time on:
+
+* visual design
+* polished UI
+* dashboard design
+* animations
+* design systems
+* responsive styling
+* mobile UI
+* visual components
+* frontend UX
+
+The frontend design will be handled later with a separate prompt.
+
+If a minimal frontend/stub is necessary to test backend functionality, create only what is technically required.
+
+Otherwise, focus on the backend and system functionality.
+
+---
+
+### 4. Build production-quality foundations
+
+Even though this is being developed phase-by-phase, don't write throwaway code.
+
+Use:
+
+* modular architecture
+* clean separation of concerns
+* proper error handling
+* environment variables
+* database migrations
+* validation
+* authentication/authorization
+* logging
+* tests
+* meaningful naming
+* reusable services
+* secure handling of secrets
+
+Do not hardcode credentials or API keys.
+
+Create/update `.env.example` where necessary.
+
+---
+
+### 5. Don't jump ahead
+
+While implementing the current phase, you may create **small supporting pieces** required by the current phase.
+
+However, do not prematurely implement future modules.
+
+For example, while building authentication, don't start building the AI agent, meetings pipeline, finance module, or report generation unless the current phase explicitly requires it.
+
+Keep the architecture ready for future phases without implementing them prematurely.
+
+---
+
+### 6. Verify everything
+
+Do not tell me a phase is complete simply because the code was generated.
+
+Actually:
+
+1. Start the application.
+2. Run tests.
+3. Verify database connectivity.
+4. Test important APIs.
+5. Fix errors you encounter.
+6. Re-run the tests.
+
+If something cannot be tested because an external service/API is unavailable, clearly tell me what was mocked and what remains unverified.
+
+---
+
+## First Action
+
+Before writing code:
+
+1. Read the entire attached Markdown file.
+2. Inspect the existing repository.
+3. Determine the current state of the project.
+4. Compare the repository against the architecture and build order in the Markdown.
+5. Tell me briefly:
+
+   * what you found
+   * what already exists
+   * what Phase 1 requires
+   * what files/modules you intend to create
+
+Then begin **Phase 1 only**.
+
+Do not start frontend design.
+
+Do not proceed to Phase 2 automatically.
+
+### phases
+2 Documents module end-to-end + deploy backend
+3 Projects, Files, Finance, Channels
+4 Real-time layer (WebSockets)
+5 Sessions pipeline (upload → transcribe → summarize)
+6 AI Assistant (tools + Gemini agent)
+7 Create Report
+8 Mobile app (Expo, 3–4 modules)
+9 Live video conferencing

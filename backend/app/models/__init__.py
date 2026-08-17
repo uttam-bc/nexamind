@@ -3,11 +3,15 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
 from app.database import Base
+from app.models.channel import Channel, Message  # noqa: F401
+from app.models.document import Document  # noqa: F401
+from app.models.file import FileRecord  # noqa: F401
+from app.models.finance import FinanceTransaction  # noqa: F401
+from app.models.project import CodeRepo, Commit, Issue, Task  # noqa: F401
 
 
 class WorkspaceType(str, enum.Enum):
@@ -85,6 +89,30 @@ class Workspace(Base):
 
     owner: Mapped["User"] = relationship(back_populates="owned_workspaces", foreign_keys=[owner_id])
     members: Mapped[list["WorkspaceMember"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    tasks: Mapped[list["Task"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    code_repos: Mapped[list["CodeRepo"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    files: Mapped[list["FileRecord"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    finance_transactions: Mapped[list["FinanceTransaction"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    channels: Mapped[list["Channel"]] = relationship(
         back_populates="workspace",
         cascade="all, delete-orphan",
     )
