@@ -224,7 +224,7 @@ export default function App() {
   // ----------------------------------------------------
   if (!token || !user) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4">
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 fade-in">
         <div className="max-w-md w-full glass-panel p-8 rounded-3xl shadow-2xl border border-slate-800 space-y-6">
           <div className="text-center space-y-2">
             <div className="inline-flex items-center justify-center p-3.5 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl shadow-xl shadow-indigo-600/30 text-white">
@@ -336,7 +336,7 @@ export default function App() {
   // Render Main Application Shell
   // ----------------------------------------------------
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans fade-in">
       {/* Navigation Sidebar */}
       <Sidebar
         workspaces={workspaces}
