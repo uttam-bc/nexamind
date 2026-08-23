@@ -19,8 +19,11 @@ import {
   Calendar,
 } from 'lucide-react';
 import { api } from '../api';
+import { useToast } from '../context/ToastContext';
+import { PageHeader, SearchInput, Modal, Badge, EmptyState } from './ui';
 
 export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
+  const { error: toastError, confirm } = useToast();
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,7 +91,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
       setSelectedTask(null);
       await onRefreshTasks();
     } catch (err) {
-      alert(`Update error: ${err.message}`);
+      toastError(`Update error: ${err.message}`);
     } finally {
       setIsSavingEdit(false);
     }
@@ -111,7 +114,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
       setTaskPriority('medium');
       await onRefreshTasks();
     } catch (err) {
-      alert(`Create task error: ${err.message}`);
+      toastError(`Create task error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -122,18 +125,18 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
       await api.updateTask(workspaceId, taskId, { status: newStatus });
       await onRefreshTasks();
     } catch (err) {
-      alert(`Move task error: ${err.message}`);
+      toastError(`Move task error: ${err.message}`);
     }
   };
 
   const handleDeleteTask = async (taskId) => {
-    if (confirm('Delete this task?')) {
+    if (await confirm('Delete this task?')) {
       try {
         await api.deleteTask(workspaceId, taskId);
         if (selectedTask?.id === taskId) setSelectedTask(null);
         await onRefreshTasks();
       } catch (err) {
-        alert(err.message);
+        toastError(err.message);
       }
     }
   };
@@ -158,22 +161,9 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
     setSubtasks(subtasks.filter((st) => st.id !== subtaskId));
   };
 
-  const getPriorityBadge = (priority) => {
-    const map = {
-      urgent: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
-      high: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-      medium: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
-      low: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
-    };
-    return (
-      <span
-        className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md border ${
-          map[priority] || map.medium
-        }`}
-      >
-        {priority || 'medium'}
-      </span>
-    );
+  const priorityVariant = (priority) => {
+    const map = { urgent: 'rose', high: 'amber', medium: 'indigo', low: 'default' };
+    return map[priority] || 'indigo';
   };
 
   // Filter tasks
@@ -187,55 +177,27 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
 
   return (
     <div className="h-full flex flex-col space-y-6">
-      {/* Top Header & Search/Filter Controls */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">
-            Sprint Projects & Kanban Board
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Manage sprint tasks, track checklists, and coordinate deliverables across columns.
-          </p>
-        </div>
+      <PageHeader
+        title="Tasks & Kanban"
+        description="Manage sprint tasks, track checklists, and coordinate deliverables."
+        actions={
+          <>
+            <SearchInput value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tasks..." className="w-48" />
+            <select className="input-base py-2 text-xs w-auto" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
+              <option value="all">All Priorities</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <button onClick={() => setShowAddModal(true)} className="btn-primary py-2 text-xs">
+              <Plus className="w-4 h-4" /> Add Task
+            </button>
+          </>
+        }
+      />
 
-        <div className="flex items-center gap-3">
-          {/* Search Box */}
-          <div className="relative w-56">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          {/* Priority Filter */}
-          <select
-            className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-          >
-            <option value="all">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Task</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 3 Columns Grid */}
-      <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 flex-1 min-h-0">
         {columns.map((col) => {
           const colTasks = filteredTasks.filter((t) => t.status === col.id);
           return (
@@ -288,7 +250,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
                       )}
 
                       <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-                        {getPriorityBadge(task.priority)}
+                        <Badge variant={priorityVariant(task.priority)}>{task.priority || 'medium'}</Badge>
 
                         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           {col.id !== 'todo' && (
@@ -320,9 +282,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
                 })}
 
                 {colTasks.length === 0 && (
-                  <div className="text-center text-slate-600 py-12 text-xs italic">
-                    No tasks in {col.label}
-                  </div>
+                  <EmptyState title={`No tasks in ${col.label}`} description="Add a task to get started" />
                 )}
               </div>
             </div>

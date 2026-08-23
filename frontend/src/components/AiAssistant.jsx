@@ -25,15 +25,16 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { api } from '../api';
+import { useToast } from '../context/ToastContext';
 
 export default function AiAssistant({
   workspaceId,
   onNavigateTab,
   onRefreshAll,
   onSwitchWorkspace,
-  isExpanded = false,
-  onToggleExpand,
+  variant = 'full',
 }) {
+  const { error: toastError, confirm } = useToast();
   const defaultGreeting = {
     role: 'assistant',
     content:
@@ -89,8 +90,8 @@ export default function AiAssistant({
   }, [messages, activePlanSteps]);
 
   // Clear chat history
-  const handleClearChat = () => {
-    if (confirm('Clear chat history for this workspace?')) {
+  const handleClearChat = async () => {
+    if (await confirm('Clear chat history for this workspace?')) {
       const storageKey = `nexamind_ai_chat_${workspaceId}`;
       localStorage.removeItem(storageKey);
       setMessages([defaultGreeting]);
@@ -101,7 +102,7 @@ export default function AiAssistant({
   const toggleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      toastError('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
       return;
     }
 
@@ -287,41 +288,25 @@ export default function AiAssistant({
   ];
 
   return (
-    <div className="glass-panel rounded-3xl border border-slate-800 flex flex-col h-full overflow-hidden bg-slate-900/90 shadow-2xl relative">
-      {/* Header */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/70">
+    <div className={`glass-panel rounded-2xl border border-slate-800/80 flex flex-col overflow-hidden bg-slate-900/90 shadow-panel relative ${variant === 'full' ? 'h-full min-h-[600px]' : ''}`}>
+      <div className="p-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/50">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 animate-pulse">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/25">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-extrabold text-sm text-slate-100">NexaMind Omni-Agent</span>
-              <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-bold px-2 py-0.5 rounded-full border border-indigo-500/30">
-                Llama 3.3 70B & Tools
+              <span className="font-bold text-sm text-slate-100">NexaMind AI Copilot</span>
+              <span className="text-[10px] bg-indigo-500/15 text-indigo-300 font-semibold px-2 py-0.5 rounded-full border border-indigo-500/25">
+                Agent
               </span>
             </div>
-            <span className="text-[11px] text-slate-400">Full Execution Authority (Docs, Tasks, Calendar, Channels)</span>
+            <span className="text-[11px] text-slate-500">Docs, tasks, calendar, channels & code</span>
           </div>
         </div>
-
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleClearChat}
-            title="Clear Chat History"
-            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          {onToggleExpand && (
-            <button
-              onClick={onToggleExpand}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
-            >
-              {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </button>
-          )}
-        </div>
+        <button onClick={handleClearChat} title="Clear chat" className="btn-ghost p-2 text-slate-400 hover:text-rose-400">
+          <Trash2 className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Messages Canvas */}
@@ -453,11 +438,7 @@ export default function AiAssistant({
           className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 resize-none placeholder-slate-500 font-sans"
         />
 
-        <button
-          type="submit"
-          disabled={!inputPrompt.trim() || isProcessing}
-          className="p-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl shadow-lg shadow-indigo-600/30 transition disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 flex items-center justify-center"
-        >
+        <button type="submit" disabled={!inputPrompt.trim() || isProcessing} className="btn-primary p-2.5 rounded-xl">
           <Send className="w-4 h-4" />
         </button>
       </form>
