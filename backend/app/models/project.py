@@ -71,13 +71,15 @@ class Task(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        onupdate=datetime.now,
         nullable=False,
     )
 
@@ -110,13 +112,15 @@ class CodeRepo(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        onupdate=datetime.now,
         nullable=False,
     )
 
@@ -149,7 +153,8 @@ class Commit(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
 
@@ -187,13 +192,15 @@ class Issue(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        onupdate=datetime.now,
         nullable=False,
     )
 

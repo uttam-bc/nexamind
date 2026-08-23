@@ -250,10 +250,11 @@ export default function App() {
                   Full Name
                 </label>
                 <input
+                  color='black'
                   type="text"
                   required
                   placeholder="Jordan Vance"
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600 font-medium"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 text-black placeholder-slate-600 font-medium"
                   value={authForm.name}
                   onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
                 />
@@ -265,10 +266,11 @@ export default function App() {
                 Email Address
               </label>
               <input
+              color='black'
                 type="email"
                 required
                 placeholder="admin@nexamind.app"
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600 font-medium"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 text-black placeholder-slate-600 font-medium"
                 value={authForm.email}
                 onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
               />
@@ -279,10 +281,11 @@ export default function App() {
                 Password
               </label>
               <input
+              color='black'
                 type="password"
                 required
                 placeholder="••••••••"
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600 font-medium"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 text-black placeholder-slate-600 font-medium"
                 value={authForm.password}
                 onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
               />

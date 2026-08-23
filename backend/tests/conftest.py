@@ -56,3 +56,30 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def auth_context(client: AsyncClient) -> dict:
+    response = await client.post(
+        "/auth/register",
+        json={
+            "email": "testuser@example.com",
+            "password": "securepass123",
+            "name": "Test User",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    workspaces = await client.get(
+        "/workspaces",
+        headers={"Authorization": f"Bearer {data['access_token']}"},
+    )
+    return {
+        "token": data["access_token"],
+        "user_id": data["user"]["id"],
+        "workspace_id": workspaces.json()[0]["id"],
+    }
+
+
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}

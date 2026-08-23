@@ -38,13 +38,15 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        onupdate=datetime.now,
         nullable=False,
     )
 
@@ -77,13 +79,15 @@ class Workspace(Base):
     join_code: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        onupdate=datetime.now,
         nullable=False,
     )
 
@@ -147,7 +151,8 @@ class WorkspaceMember(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
         nullable=False,
     )
 
