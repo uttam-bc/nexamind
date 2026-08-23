@@ -10,6 +10,10 @@ class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
+class WorkspaceUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
 class WorkspaceJoin(BaseModel):
     join_code: str = Field(min_length=6, max_length=32)
 
@@ -19,6 +23,17 @@ class WorkspaceMemberResponse(BaseModel):
 
     id: UUID
     user_id: UUID
+    role: WorkspaceRole
+    created_at: datetime
+
+
+class WorkspaceMemberDetailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    name: str
+    email: str
     role: WorkspaceRole
     created_at: datetime
 

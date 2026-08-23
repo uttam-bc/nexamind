@@ -47,9 +47,29 @@ async function request(path, options = {}) {
     return null;
   }
 
-  const data = await res.json().catch(() => ({}));
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+
   if (!res.ok) {
-    throw new Error(data.detail || 'Request failed');
+    let errorMsg = 'Request failed';
+    if (typeof data.detail === 'string') {
+      errorMsg = data.detail;
+    } else if (Array.isArray(data.detail)) {
+      errorMsg = data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ');
+    } else if (data.message) {
+      errorMsg = data.message;
+    } else if (res.status === 401) {
+      errorMsg = 'Session expired or not logged in. Please log in again.';
+    } else if (res.status === 404) {
+      errorMsg = 'Workspace or endpoint not found.';
+    } else {
+      errorMsg = `Request failed (HTTP ${res.status})`;
+    }
+    throw new Error(errorMsg);
   }
   return data;
 }

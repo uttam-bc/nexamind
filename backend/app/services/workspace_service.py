@@ -53,6 +53,77 @@ async def get_workspace_for_user(
     return workspace
 
 
+async def list_workspace_members_with_details(
+    db: AsyncSession,
+    workspace_id: UUID,
+    user_id: UUID,
+) -> list[dict]:
+    membership = await get_workspace_membership(db, workspace_id, user_id)
+    if not membership:
+        raise AuthError("Workspace not found or access denied", status_code=404)
+
+    result = await db.execute(
+        select(WorkspaceMember, User)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(WorkspaceMember.workspace_id == workspace_id)
+        .order_by(WorkspaceMember.created_at.asc())
+    )
+    members_with_users = result.all()
+    return [
+        {
+            "id": member.id,
+            "user_id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": member.role,
+            "created_at": member.created_at,
+        }
+        for member, user in members_with_users
+    ]
+
+
+async def update_workspace_name(
+    db: AsyncSession,
+    workspace_id: UUID,
+    user_id: UUID,
+    new_name: str,
+) -> Workspace:
+    membership = await get_workspace_membership(db, workspace_id, user_id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]:
+        raise AuthError("Only workspace owners or admins can rename the workspace", status_code=403)
+
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise AuthError("Workspace not found", status_code=404)
+
+    workspace.name = new_name.strip()
+    await db.flush()
+    return workspace
+
+
+async def regenerate_workspace_join_code(
+    db: AsyncSession,
+    workspace_id: UUID,
+    user_id: UUID,
+) -> Workspace:
+    membership = await get_workspace_membership(db, workspace_id, user_id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]:
+        raise AuthError("Only workspace owners or admins can regenerate the join code", status_code=403)
+
+    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise AuthError("Workspace not found", status_code=404)
+
+    if workspace.type != WorkspaceType.TEAM:
+        raise AuthError("Personal workspaces do not have join codes", status_code=400)
+
+    workspace.join_code = await _generate_unique_join_code(db)
+    await db.flush()
+    return workspace
+
+
 async def create_team_workspace(
     db: AsyncSession,
     owner: User,
