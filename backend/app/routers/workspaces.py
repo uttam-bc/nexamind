@@ -10,13 +10,18 @@ from app.schemas.workspace import (
     WorkspaceCreate,
     WorkspaceDetailResponse,
     WorkspaceJoin,
+    WorkspaceMemberDetailResponse,
     WorkspaceResponse,
+    WorkspaceUpdate,
 )
 from app.services.workspace_service import (
     create_team_workspace,
     get_workspace_for_user,
     join_workspace_by_code,
     list_user_workspaces,
+    list_workspace_members_with_details,
+    regenerate_workspace_join_code,
+    update_workspace_name,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -49,6 +54,37 @@ async def get_workspace(
 ) -> WorkspaceDetailResponse:
     workspace = await get_workspace_for_user(db, workspace_id, current_user.id)
     return WorkspaceDetailResponse.model_validate(workspace)
+
+
+@router.patch("/{workspace_id}", response_model=WorkspaceResponse)
+async def update_workspace(
+    workspace_id: UUID,
+    data: WorkspaceUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceResponse:
+    workspace = await update_workspace_name(db, workspace_id, current_user.id, data.name)
+    return WorkspaceResponse.model_validate(workspace)
+
+
+@router.get("/{workspace_id}/members", response_model=list[WorkspaceMemberDetailResponse])
+async def get_workspace_members(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[WorkspaceMemberDetailResponse]:
+    members = await list_workspace_members_with_details(db, workspace_id, current_user.id)
+    return [WorkspaceMemberDetailResponse.model_validate(m) for m in members]
+
+
+@router.post("/{workspace_id}/regenerate-code", response_model=WorkspaceResponse)
+async def regenerate_join_code(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceResponse:
+    workspace = await regenerate_workspace_join_code(db, workspace_id, current_user.id)
+    return WorkspaceResponse.model_validate(workspace)
 
 
 @router.post("/join", response_model=WorkspaceResponse)

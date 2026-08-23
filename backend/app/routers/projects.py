@@ -34,6 +34,7 @@ from app.services.project_service import (
     update_issue,
     update_task,
 )
+from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["projects"])
 
@@ -59,6 +60,11 @@ async def create_workspace_task(
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
     task = await create_task(db, workspace_id, current_user, data)
+    task_data = TaskResponse.model_validate(task).model_dump(mode="json")
+    await ws_manager.broadcast_to_workspace(
+        workspace_id,
+        {"event": "task_created", "workspace_id": str(workspace_id), "data": task_data},
+    )
     return TaskResponse.model_validate(task)
 
 
@@ -82,6 +88,11 @@ async def update_workspace_task(
     db: AsyncSession = Depends(get_db),
 ) -> TaskResponse:
     task = await update_task(db, workspace_id, task_id, current_user.id, data)
+    task_data = TaskResponse.model_validate(task).model_dump(mode="json")
+    await ws_manager.broadcast_to_workspace(
+        workspace_id,
+        {"event": "task_updated", "workspace_id": str(workspace_id), "data": task_data},
+    )
     return TaskResponse.model_validate(task)
 
 
@@ -93,7 +104,12 @@ async def delete_workspace_task(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     await delete_task(db, workspace_id, task_id, current_user.id)
+    await ws_manager.broadcast_to_workspace(
+        workspace_id,
+        {"event": "task_deleted", "workspace_id": str(workspace_id), "task_id": str(task_id)},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 
 # --- Code Repositories ---

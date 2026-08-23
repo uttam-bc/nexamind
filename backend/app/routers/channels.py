@@ -19,6 +19,7 @@ from app.services.channel_service import (
     list_messages,
     post_message,
 )
+from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/channels", tags=["channels"])
 
@@ -41,6 +42,11 @@ async def create_workspace_channel(
     db: AsyncSession = Depends(get_db),
 ) -> ChannelResponse:
     channel = await create_channel(db, workspace_id, current_user, data)
+    channel_data = ChannelResponse.model_validate(channel).model_dump(mode="json")
+    await ws_manager.broadcast_to_workspace(
+        workspace_id,
+        {"event": "channel_created", "workspace_id": str(workspace_id), "data": channel_data},
+    )
     return ChannelResponse.model_validate(channel)
 
 
@@ -76,4 +82,14 @@ async def post_channel_message(
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
     message = await post_message(db, workspace_id, channel_id, current_user, data)
-    return MessageResponse.model_validate(message)
+    msg_response = MessageResponse.model_validate(message)
+    await ws_manager.broadcast_to_channel(
+        channel_id,
+        {
+            "event": "new_message",
+            "channel_id": str(channel_id),
+            "data": msg_response.model_dump(mode="json"),
+        },
+    )
+    return msg_response
+

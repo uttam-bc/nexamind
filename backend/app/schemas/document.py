@@ -19,7 +19,22 @@ class DocumentBlock(BaseModel):
 
 
 class DocumentContent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     blocks: list[DocumentBlock] = Field(default_factory=list)
+    text: str | None = None
+
+    @model_validator(mode="after")
+    def populate_blocks_from_text(self) -> Self:
+        if self.text and not self.blocks:
+            self.blocks = [
+                DocumentBlock(
+                    id="1",
+                    type="paragraph",
+                    text=self.text,
+                )
+            ]
+        return self
 
 
 class DocumentCreate(BaseModel):

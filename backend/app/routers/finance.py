@@ -83,6 +83,7 @@ async def delete_workspace_transaction(
 
 
 @router.get("/runway", response_model=RunwaySummaryResponse)
+@router.get("/summary", response_model=RunwaySummaryResponse)
 async def get_workspace_runway(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),

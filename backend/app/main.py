@@ -8,7 +8,21 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.database import Base, engine
-from app.routers import auth, channels, documents, files, finance, projects, workspaces
+from app.routers import (
+    ai_agent,
+    auth,
+    calendar,
+    channels,
+    documents,
+    files,
+    finance,
+    projects,
+    reports,
+    sessions,
+    video,
+    websockets,
+    workspaces,
+)
 from app.services.auth_service import AuthError
 
 settings = get_settings()
@@ -19,10 +33,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    if settings.database_url.startswith("sqlite"):
+    try:
+        import app.models  # noqa: F401 - Register all database models
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("SQLite schema initialized")
+        logger.info("Database schema initialized and verified")
+    except Exception as e:
+        logger.warning("Database schema auto-sync warning: %s", e)
     yield
 
 
@@ -59,3 +76,14 @@ app.include_router(projects.router)
 app.include_router(files.router)
 app.include_router(finance.router)
 app.include_router(channels.router)
+app.include_router(websockets.router)
+app.include_router(sessions.router)
+app.include_router(ai_agent.router)
+app.include_router(reports.router)
+app.include_router(video.router)
+app.include_router(calendar.router)
+
+
+
+
+

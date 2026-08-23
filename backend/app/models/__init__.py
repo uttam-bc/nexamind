@@ -12,6 +12,15 @@ from app.models.document import Document  # noqa: F401
 from app.models.file import FileRecord  # noqa: F401
 from app.models.finance import FinanceTransaction  # noqa: F401
 from app.models.project import CodeRepo, Commit, Issue, Task  # noqa: F401
+from app.models.report import ReportRecord, ReportType  # noqa: F401
+from app.models.session import SessionRecord, SessionSource, SessionStatus  # noqa: F401
+from app.models.calendar import (  # noqa: F401
+    CalendarEvent,
+    CalendarEventType,
+    CalendarEventPriority,
+    CalendarEventSource,
+)
+
 
 
 class WorkspaceType(str, enum.Enum):
@@ -116,6 +125,20 @@ class Workspace(Base):
         back_populates="workspace",
         cascade="all, delete-orphan",
     )
+    sessions: Mapped[list["SessionRecord"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    reports: Mapped[list["ReportRecord"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    calendar_events: Mapped[list["CalendarEvent"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+
+
 
 
 class WorkspaceMember(Base):

@@ -459,6 +459,10 @@ export default function App() {
                 workspaceId={currentWorkspace?.id}
                 onNavigateTab={setActiveTab}
                 onRefreshAll={() => loadWorkspaceData(currentWorkspace?.id)}
+                onSwitchWorkspace={(wsId) => {
+                  const target = workspaces.find((w) => w.id === wsId);
+                  if (target) handleSelectWorkspace(target);
+                }}
               />
             </div>
           )}
