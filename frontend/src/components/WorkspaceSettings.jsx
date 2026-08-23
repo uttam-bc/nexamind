@@ -1,0 +1,322 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Settings,
+  Users,
+  Key,
+  Shield,
+  Copy,
+  Check,
+  RefreshCw,
+  Edit2,
+  Save,
+  Trash2,
+  Mail,
+  UserCheck,
+  Building,
+  CheckCircle2,
+} from 'lucide-react';
+import { api } from '../api';
+
+export default function WorkspaceSettings({
+  workspace,
+  user,
+  onRefreshWorkspace,
+}) {
+  const [members, setMembers] = useState([]);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newName, setNewName] = useState(workspace?.name || '');
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteSent, setInviteSent] = useState(false);
+
+  useEffect(() => {
+    if (workspace?.id) {
+      setNewName(workspace.name);
+      loadMembers();
+    }
+  }, [workspace]);
+
+  const loadMembers = async () => {
+    try {
+      const data = await api.getWorkspaceMembers(workspace.id);
+      setMembers(data);
+    } catch (err) {
+      console.error('Error fetching members', err);
+    }
+  };
+
+  const handleSaveName = async (e) => {
+    e.preventDefault();
+    if (!newName.trim() || savingName) return;
+    setSavingName(true);
+    try {
+      await api.updateWorkspace(workspace.id, newName.trim());
+      setIsEditingName(false);
+      await onRefreshWorkspace();
+      alert('Workspace name updated successfully!');
+    } catch (err) {
+      alert(`Update failed: ${err.message}`);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleRegenerateCode = async () => {
+    if (confirm('Regenerate join code? The previous join code will immediately become invalid.')) {
+      setRegenerating(true);
+      try {
+        await api.regenerateJoinCode(workspace.id);
+        await onRefreshWorkspace();
+        alert('Join code regenerated successfully!');
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        setRegenerating(false);
+      }
+    }
+  };
+
+  const copyJoinCode = () => {
+    if (workspace?.join_code) {
+      navigator.clipboard.writeText(workspace.join_code);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    }
+  };
+
+  const handleSendInvite = (e) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviteSent(true);
+    setTimeout(() => {
+      setInviteSent(false);
+      setInviteEmail('');
+    }, 3000);
+  };
+
+  const isOwnerOrAdmin =
+    workspace?.owner_id === user?.id ||
+    members.find((m) => m.user_id === user?.id)?.role === 'owner' ||
+    members.find((m) => m.user_id === user?.id)?.role === 'admin';
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
+      {/* Top Header */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+        <div>
+          <h2 className="text-2xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2.5">
+            <Settings className="w-6 h-6 text-indigo-400" />
+            <span>Workspace Settings & Members</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Manage workspace identity, team membership, security credentials, and access roles.
+          </p>
+        </div>
+
+        <span className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
+          {workspace?.type === 'personal' ? 'Personal Space' : 'Team Workspace'}
+        </span>
+      </div>
+
+      {/* 1. Workspace Profile Card */}
+      <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+          <Building className="w-4 h-4 text-indigo-400" />
+          <span>General Information</span>
+        </h3>
+
+        <div className="grid grid-cols-2 gap-6">
+          <div>
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Workspace Name
+            </label>
+            {isEditingName ? (
+              <form onSubmit={handleSaveName} className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-semibold"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={savingName}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingName(false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-xl text-xs"
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center justify-between p-3 bg-slate-900/60 rounded-xl border border-slate-800">
+                <span className="font-bold text-sm text-slate-100">{workspace?.name}</span>
+                {isOwnerOrAdmin && (
+                  <button
+                    onClick={() => setIsEditingName(true)}
+                    className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition"
+                    title="Edit Name"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Created Date
+            </label>
+            <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
+              {workspace?.created_at ? new Date(workspace.created_at).toLocaleDateString(undefined, { dateStyle: 'long' }) : 'N/A'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Team Invitation & Join Code (Only for Team Workspaces) */}
+      {workspace?.type === 'team' && (
+        <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Key className="w-4 h-4 text-purple-400" />
+              <span>Team Join Code & Access</span>
+            </h3>
+
+            {isOwnerOrAdmin && (
+              <button
+                onClick={handleRegenerateCode}
+                disabled={regenerating}
+                className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 font-semibold transition"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${regenerating ? 'animate-spin' : ''}`} />
+                <span>Regenerate Code</span>
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-6 items-center">
+            {/* Join Code Box */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-0.5">
+                  Shareable Join Code
+                </span>
+                <span className="font-mono text-xl font-black text-indigo-400 tracking-widest">
+                  {workspace?.join_code || 'NONE'}
+                </span>
+              </div>
+              <button
+                onClick={copyJoinCode}
+                className="flex items-center gap-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 px-3.5 py-2 rounded-xl text-xs font-bold transition"
+              >
+                {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedCode ? 'Copied' : 'Copy Code'}</span>
+              </button>
+            </div>
+
+            {/* Invite via Email simulation */}
+            <form onSubmit={handleSendInvite} className="flex gap-2">
+              <div className="relative flex-1">
+                <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 top-3.5" />
+                <input
+                  type="email"
+                  placeholder="colleague@company.com"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                />
+              </div>
+              <button
+                type="submit"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition"
+              >
+                {inviteSent ? 'Invite Ready!' : 'Send Invite'}
+              </button>
+            </form>
+          </div>
+          {inviteSent && (
+            <div className="text-xs text-emerald-400 bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-500/20 flex items-center gap-2 font-medium">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Invitation code copied! Share code {workspace?.join_code} with {inviteEmail}.</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. Workspace Members Roster */}
+      <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <Users className="w-4 h-4 text-emerald-400" />
+            <span>Workspace Members ({members.length})</span>
+          </h3>
+          <button onClick={loadMembers} className="text-xs text-indigo-400 hover:underline">
+            Refresh List
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {members.map((member) => {
+            const isCurrentUser = member.user_id === user?.id;
+            return (
+              <div
+                key={member.id}
+                className="p-4 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs shadow-md">
+                    {member.name?.slice(0, 2).toUpperCase() || 'U'}
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-100 flex items-center gap-2">
+                      <span>{member.name}</span>
+                      {isCurrentUser && (
+                        <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded font-mono">
+                          You
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{member.email}</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <span className="text-[10px] text-slate-500">
+                    Joined {new Date(member.created_at).toLocaleDateString()}
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md border font-mono ${
+                      member.role === 'owner'
+                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                        : member.role === 'admin'
+                        ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                        : 'bg-slate-800 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    {member.role}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+
+          {members.length === 0 && (
+            <div className="text-center text-slate-500 py-8 text-xs">Loading members...</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
