@@ -1,85 +1,121 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css";
 
-@layer base {
-  :root {
-    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
-  }
-
-  body {
-    @apply bg-surface text-slate-100 antialiased font-sans;
-    margin: 0;
-  }
-
-  * {
-    @apply border-slate-800/80;
-  }
+:root {
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 }
 
-@layer components {
-  .glass-panel {
-    @apply bg-slate-900/75 backdrop-blur-xl border border-white/[0.06] shadow-panel;
-  }
-
-  .gradient-text {
-    @apply bg-gradient-to-br from-indigo-400 via-purple-400 to-sky-400 bg-clip-text text-transparent;
-  }
-
-  .input-base {
-    @apply w-full bg-slate-950/80 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100
-      placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/70 focus:ring-1 focus:ring-indigo-500/30
-      transition-colors;
-  }
-
-  .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-500
-      hover:from-indigo-500 hover:to-indigo-400 text-white font-semibold rounded-xl px-4 py-2.5 text-sm
-      shadow-lg shadow-indigo-600/25 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700/80 text-slate-200
-      font-medium rounded-xl px-4 py-2.5 text-sm border border-slate-700/80 transition-all active:scale-[0.98];
-  }
-
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60
-      rounded-xl px-3 py-2 text-sm transition-colors;
-  }
-
-  .nav-item {
-    @apply w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all;
-  }
-
-  .metric-card {
-    @apply glass-panel p-5 rounded-2xl border border-slate-800/80 hover:border-indigo-500/30
-      transition-all cursor-pointer;
-  }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: #F8FAFC;
+  color: #191C1E;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-@layer utilities {
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+/* Explicit High-Contrast Text Selection Styles */
+::selection {
+  background-color: #4F46E5 !important;
+  color: #FFFFFF !important;
+}
+::-moz-selection {
+  background-color: #4F46E5 !important;
+  color: #FFFFFF !important;
 }
 
+input::selection, textarea::selection {
+  background-color: #4F46E5 !important;
+  color: #FFFFFF !important;
+}
+
+.font-mono, .font-jetbrains {
+  font-family: var(--font-mono);
+}
+
+.font-geist {
+  font-family: var(--font-sans);
+}
+
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(241, 245, 249, 0.8);
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 4px;
+  background: #CBD5E1;
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #94A3B8;
 }
+
+/* Explicit High-Contrast Active Navigation & Primary Buttons */
+.nav-item-active {
+  background-color: #4F46E5 !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+.nav-item-active svg {
+  color: #FFFFFF !important;
+}
+
+.btn-primary-indigo {
+  background-color: #4F46E5 !important;
+  color: #FFFFFF !important;
+}
+.btn-primary-indigo:hover {
+  background-color: #4338CA !important;
+}
+
+/* Stitch White Glass Panels & Elevation */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #E2E8F0;
+}
+
+.glass-panel-elevated {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+}
+
+.smooth-shadow {
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+}
+
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+}
+
+/* AI Pulse Animation */
+.ai-pulse {
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+}
+
+.live-pulse {
+  animation: live-pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes live-pulse-ring {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.92); }
+}
+
+/* Drag and Drop styles */
+.draggable { cursor: grab; }
+.draggable:active { cursor: grabbing; }
+.droppable-active { background-color: rgba(79, 70, 229, 0.05); }

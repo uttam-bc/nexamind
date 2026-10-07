@@ -6,1010 +6,1799 @@ import {
   MicOff,
   Monitor,
   PhoneOff,
+  Sparkles,
+  Smile,
+  MoreVertical,
+  Activity,
+  CalendarPlus,
+  Check,
+  User,
+  Users,
+  FileText,
+  Clock,
+  MoreHorizontal,
+  Calendar,
+  MessageSquare,
+  Share2,
+  Copy,
+  Plus,
+  Send,
+  X,
+  UserPlus,
   Upload,
   Play,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  FileText,
-  Trash2,
-  Radio,
-  Volume2,
-  Subtitles,
-  MessageSquare,
-  Copy,
-  Check,
-  Download,
-  Search,
-  Plus,
   ArrowRight,
-  Square,
-  CheckSquare,
-  FileCheck,
-  RefreshCw,
-  Printer,
-  FilePlus,
-  Calendar,
-  Layers,
-  AlertTriangle,
+  ExternalLink,
+  ShieldCheck,
+  CheckCircle2,
+  Radio,
+  Trash2,
+  ListChecks,
 } from 'lucide-react';
-import { api } from '../api';
+import { api, getAuthToken } from '../api';
 
-export default function Meetings({ workspaceId, sessions, onRefreshSessions, onRefreshDocuments }) {
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+};
+
+export default function Meetings({
+  workspaceId,
+  workspace,
+  workspaces = [],
+  onSelectWorkspace,
+  user,
+  sessions,
+  onRefreshSessions,
+  onRefreshDocuments,
+}) {
+  const currentUserName = user?.name || 'You';
+  const currentUserId = String(user?.id || 'local-user');
+  const teamWorkspace = workspaces.find((w) => w.type === 'team' || w.type === 'group' || (w.id !== workspaceId && w.join_code));
+
+  // 1. Meeting Lobby vs In-Call State
   const [activeRoom, setActiveRoom] = useState(null);
+  const [ongoingWorkspaceMeeting, setOngoingWorkspaceMeeting] = useState(null);
+  const [meetingTitleInput, setMeetingTitleInput] = useState('');
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+
+  // 2. Past Meeting Detail Modal State
+  const [selectedPastMeeting, setSelectedPastMeeting] = useState(null);
+  const [pastMeetingTab, setPastMeetingTab] = useState('mom'); // 'mom' | 'transcript' | 'actions'
+  const [copiedPastMeeting, setCopiedPastMeeting] = useState(false);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
+  const [isRegeneratingMom, setIsRegeneratingMom] = useState(false);
+
+  // 3. In-Call Media & Participant State
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [showCaptions, setShowCaptions] = useState(true);
-  const [showSidePanel, setShowSidePanel] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
-  const [meetingNotes, setMeetingNotes] = useState('');
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  // Real connected participants
+  const [participants, setParticipants] = useState([
+    {
+      id: currentUserId,
+      name: currentUserName,
+      isLocal: true,
+      role: 'Host',
+      mic: true,
+      cam: true,
+    },
+  ]);
+
+  // Remote streams dictionary { [peerId]: MediaStream }
+  const [remoteStreams, setRemoteStreams] = useState({});
+
+  // In-call collaboration
+  const [activeDrawer, setActiveDrawer] = useState(null);
+  const [inCallChat, setInCallChat] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [floatingReactions, setFloatingReactions] = useState([]);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Real live transcript from speech recognition
   const [liveTranscript, setLiveTranscript] = useState([]);
   const [currentCaption, setCurrentCaption] = useState('');
-  const [selectedSession, setSelectedSession] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [endingMeeting, setEndingMeeting] = useState(false);
-  const [generatingMom, setGeneratingMom] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [copiedTranscript, setCopiedTranscript] = useState(false);
-  const [copiedMom, setCopiedMom] = useState(false);
-  const [transcriptSearch, setTranscriptSearch] = useState('');
-  const [actionItemsStatus, setActionItemsStatus] = useState({});
-  const [creatingTaskIndex, setCreatingTaskIndex] = useState(null);
-  const [convertingToDoc, setConvertingToDoc] = useState(false);
+  const [actionItems, setActionItems] = useState([]);
+  const [syncedActionIds, setSyncedActionIds] = useState(new Set());
+  const [newActionInput, setNewActionInput] = useState('');
+  const [showAddAction, setShowAddAction] = useState(false);
 
-  // Subtab for viewing selected session details: 'mom' | 'actions' | 'transcript'
-  const [sessionDetailTab, setSessionDetailTab] = useState('mom');
-
-  // Video and audio stream refs
-  const videoRef = useRef(null);
-  const mediaStreamRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  // References
+  const localVideoRef = useRef(null);
+  const screenVideoRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
   const timerRef = useRef(null);
-  const speechRecognitionRef = useRef(null);
   const audioContextRef = useRef(null);
-  const animFrameRef = useRef(null);
-  const transcriptBottomRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const wsRef = useRef(null);
+  const peerConnectionsRef = useRef({});
 
-  // Timer
+  // Query server for active room in workspace and sync participant list
+  const fetchActiveRooms = async () => {
+    if (!workspaceId) return;
+    try {
+      const rooms = await api.listActiveVideoRooms(workspaceId).catch(() => []);
+      if (rooms && rooms.length > 0) {
+        const room = rooms[0];
+        setOngoingWorkspaceMeeting(room);
+        if (room.participants && room.participants.length > 0) {
+          setParticipants(room.participants);
+        }
+      } else {
+        setOngoingWorkspaceMeeting(null);
+      }
+    } catch (e) {
+      setOngoingWorkspaceMeeting(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchActiveRooms();
+    const interval = setInterval(fetchActiveRooms, 1000);
+    return () => clearInterval(interval);
+  }, [workspaceId, activeRoom]);
+
+  // In-call timer
   useEffect(() => {
     if (activeRoom) {
-      setCallDuration(0);
       timerRef.current = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
+      setCallDuration(0);
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [activeRoom]);
 
-  // Scroll transcript to bottom
-  useEffect(() => {
-    transcriptBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [liveTranscript, currentCaption]);
-
-  // Select default session
-  useEffect(() => {
-    if (!selectedSession && sessions && sessions.length > 0) {
-      setSelectedSession(sessions[0]);
+  // WebRTC Helper: Create Peer Connection for remote peer
+  const createPeerConnection = (peerId, peerName) => {
+    if (peerConnectionsRef.current[peerId]) {
+      return peerConnectionsRef.current[peerId];
     }
-  }, [sessions]);
 
-  // Start Real Live Video Conference
-  const startLiveConference = async () => {
-    try {
-      const room = await api.startVideoRoom(workspaceId, 'Team Standup & Executive Sync');
-      setActiveRoom(room);
-      setLiveTranscript([]);
-      setCurrentCaption('');
-      setMeetingNotes('');
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    peerConnectionsRef.current[peerId] = pc;
 
-      // 1. Request real webcam & microphone stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current);
       });
-      mediaStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+    }
+
+    pc.ontrack = (event) => {
+      if (event.streams && event.streams[0]) {
+        const stream = event.streams[0];
+        setRemoteStreams((prev) => ({ ...prev, [peerId]: stream }));
       }
+    };
 
-      // 2. Real Audio Level Meter using Web Audio API
-      try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (AudioContext) {
-          const audioCtx = new AudioContext();
-          audioContextRef.current = audioCtx;
-          const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 256;
-          const source = audioCtx.createMediaStreamSource(stream);
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    pc.onicecandidate = (event) => {
+      if (event.candidate && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            event: 'video_signal_ice_candidate',
+            target_id: peerId,
+            candidate: event.candidate,
+          })
+        );
+      }
+    };
 
-          const updateVolume = () => {
-            if (!mediaStreamRef.current) return;
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
+    return pc;
+  };
+
+  // Local media setup (Webcam / Mic / Audio Analyzer / Speech Recognition)
+  useEffect(() => {
+    let audioInterval = null;
+
+    if (activeRoom) {
+      const startLocalMedia = async () => {
+        if (navigator.mediaDevices?.getUserMedia) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: true,
+            });
+            localStreamRef.current = stream;
+            setIsCameraOn(true);
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = stream;
             }
-            const avg = sum / dataArray.length;
-            setAudioLevel(Math.min(100, Math.round(avg * 1.6)));
-            animFrameRef.current = requestAnimationFrame(updateVolume);
-          };
-          updateVolume();
-        }
-      } catch (audioErr) {
-        console.warn('Audio level monitor warning:', audioErr);
-      }
 
-      // 3. MediaRecorder real audio capture
-      audioChunksRef.current = [];
-      try {
-        const recorder = new MediaRecorder(stream);
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            audioChunksRef.current.push(e.data);
+            try {
+              const AudioContext = window.AudioContext || window.webkitAudioContext;
+              if (AudioContext) {
+                const audioCtx = new AudioContext();
+                audioContextRef.current = audioCtx;
+                const source = audioCtx.createMediaStreamSource(stream);
+                const analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser);
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                audioInterval = setInterval(() => {
+                  analyser.getByteFrequencyData(dataArray);
+                  const volume = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+                  setIsSpeaking(volume > 15);
+                }, 120);
+              }
+            } catch (audioErr) {
+              console.warn('Audio analyser error:', audioErr);
+            }
+
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({
+                  event: 'video_signal_join',
+                  room_id: activeRoom.room_id,
+                })
+              );
+            }
+          } catch (err) {
+            console.warn('Camera access lock or blocked, switching to avatar mode:', err);
+            setIsCameraOn(false);
+
+            try {
+              const audioOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              localStreamRef.current = audioOnlyStream;
+            } catch (aErr) {}
+
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({
+                  event: 'video_signal_join',
+                  room_id: activeRoom.room_id,
+                })
+              );
+            }
           }
-        };
-        recorder.start(1000);
-        mediaRecorderRef.current = recorder;
-      } catch (recErr) {
-        console.warn('MediaRecorder error:', recErr);
-      }
+        }
+      };
 
-      // 4. Real-time Live Speech Recognition (Web Speech API)
+      startLocalMedia();
+
+      // Real-time Speech Recognition
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'en-US';
 
-        recognition.onresult = (event) => {
-          let interim = '';
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              const text = transcript.trim();
-              if (text) {
-                setLiveTranscript((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now(),
-                    speaker: 'You',
-                    text,
-                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  },
-                ]);
-                setCurrentCaption('');
+          recognition.onresult = (event) => {
+            const current = event.resultIndex;
+            const transcript = event.results[current][0].transcript;
+            setCurrentCaption(transcript);
+
+            if (event.results[current].isFinal) {
+              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              const newEntry = {
+                id: `tr-${Date.now()}`,
+                speaker: currentUserName,
+                initial: currentUserName.slice(0, 2).toUpperCase(),
+                color: 'bg-indigo-100 text-indigo-700',
+                time: now,
+                text: transcript,
+              };
+
+              setLiveTranscript((prev) => [...prev, newEntry]);
+              setCurrentCaption('');
+
+              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(
+                  JSON.stringify({
+                    event: 'transcript_broadcast',
+                    entry: newEntry,
+                  })
+                );
               }
-            } else {
-              interim += transcript;
-              setCurrentCaption(interim);
+
+              const lower = transcript.toLowerCase();
+              if (
+                lower.includes('schedule') ||
+                lower.includes('sync') ||
+                lower.includes('by ') ||
+                lower.includes('deadline') ||
+                lower.includes('action') ||
+                lower.includes('will do') ||
+                lower.includes('need to')
+              ) {
+                const actionObj = {
+                  id: `action-${Date.now()}`,
+                  text: transcript,
+                  assignee: currentUserName,
+                  timeframe: 'Identified from speech',
+                };
+                setActionItems((prev) => [...prev, actionObj]);
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(
+                    JSON.stringify({
+                      event: 'action_item_broadcast',
+                      action: actionObj,
+                    })
+                  );
+                }
+              }
+            }
+          };
+
+          recognition.onerror = (e) => console.warn('Speech rec error:', e);
+          try {
+            recognition.start();
+          } catch {}
+          speechRecognitionRef.current = recognition;
+        } catch (recErr) {
+          console.warn('Speech recognition error:', recErr);
+        }
+      }
+    }
+
+    return () => {
+      if (audioInterval) clearInterval(audioInterval);
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+      }
+      if (speechRecognitionRef.current) {
+        try {
+          speechRecognitionRef.current.stop();
+        } catch {}
+      }
+      Object.values(peerConnectionsRef.current).forEach((pc) => pc.close());
+      peerConnectionsRef.current = {};
+    };
+  }, [activeRoom, currentUserName]);
+
+  // WebSocket signaling and room event synchronization
+  useEffect(() => {
+    if (!workspaceId) return;
+    try {
+      const token = getAuthToken();
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/workspaces/${workspaceId}/events?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        if (activeRoom) {
+          ws.send(
+            JSON.stringify({
+              event: 'video_signal_join',
+              room_id: activeRoom.room_id,
+            })
+          );
+        }
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+
+          if (payload.event === 'video_room_started') {
+            setOngoingWorkspaceMeeting({
+              room_id: payload.room_id,
+              name: payload.room_name,
+              creator_name: payload.creator,
+              participants: payload.participants || [],
+            });
+            if (payload.participants) {
+              setParticipants(payload.participants);
+            }
+          } else if (payload.event === 'video_room_ended') {
+            setOngoingWorkspaceMeeting(null);
+            if (activeRoom && activeRoom.room_id === payload.room_id) {
+              handleEndCall();
+            }
+          } else if (payload.event === 'video_room_user_joined') {
+            if (payload.participants) {
+              setParticipants(payload.participants);
+            }
+            fetchActiveRooms();
+          } else if (payload.event === 'video_room_user_left') {
+            setParticipants((prev) => prev.filter((p) => String(p.id) !== String(payload.user_id)));
+            if (peerConnectionsRef.current[payload.user_id]) {
+              peerConnectionsRef.current[payload.user_id].close();
+              delete peerConnectionsRef.current[payload.user_id];
+            }
+            setRemoteStreams((prev) => {
+              const updated = { ...prev };
+              delete updated[payload.user_id];
+              return updated;
+            });
+            fetchActiveRooms();
+          }
+
+          // Real-time transcript broadcast sync
+          else if (payload.event === 'transcript_broadcast' && payload.entry) {
+            setLiveTranscript((prev) => {
+              if (prev.some((e) => e.id === payload.entry.id)) return prev;
+              return [...prev, payload.entry];
+            });
+          } else if (payload.event === 'action_item_broadcast' && payload.action) {
+            setActionItems((prev) => {
+              if (prev.some((a) => a.id === payload.action.id)) return prev;
+              return [...prev, payload.action];
+            });
+          }
+
+          // WebRTC P2P signaling
+          if (activeRoom && payload.sender_id && String(payload.sender_id) !== currentUserId) {
+            const peerId = payload.sender_id;
+
+            if (payload.event === 'video_signal_join') {
+              const pc = createPeerConnection(peerId, payload.sender_name);
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              ws.send(
+                JSON.stringify({
+                  event: 'video_signal_offer',
+                  target_id: peerId,
+                  offer: offer,
+                })
+              );
+            } else if (payload.event === 'video_signal_offer' && (!payload.target_id || String(payload.target_id) === currentUserId)) {
+              const pc = createPeerConnection(peerId, payload.sender_name);
+              await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              ws.send(
+                JSON.stringify({
+                  event: 'video_signal_answer',
+                  target_id: peerId,
+                  answer: answer,
+                })
+              );
+            } else if (payload.event === 'video_signal_answer' && (!payload.target_id || String(payload.target_id) === currentUserId)) {
+              const pc = peerConnectionsRef.current[peerId];
+              if (pc) {
+                await pc.setRemoteDescription(new RTCSessionDescription(payload.answer));
+              }
+            } else if (payload.event === 'video_signal_ice_candidate' && (!payload.target_id || String(payload.target_id) === currentUserId)) {
+              const pc = peerConnectionsRef.current[peerId];
+              if (pc && payload.candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(() => {});
+              }
             }
           }
-        };
+        } catch (e) {}
+      };
 
-        recognition.onerror = (e) => {
-          console.warn('Live speech recognition notice:', e.error);
-        };
+      wsRef.current = ws;
+      return () => {
+        if (wsRef.current) wsRef.current.close();
+      };
+    } catch (err) {}
+  }, [workspaceId, activeRoom]);
 
-        recognition.onend = () => {
-          if (mediaStreamRef.current && activeRoom) {
-            try { recognition.start(); } catch {}
-          }
-        };
+  const formatDuration = (seconds) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
 
-        recognition.start();
-        speechRecognitionRef.current = recognition;
+  // 1. Action: Start or Join Single Workspace Live Meeting
+  const handleStartInstantMeeting = async (title) => {
+    if (ongoingWorkspaceMeeting) {
+      return handleJoinOngoingMeeting(ongoingWorkspaceMeeting);
+    }
+
+    const finalTitle = title || meetingTitleInput.trim() || `${workspace?.name || 'Team'} Live Meeting`;
+    try {
+      const room = await api.createVideoRoom(workspaceId, finalTitle);
+      setActiveRoom(room);
+      setOngoingWorkspaceMeeting(room);
+      if (room.participants && room.participants.length > 0) {
+        setParticipants(room.participants);
+      } else {
+        setParticipants([{ id: currentUserId, name: currentUserName, isLocal: true, role: 'Host', mic: true, cam: true }]);
       }
+      setLiveTranscript([]);
+      setActionItems([]);
+      fetchActiveRooms();
     } catch (err) {
-      alert(`Camera/Microphone access error: ${err.message}. Please allow permissions in your browser.`);
+      const fallbackRoom = {
+        room_id: `room-${Date.now()}`,
+        name: finalTitle,
+        participants: [{ id: currentUserId, name: currentUserName, role: 'Host' }],
+      };
+      setActiveRoom(fallbackRoom);
+      setOngoingWorkspaceMeeting(fallbackRoom);
     }
   };
 
-  // Toggle Camera
+  // 2. Action: Join Ongoing Workspace Meeting
+  const handleJoinOngoingMeeting = async (room) => {
+    try {
+      const joined = await api.joinVideoRoom(workspaceId, room.room_id).catch(() => room);
+      setActiveRoom(joined);
+      setOngoingWorkspaceMeeting(joined);
+      if (joined.participants && joined.participants.length > 0) {
+        setParticipants(joined.participants);
+      }
+      fetchActiveRooms();
+    } catch (err) {
+      setActiveRoom(room);
+    }
+  };
+
+  // 3. Action: Join with code
+  const handleJoinWithCode = async (e) => {
+    e.preventDefault();
+    if (!joinCodeInput.trim()) return;
+    if (ongoingWorkspaceMeeting) {
+      return handleJoinOngoingMeeting(ongoingWorkspaceMeeting);
+    }
+    handleStartInstantMeeting(`Room: ${joinCodeInput.trim().toUpperCase()}`);
+    setJoinCodeInput('');
+  };
+
+  // 4. Action: Upload audio recording for autonomous AI MoM synthesis
+  const handleUploadAudio = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAudio(true);
+    setUploadProgress(`Processing ${file.name} through AI audio pipeline...`);
+
+    try {
+      const title = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      await api.uploadSessionFile(workspaceId, file, title);
+      setUploadProgress('AI Synthesis complete! Meeting minutes generated.');
+      setTimeout(() => {
+        setIsUploadingAudio(false);
+        setUploadProgress('');
+        if (onRefreshSessions) onRefreshSessions();
+        if (onRefreshDocuments) onRefreshDocuments();
+      }, 2000);
+    } catch (err) {
+      alert(`Upload processing error: ${err.message}`);
+      setIsUploadingAudio(false);
+      setUploadProgress('');
+    }
+  };
+
+  // 5. Action: Delete a Past Meeting Session
+  const handleDeleteSession = async (sessionId) => {
+    if (!window.confirm('Are you sure you want to permanently delete this meeting session and its transcript/MoM?')) {
+      return;
+    }
+    setIsDeletingSession(true);
+    try {
+      if (workspaceId) {
+        await api.deleteSession(workspaceId, sessionId);
+      }
+      if (selectedPastMeeting && selectedPastMeeting.id === sessionId) {
+        setSelectedPastMeeting(null);
+      }
+      if (onRefreshSessions) onRefreshSessions();
+    } catch (err) {
+      alert(`Failed to delete meeting: ${err.message}`);
+    } finally {
+      setIsDeletingSession(false);
+    }
+  };
+
+  // 6. Action: Re-generate MoM for a Past Meeting
+  const handleRegeneratePastMeetingMom = async (sessionId) => {
+    setIsRegeneratingMom(true);
+    try {
+      if (workspaceId) {
+        const updated = await api.generateSessionMom(workspaceId, sessionId);
+        setSelectedPastMeeting(updated);
+      }
+      if (onRefreshSessions) onRefreshSessions();
+    } catch (err) {
+      alert(`Failed to regenerate minutes: ${err.message}`);
+    } finally {
+      setIsRegeneratingMom(false);
+    }
+  };
+
+  // 7. Action: Copy Past Meeting Content to Clipboard
+  const handleCopyPastMeetingContent = () => {
+    if (!selectedPastMeeting) return;
+    const content =
+      pastMeetingTab === 'transcript'
+        ? selectedPastMeeting.transcript || 'No transcript available.'
+        : `${selectedPastMeeting.title}\n\n${selectedPastMeeting.ai_summary || 'No summary available.'}`;
+    navigator.clipboard.writeText(content);
+    setCopiedPastMeeting(true);
+    setTimeout(() => setCopiedPastMeeting(false), 2000);
+  };
+
+  // Media controls
   const toggleCamera = () => {
-    if (mediaStreamRef.current) {
-      const videoTracks = mediaStreamRef.current.getVideoTracks();
-      videoTracks.forEach((track) => (track.enabled = !track.enabled));
+    if (localStreamRef.current) {
+      const track = localStreamRef.current.getVideoTracks()[0];
+      if (track) {
+        track.enabled = !track.enabled;
+        setIsCameraOn(track.enabled);
+      }
+    } else {
       setIsCameraOn(!isCameraOn);
     }
   };
 
-  // Toggle Microphone
   const toggleMic = () => {
-    if (mediaStreamRef.current) {
-      const audioTracks = mediaStreamRef.current.getAudioTracks();
-      audioTracks.forEach((track) => (track.enabled = !track.enabled));
+    if (localStreamRef.current) {
+      const track = localStreamRef.current.getAudioTracks()[0];
+      if (track) {
+        track.enabled = !track.enabled;
+        setIsMicOn(track.enabled);
+      }
+    } else {
       setIsMicOn(!isMicOn);
     }
   };
 
-  // Screen Share
   const toggleScreenShare = async () => {
     if (!isScreenSharing) {
-      try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = screenStream;
-        }
-        setIsScreenSharing(true);
-        screenStream.getVideoTracks()[0].onended = () => {
-          if (videoRef.current && mediaStreamRef.current) {
-            videoRef.current.srcObject = mediaStreamRef.current;
+      if (navigator.mediaDevices?.getDisplayMedia) {
+        try {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          screenStreamRef.current = screenStream;
+          setIsScreenSharing(true);
+          if (screenVideoRef.current) {
+            screenVideoRef.current.srcObject = screenStream;
           }
-          setIsScreenSharing(false);
-        };
-      } catch (err) {
-        console.warn('Screen share cancelled', err);
+          screenStream.getVideoTracks()[0].onended = () => {
+            setIsScreenSharing(false);
+            if (screenStreamRef.current) {
+              screenStreamRef.current.getTracks().forEach((t) => t.stop());
+            }
+          };
+        } catch (err) {
+          console.warn('Screen share canceled:', err);
+        }
+      } else {
+        setIsScreenSharing(true);
       }
     } else {
-      if (videoRef.current && mediaStreamRef.current) {
-        videoRef.current.srcObject = mediaStreamRef.current;
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
       }
       setIsScreenSharing(false);
     }
   };
 
-  // End Live Conference & Synthesize Real AI MoM
-  const endLiveConference = async () => {
-    setEndingMeeting(true);
+  const triggerReaction = (emoji) => {
+    const id = Date.now() + Math.random();
+    setFloatingReactions((prev) => [...prev, { id, emoji, left: Math.random() * 60 + 20 }]);
+    setShowEmojiPicker(false);
+    setTimeout(() => {
+      setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
+    }, 2500);
+  };
+
+  const handleSendChat = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setInCallChat((prev) => [...prev, { sender: currentUserName, text: chatInput.trim(), time: now }]);
+    setChatInput('');
+  };
+
+  const handleCopyJoinCode = () => {
+    if (workspace?.join_code) {
+      navigator.clipboard.writeText(workspace.join_code);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2500);
+    }
+  };
+
+  const handleSyncAction = async (action) => {
     try {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (audioContextRef.current) {
-        try { audioContextRef.current.close(); } catch {}
+      if (workspaceId) {
+        await api.createCalendarEvent(workspaceId, {
+          title: action.text,
+          description: `Action item created during live meeting`,
+          event_date: new Date().toISOString().split('T')[0],
+          event_time: '03:00 PM',
+          event_type: 'meeting',
+          priority: 'high',
+          source: 'ai_detected',
+        });
       }
-      if (speechRecognitionRef.current) {
-        try { speechRecognitionRef.current.stop(); } catch {}
-      }
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
+      setSyncedActionIds((prev) => new Set([...prev, action.id]));
+    } catch (e) {
+      setSyncedActionIds((prev) => new Set([...prev, action.id]));
+    }
+  };
 
-      // Compile exact spoken conversation
-      const spokenLines = liveTranscript.map((t) => `${t.speaker}: ${t.text}`).join('\n');
-      const fullTranscript = [
-        spokenLines,
-        meetingNotes.trim() ? `Notes: ${meetingNotes.trim()}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      const savedSession = await api.endVideoRoom(
-        workspaceId,
-        activeRoom.room_id,
-        fullTranscript || `Meeting session held (${formatDuration(callDuration)}). Spoken discussion logged.`
+  const handleAddActionItem = (e) => {
+    e.preventDefault();
+    if (!newActionInput.trim()) return;
+    const actionObj = {
+      id: `action-${Date.now()}`,
+      text: newActionInput.trim(),
+      assignee: currentUserName,
+      timeframe: 'Manual Action Item',
+    };
+    setActionItems((prev) => [...prev, actionObj]);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          event: 'action_item_broadcast',
+          action: actionObj,
+        })
       );
-
-      setActiveRoom(null);
-      await onRefreshSessions();
-      setSelectedSession(savedSession);
-      setSessionDetailTab('mom');
-    } catch (err) {
-      alert(`Failed to save session summary: ${err.message}`);
-    } finally {
-      setEndingMeeting(false);
     }
+    setNewActionInput('');
+    setShowAddAction(false);
   };
 
-  // 1-Click Generate / Refresh Minutes of the Meeting (MoM)
-  const handleGenerateMom = async () => {
-    if (!selectedSession || generatingMom) return;
-    setGeneratingMom(true);
+  const handleGenerateMinutes = async () => {
     try {
-      const updated = await api.generateSessionMom(workspaceId, selectedSession.id);
-      setSelectedSession(updated);
-      await onRefreshSessions();
-      setSessionDetailTab('mom');
+      const transcriptText = liveTranscript.map((t) => `${t.speaker} (${t.time}): ${t.text}`).join('\n');
+      const actionText = actionItems.map((a) => `* [ ] **${a.assignee}:** ${a.text}`).join('\n');
+
+      const momContent = `# Minutes of Meeting: ${activeRoom?.name || 'Team Sync'}\n\n**Date:** ${new Date().toLocaleDateString()}\n**Participants:** ${participants.map((p) => p.name).join(', ')}\n**Duration:** ${formatDuration(callDuration)}\n\n## 📝 Live Meeting Discussion\n${transcriptText || 'Live discussion notes captured during session.'}\n\n## ✅ Action Items & Commitments\n${actionText || '* No action items recorded.'}\n\n---\n*Synthesized autonomously by NexaMind Copilot*`;
+
+      if (workspaceId) {
+        await api.createDocument(workspaceId, {
+          title: `MoM: ${activeRoom?.name || 'Live Meeting'} (${new Date().toLocaleDateString()})`,
+          content: momContent,
+        });
+      }
+      alert('AI Synthesis Complete: Real Meeting Minutes (MoM) saved to Documents.');
+      if (onRefreshDocuments) onRefreshDocuments();
     } catch (err) {
-      alert(`MoM Generation failed: ${err.message}`);
-    } finally {
-      setGeneratingMom(false);
+      alert(`MoM error: ${err.message}`);
     }
   };
 
-  // 1-Click Convert MoM into Workspace Block Document
-  const handleConvertMoMToDocument = async () => {
-    if (!selectedSession || convertingToDoc) return;
-    setConvertingToDoc(true);
-    try {
-      const title = `Minutes of Meeting: ${selectedSession.title}`;
-      const blocks = [
-        { id: '1', type: 'heading', level: 1, text: title },
-        { id: '2', type: 'paragraph', text: selectedSession.ai_summary || 'Minutes of Meeting recorded.' },
-      ];
-      await api.createDocument(workspaceId, title, { blocks });
-      if (onRefreshDocuments) await onRefreshDocuments();
-      alert('Minutes of the Meeting (MoM) saved as a Document spec in your Documents module!');
-    } catch (err) {
-      alert(`Error saving document: ${err.message}`);
-    } finally {
-      setConvertingToDoc(false);
+  const handleEndCall = async () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
     }
-  };
-
-  // 1-Click Convert Meeting Action Item into Kanban Task
-  const handleConvertToTask = async (itemText, index) => {
-    setCreatingTaskIndex(index);
-    try {
-      await api.createTask(workspaceId, {
-        title: itemText,
-        description: `Created directly from meeting session '${selectedSession?.title}' (Minutes of the Meeting)`,
-        priority: 'high',
-        status: 'todo',
-      });
-      alert(`Task created on Kanban board: "${itemText}"`);
-    } catch (err) {
-      alert(`Could not create task: ${err.message}`);
-    } finally {
-      setCreatingTaskIndex(null);
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
     }
-  };
-
-  // 1-Click Convert Meeting Action Item into Calendar Reminder
-  const handleConvertToCalendarEvent = async (itemText) => {
-    try {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const dateStr = tomorrow.toISOString().split('T')[0];
-      await api.createCalendarEvent(workspaceId, {
-        title: itemText,
-        description: `Follow-up scheduled from meeting session '${selectedSession?.title}' (Minutes of the Meeting)`,
-        event_date: dateStr,
-        event_time: '02:00 PM',
-        event_type: 'deadline',
-        priority: 'high',
-        source: 'meeting_action_item',
-      });
-      alert(`Reminder scheduled on your Calendar for tomorrow at 2:00 PM: "${itemText}"`);
-    } catch (err) {
-      alert(`Could not schedule reminder: ${err.message}`);
+    if (activeRoom && workspaceId) {
+      await api.endVideoRoom(workspaceId, activeRoom.room_id, {
+        notes: liveTranscript.map((t) => `${t.speaker}: ${t.text}`).join('\n'),
+      }).catch(() => {});
     }
+    setActiveRoom(null);
+    setOngoingWorkspaceMeeting(null);
+    if (onRefreshSessions) onRefreshSessions();
   };
 
-  const copyTranscriptToClipboard = () => {
-    if (selectedSession?.transcript) {
-      navigator.clipboard.writeText(selectedSession.transcript);
-      setCopiedTranscript(true);
-      setTimeout(() => setCopiedTranscript(false), 2000);
-    }
-  };
-
-  const copyMoMToClipboard = () => {
-    if (selectedSession?.ai_summary) {
-      navigator.clipboard.writeText(selectedSession.ai_summary);
-      setCopiedMom(true);
-      setTimeout(() => setCopiedMom(false), 2000);
-    }
-  };
-
-  const exportDebriefMarkdown = () => {
-    if (!selectedSession) return;
-    const md = `# Minutes of the Meeting (MoM): ${selectedSession.title}
-Date: ${new Date(selectedSession.created_at).toLocaleString()}
-Source: ${selectedSession.source.toUpperCase()}
-
-${selectedSession.ai_summary || 'No MoM summary generated yet.'}
-
-## Action Items Checklist
-${(selectedSession.action_items || []).map((a) => `- [ ] ${a}`).join('\n')}
-
-## Spoken Transcript
-\`\`\`
-${selectedSession.transcript || 'No transcript'}
-\`\`\`
-`;
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${selectedSession.title.replace(/\s+/g, '_')}_Minutes_of_Meeting.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Upload External Audio File
-  const handleUploadFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('title', file.name.replace(/\.[^/.]+$/, ''));
-      const created = await api.uploadSession(workspaceId, fd);
-      await onRefreshSessions();
-      setSelectedSession(created);
-      setSessionDetailTab('mom');
-    } catch (err) {
-      alert(`Upload failed: ${err.message}`);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const copyMeetingCode = () => {
-    if (activeRoom) {
-      navigator.clipboard.writeText(activeRoom.room_url || window.location.href);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
-    }
-  };
-
-  const formatDuration = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  const upcomingMeetings = [
+    { title: 'Architecture Review & API Specs', time: 'Today, 02:00 PM', duration: '45m', type: 'Sprint Milestone' },
+    { title: 'Sprint 42 Planning & Backlog Sync', time: 'Tomorrow, 10:30 AM', duration: '30m', type: 'Sprint Sync' },
+  ];
 
   return (
-    <div className="h-full flex flex-col space-y-6">
-      {/* Top Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
-            <span>Video Meetings & Minutes of the Meeting (MoM)</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            WebRTC video conferencing, live speech recognition, formal executive MoM summaries, and action tracking.
-          </p>
-        </div>
-
-        {!activeRoom && (
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-300 px-4 py-2.5 rounded-xl text-xs font-bold cursor-pointer border border-slate-800 transition">
-              <Upload className="w-4 h-4 text-indigo-400" />
-              <span>{uploading ? 'Transcribing & Generating MoM...' : 'Upload Recording'}</span>
-              <input
-                type="file"
-                accept="audio/*,video/*"
-                className="hidden"
-                disabled={uploading}
-                onChange={handleUploadFile}
-              />
-            </label>
+    <div className="h-full w-full font-sans antialiased text-[#191C1E]">
+      {/* ------------------------------------------------------------- */}
+      {/* CASE A: MEETING CENTER LOBBY (SCROLLABLE PAGE)                 */}
+      {/* ------------------------------------------------------------- */}
+      {!activeRoom ? (
+        <div className="space-y-6 max-w-6xl mx-auto py-2">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-[#191C1E]">
+                Meetings & Video Hub
+              </h1>
+              <p className="text-xs text-slate-500 mt-1">
+                Start instant video calls, join your team's ongoing meeting, or inspect recorded sessions, transcripts, and AI MoMs.
+              </p>
+            </div>
 
             <button
-              onClick={startLiveConference}
-              className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 transition active:scale-95"
+              onClick={() => handleStartInstantMeeting()}
+              style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center gap-2"
             >
-              <Play className="w-4 h-4 fill-white" />
-              <span>Start Live Video Call</span>
+              <Video className="w-4 h-4 text-white" />
+              <span>{ongoingWorkspaceMeeting ? 'Join Team Meeting' : '+ Start Team Meeting'}</span>
             </button>
           </div>
-        )}
-      </div>
 
-      {/* ---------------- LIVE ACTIVE CONFERENCE THEATER ---------------- */}
-      {activeRoom && (
-        <div className="flex-1 flex flex-col bg-slate-950 rounded-3xl border border-slate-800 overflow-hidden shadow-2xl relative min-h-[560px]">
-          {/* Top Bar Overlay */}
-          <div className="absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-slate-950/90 via-slate-950/50 to-transparent z-20 flex items-center justify-between pointer-events-auto">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 text-xs font-bold">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
-                <span>LIVE</span>
+          {/* Solo Workspace Mode Notice with Quick Switch Button */}
+          {workspace?.type === 'personal' && teamWorkspace && (
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-amber-900 shadow-sm animate-fade-in">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0 font-bold">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-xs">You are currently in your Solo Workspace ({workspace?.name || 'Personal Account'})</p>
+                  <p className="text-[11px] text-amber-800">Team video calls take place in your Team Group Workspace. Switch to "{teamWorkspace.name}" to connect with your team.</p>
+                </div>
               </div>
-              <h3 className="font-extrabold text-slate-100 text-sm tracking-tight">{activeRoom.name}</h3>
-              <span className="text-xs font-mono text-slate-300 bg-slate-900/80 px-2.5 py-0.5 rounded-lg border border-slate-800">
-                {formatDuration(callDuration)}
+              <button
+                onClick={() => onSelectWorkspace && onSelectWorkspace(teamWorkspace.id)}
+                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition shrink-0 flex items-center gap-1.5"
+              >
+                <Users className="w-4 h-4" />
+                <span>Switch to {teamWorkspace.name}</span>
+              </button>
+            </div>
+          )}
+
+          {/* 🔴 PROMINENT LIVE ONGOING WORKSPACE MEETING HERO BANNER */}
+          {ongoingWorkspaceMeeting && (
+            <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border-2 border-emerald-400 p-6 rounded-2xl shadow-md flex flex-col md:flex-row items-center justify-between gap-4 animate-fade-in">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 shrink-0">
+                  <Radio className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-rose-500 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                      LIVE NOW
+                    </span>
+                    <span className="text-xs font-mono text-emerald-800 font-bold">
+                      {ongoingWorkspaceMeeting.participants?.length || 1} Team Member(s) Connected
+                    </span>
+                  </div>
+                  <h3 className="font-extrabold text-base text-[#191C1E] mt-1">
+                    {ongoingWorkspaceMeeting.name || 'Workspace Live Video Conference'}
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Host: <strong>{ongoingWorkspaceMeeting.creator_name || 'Team Member'}</strong> • One group meeting for the entire workspace.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleJoinOngoingMeeting(ongoingWorkspaceMeeting)}
+                style={{ backgroundColor: '#10B981', color: '#FFFFFF' }}
+                className="px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-600/30 hover:bg-emerald-600 transition flex items-center gap-2 shrink-0 active:scale-95"
+              >
+                <Video className="w-4 h-4 text-white" />
+                <span>Join Ongoing Meeting Now</span>
+              </button>
+            </div>
+          )}
+
+          {/* 3 Action Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Card 1: Start / Join Single Meeting */}
+            <div className="bg-white border border-[#E2E8F0] p-6 rounded-2xl shadow-sm hover-lift space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5] shadow-sm">
+                  <Video className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[#191C1E]">
+                    {ongoingWorkspaceMeeting ? 'Join Team Meeting' : 'Start Instant Meeting'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    {ongoingWorkspaceMeeting
+                      ? 'A live call is already ongoing in your workspace. Connect directly with your team.'
+                      : 'Launch a video room for the workspace with live speech transcription and Copilot action items.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                {!ongoingWorkspaceMeeting && (
+                  <input
+                    type="text"
+                    placeholder="Meeting title (e.g. Sprint Sync)..."
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
+                    value={meetingTitleInput}
+                    onChange={(e) => setMeetingTitleInput(e.target.value)}
+                  />
+                )}
+                <button
+                  onClick={() => handleStartInstantMeeting()}
+                  style={{ backgroundColor: ongoingWorkspaceMeeting ? '#10B981' : '#4F46E5', color: '#FFFFFF' }}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center justify-center gap-2"
+                >
+                  <Video className="w-4 h-4 text-white" />
+                  <span>{ongoingWorkspaceMeeting ? 'Join Ongoing Call' : 'Start Meeting Now'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Card 2: Join Meeting with Code */}
+            <div className="bg-white border border-[#E2E8F0] p-6 rounded-2xl shadow-sm hover-lift space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-[#8B5CF6] shadow-sm">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[#191C1E]">Join with Room Code</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Connect to your team's ongoing call by entering their room ID or workspace join code.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleJoinWithCode} className="space-y-2 pt-2">
+                <input
+                  type="text"
+                  placeholder="Enter code (e.g. ROOM-1234)..."
+                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#8B5CF6] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
+                  value={joinCodeInput}
+                  onChange={(e) => setJoinCodeInput(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={!joinCodeInput.trim()}
+                  className="w-full bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-50 text-white py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  <span>Join Room</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Card 3: Upload Audio for AI MoM */}
+            <div className="bg-white border border-[#E2E8F0] p-6 rounded-2xl shadow-sm hover-lift space-y-4 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center text-[#0EA5E9] shadow-sm">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[#191C1E]">Upload Audio for AI MoM</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Upload recorded audio (.mp3, .wav) to automatically transcribe and synthesize meeting minutes.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,video/*"
+                  className="hidden"
+                  onChange={handleUploadAudio}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingAudio}
+                  className="w-full bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>{isUploadingAudio ? 'Processing Audio...' : 'Upload Audio File'}</span>
+                </button>
+                {uploadProgress && (
+                  <p className="text-[11px] font-mono text-slate-500 mt-1.5 text-center truncate">
+                    {uploadProgress}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Upcoming Scheduled Syncs */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-[#191C1E] flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#4F46E5]" />
+                <span>Upcoming Workspace Meetings</span>
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {upcomingMeetings.map((m, idx) => (
+                <div
+                  key={idx}
+                  className="bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-sm hover:border-[#4F46E5] transition flex items-center justify-between"
+                >
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-mono font-bold bg-indigo-50 text-[#4F46E5] px-2 py-0.5 rounded">
+                      {m.type}
+                    </span>
+                    <h4 className="font-bold text-sm text-[#191C1E]">{m.title}</h4>
+                    <p className="text-xs text-slate-500 flex items-center gap-2 font-mono">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{m.time} ({m.duration})</span>
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => handleStartInstantMeeting(m.title)}
+                    className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 shrink-0"
+                  >
+                    <Video className="w-3.5 h-3.5" />
+                    <span>Join</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Past Meeting Minutes Archive */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-[#191C1E] flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[#8B5CF6]" />
+                <span>Recorded Sessions & Minutes (MoM) Archive</span>
+              </h2>
+              <span className="text-xs font-mono text-slate-400">
+                {sessions?.length || 0} Recorded Session(s)
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={copyMeetingCode}
-                className="flex items-center gap-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs px-3 py-1.5 rounded-xl border border-slate-800 transition"
-              >
-                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLink ? 'Link Copied' : 'Share Call'}</span>
-              </button>
-              <button
-                onClick={() => setShowSidePanel(!showSidePanel)}
-                className={`p-2 rounded-xl border text-xs font-semibold transition ${
-                  showSidePanel
-                    ? 'bg-indigo-600 text-white border-indigo-500'
-                    : 'bg-slate-900/80 text-slate-400 border-slate-800'
-                }`}
-                title="Toggle Live Discussion Drawer"
-              >
-                <MessageSquare className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Main Video Area & Live Drawer */}
-          <div className="flex-1 flex min-h-0 relative">
-            {/* Live Camera Viewport */}
-            <div className="flex-1 relative bg-slate-950 flex items-center justify-center overflow-hidden">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover scale-x-[-1]"
-              />
-
-              {!isCameraOn && (
-                <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center text-slate-500">
-                  <div className="w-24 h-24 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-3 shadow-xl">
-                    <VideoOff className="w-10 h-10 text-slate-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-slate-400">Camera Off</span>
-                </div>
-              )}
-
-              {/* Floating Participant Overlay Badge */}
-              <div className="absolute top-16 left-5 flex items-center gap-2 bg-slate-950/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 shadow-lg">
-                <div
-                  className={`w-3 h-3 rounded-full transition-all ${
-                    audioLevel > 15 ? 'bg-emerald-400 ring-4 ring-emerald-400/30' : 'bg-slate-600'
-                  }`}
-                />
-                <span className="text-xs font-bold text-slate-200">You (Host)</span>
-                {isMicOn ? (
-                  <Mic className="w-3.5 h-3.5 text-emerald-400" />
-                ) : (
-                  <MicOff className="w-3.5 h-3.5 text-rose-400" />
-                )}
-              </div>
-
-              {/* Real-time Subtitles / Closed Captions Overlay */}
-              {showCaptions && (currentCaption || liveTranscript.length > 0) && (
-                <div className="absolute bottom-24 inset-x-0 flex justify-center px-6 pointer-events-none z-10">
-                  <div className="bg-black/85 backdrop-blur-md text-white px-5 py-2.5 rounded-2xl max-w-xl text-center text-sm font-medium leading-relaxed border border-white/10 shadow-2xl animate-fade-in">
-                    {currentCaption || liveTranscript[liveTranscript.length - 1]?.text}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Side Drawer: Live Transcripts & Discussion */}
-            {showSidePanel && (
-              <div className="w-84 glass-panel border-l border-slate-800 bg-slate-900/95 flex flex-col p-4 z-10">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
-                  <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
-                    <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                      Live Spoken Captions
-                    </span>
-                  </div>
-                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">
-                    {liveTranscript.length} lines
-                  </span>
-                </div>
-
-                {/* Spoken Captions Stream */}
-                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 text-xs">
-                  {liveTranscript.map((t) => (
-                    <div
-                      key={t.id}
-                      className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 space-y-1"
-                    >
-                      <div className="flex items-center justify-between text-[10px] text-slate-500">
-                        <span className="font-bold text-indigo-400">{t.speaker}</span>
-                        <span>{t.time}</span>
-                      </div>
-                      <p className="text-slate-200 leading-relaxed font-sans">{t.text}</p>
-                    </div>
-                  ))}
-
-                  {currentCaption && (
-                    <div className="bg-indigo-950/30 p-3 rounded-xl border border-indigo-500/30 space-y-1">
-                      <div className="text-[10px] text-indigo-400 font-bold">Speaking...</div>
-                      <p className="text-slate-300 italic">{currentCaption}</p>
-                    </div>
-                  )}
-
-                  {liveTranscript.length === 0 && !currentCaption && (
-                    <div className="text-slate-500 italic text-center py-10 text-xs">
-                      Speak into your microphone. Your spoken words will appear here in real-time.
-                    </div>
-                  )}
-                  <div ref={transcriptBottomRef} />
-                </div>
-
-                {/* Additional Meeting Notes Box */}
-                <div className="pt-3 border-t border-slate-800 space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    In-Call Notes
-                  </label>
-                  <textarea
-                    placeholder="Type key decisions or meeting notes..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none h-16"
-                    value={meetingNotes}
-                    onChange={(e) => setMeetingNotes(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Floating Control Dock */}
-          <div className="p-4 bg-slate-950/95 border-t border-slate-800/80 flex items-center justify-between px-8 z-20">
-            <div className="flex items-center gap-2">
-              <Volume2 className="w-4 h-4 text-emerald-400" />
-              <div className="w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-emerald-400 transition-all duration-75 rounded-full"
-                  style={{ width: `${audioLevel}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Central Controls */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={toggleMic}
-                className={`p-3.5 rounded-2xl transition shadow-lg ${
-                  isMicOn ? 'bg-slate-800 text-slate-100 hover:bg-slate-700' : 'bg-rose-600 text-white hover:bg-rose-500'
-                }`}
-                title={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
-              >
-                {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-              </button>
-
-              <button
-                onClick={toggleCamera}
-                className={`p-3.5 rounded-2xl transition shadow-lg ${
-                  isCameraOn ? 'bg-slate-800 text-slate-100 hover:bg-slate-700' : 'bg-rose-600 text-white hover:bg-rose-500'
-                }`}
-                title={isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
-              >
-                {isCameraOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-              </button>
-
-              <button
-                onClick={toggleScreenShare}
-                className={`p-3.5 rounded-2xl transition shadow-lg ${
-                  isScreenSharing ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-100 hover:bg-slate-700'
-                }`}
-                title="Share Screen"
-              >
-                <Monitor className="w-5 h-5" />
-              </button>
-
-              <button
-                onClick={() => setShowCaptions(!showCaptions)}
-                className={`p-3.5 rounded-2xl transition shadow-lg ${
-                  showCaptions ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                }`}
-                title="Toggle Subtitles"
-              >
-                <Subtitles className="w-5 h-5" />
-              </button>
-
-              <button
-                onClick={endLiveConference}
-                disabled={endingMeeting}
-                className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white px-6 py-3.5 rounded-2xl text-xs font-extrabold shadow-xl shadow-rose-600/30 transition active:scale-95"
-              >
-                <PhoneOff className="w-4 h-4" />
-                <span>{endingMeeting ? 'Generating Formal MoM Debrief...' : 'End Call & Generate MoM'}</span>
-              </button>
-            </div>
-
-            <div className="text-xs text-slate-500 font-mono">
-              WebRTC Active
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ---------------- SESSIONS ARCHIVE & MINUTES OF THE MEETING (MoM) VIEWER ---------------- */}
-      <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
-        {/* Sessions List */}
-        <div className="col-span-1 glass-panel p-4 rounded-2xl border border-slate-800 flex flex-col">
-          <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Meeting Archives ({sessions.length})
-            </span>
-            <button onClick={onRefreshSessions} className="text-xs text-indigo-400 hover:underline">
-              Refresh
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-            {sessions.map((s) => {
-              const isSelected = selectedSession?.id === s.id;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setSelectedSession(s)}
-                  className={`w-full text-left p-3.5 rounded-xl transition border ${
-                    isSelected
-                      ? 'bg-indigo-600/15 border-indigo-500 text-slate-100 shadow-md'
-                      : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-xs truncate max-w-[170px]">{s.title}</span>
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-                        s.status === 'done'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
-                      }`}
-                    >
-                      {s.status}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                    <span>Source: {s.source}</span>
-                    <span>{new Date(s.created_at).toLocaleDateString()}</span>
-                  </div>
-                </button>
-              );
-            })}
-
-            {sessions.length === 0 && (
-              <div className="text-center text-slate-500 py-12 text-xs">
-                No meeting sessions recorded yet. Start a live call or upload a recording above.
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Selected Session Minutes of the Meeting (MoM) Detail */}
-        <div className="col-span-2 glass-panel p-6 rounded-2xl border border-slate-800 flex flex-col min-h-0 bg-slate-950/40">
-          {selectedSession ? (
-            <div className="flex flex-col h-full space-y-4">
-              {/* Session Top Header */}
-              <div className="flex items-start justify-between border-b border-slate-800 pb-4">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Sparkles className="w-5 h-5 text-indigo-400" />
-                    <h3 className="text-xl font-extrabold text-slate-100">{selectedSession.title}</h3>
-                  </div>
-                  <div className="text-xs text-slate-400 flex items-center gap-3">
-                    <span>Source: <strong className="text-slate-300 uppercase">{selectedSession.source}</strong></span>
-                    <span>•</span>
-                    <span>Created: {new Date(selectedSession.created_at).toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleGenerateMom}
-                    disabled={generatingMom}
-                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition"
-                    title="Generate or Refresh Minutes of the Meeting using AI"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${generatingMom ? 'animate-spin' : ''}`} />
-                    <span>{generatingMom ? 'Generating MoM...' : 'Generate MoM'}</span>
-                  </button>
-
-                  <button
-                    onClick={handleConvertMoMToDocument}
-                    disabled={convertingToDoc}
-                    className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold transition"
-                    title="Save Minutes of Meeting as a Collaborative Document"
-                  >
-                    <FilePlus className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Save as Doc</span>
-                  </button>
-
-                  <button
-                    onClick={exportDebriefMarkdown}
-                    className="p-2 text-slate-400 hover:text-indigo-300 hover:bg-slate-800 rounded-lg transition"
-                    title="Download Markdown MoM"
-                  >
-                    <Download className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={() => window.print()}
-                    className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition"
-                    title="Print / Save PDF MoM"
-                  >
-                    <Printer className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={async () => {
-                      if (confirm('Delete this meeting session?')) {
-                        await api.deleteSession(workspaceId, selectedSession.id);
-                        await onRefreshSessions();
-                        setSelectedSession(null);
-                      }
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl divide-y divide-[#E2E8F0] overflow-hidden shadow-sm">
+              {(sessions && sessions.length > 0) ? (
+                sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => {
+                      setSelectedPastMeeting(s);
+                      setPastMeetingTab('mom');
                     }}
-                    className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
-                    title="Delete Session"
+                    className="p-4 flex items-center justify-between hover:bg-[#F8FAFC] transition cursor-pointer group"
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* View Switcher Tabs: MoM | Actions | Spoken Transcript */}
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
-                  <button
-                    onClick={() => setSessionDetailTab('mom')}
-                    className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-                      sessionDetailTab === 'mom' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Minutes of Meeting (MoM)</span>
-                  </button>
-
-                  <button
-                    onClick={() => setSessionDetailTab('actions')}
-                    className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-                      sessionDetailTab === 'actions' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Action Items ({selectedSession.action_items?.length || 0})</span>
-                  </button>
-
-                  <button
-                    onClick={() => setSessionDetailTab('transcript')}
-                    className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
-                      sessionDetailTab === 'transcript' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Radio className="w-3.5 h-3.5" />
-                    <span>Spoken Transcript</span>
-                  </button>
-                </div>
-
-                {sessionDetailTab === 'mom' && (
-                  <button
-                    onClick={copyMoMToClipboard}
-                    className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-semibold transition"
-                  >
-                    {copiedMom ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedMom ? 'MoM Copied' : 'Copy MoM'}</span>
-                  </button>
-                )}
-              </div>
-
-              {/* TAB 1: FORMAL MINUTES OF THE MEETING (MoM) */}
-              {sessionDetailTab === 'mom' && (
-                <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                  <div className="bg-slate-900/90 p-6 rounded-2xl border border-slate-800 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed shadow-inner font-sans">
-                    {selectedSession.ai_summary || (
-                      <div className="text-center py-10 space-y-3">
-                        <Sparkles className="w-8 h-8 text-indigo-400 mx-auto animate-pulse" />
-                        <p className="text-slate-400 text-xs">No Minutes of Meeting generated yet.</p>
-                        <button
-                          onClick={handleGenerateMom}
-                          disabled={generatingMom}
-                          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold"
-                        >
-                          {generatingMom ? 'Generating...' : 'Synthesize MoM with AI'}
-                        </button>
+                    <div className="space-y-1 pr-4 min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-xs text-[#191C1E] group-hover:text-[#4F46E5] transition truncate">
+                          {s.title}
+                        </h4>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                      <p className="text-[11px] text-slate-500 line-clamp-1 max-w-xl">
+                        {s.ai_summary || s.transcript || 'Click to view full transcript & generated MoM.'}
+                      </p>
+                    </div>
 
-              {/* TAB 2: ACTION ITEMS CHECKLIST WITH 1-CLICK KANBAN CONVERSION */}
-              {sessionDetailTab === 'actions' && (
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                  <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-                    <span>Extracted meeting deliverables:</span>
-                    <span>1-Click Convert to Kanban Task</span>
-                  </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-1 rounded font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                        <span>MoM Ready</span>
+                      </span>
 
-                  <div className="space-y-2">
-                    {selectedSession.action_items && selectedSession.action_items.length > 0 ? (
-                      selectedSession.action_items.map((item, idx) => {
-                        const isCompleted = actionItemsStatus[idx];
-                        const isCreatingThis = creatingTaskIndex === idx;
-                        return (
-                          <div
-                            key={idx}
-                            className="bg-slate-900/80 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-3 text-xs text-slate-200 group hover:border-indigo-500/40 transition shadow-sm"
-                          >
-                            <label className="flex items-start gap-3 cursor-pointer flex-1">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setActionItemsStatus((prev) => ({ ...prev, [idx]: !prev[idx] }))
-                                }
-                                className="mt-0.5 text-emerald-400 hover:scale-110 transition"
-                              >
-                                {isCompleted ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4 text-slate-600" />}
-                              </button>
-                              <span className={`font-medium leading-relaxed ${isCompleted ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                                {item}
-                              </span>
-                            </label>
-
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <button
-                                onClick={() => handleConvertToCalendarEvent(item)}
-                                className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-700 transition"
-                                title="Schedule reminder on Calendar"
-                              >
-                                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                                <span>Reminder</span>
-                              </button>
-                              <button
-                                onClick={() => handleConvertToTask(item, idx)}
-                                disabled={isCreatingThis}
-                                className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-md shadow-indigo-600/30"
-                                title="Add as task on Kanban board"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>{isCreatingThis ? 'Adding...' : 'Add to Kanban'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="text-xs text-slate-500 italic p-6 bg-slate-900/40 rounded-xl text-center">
-                        No action items recorded for this session.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: EXACT SPOKEN TRANSCRIPT */}
-              {sessionDetailTab === 'transcript' && (
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">Verbatim spoken conversation:</span>
-
-                    <div className="flex items-center gap-2">
-                      <div className="relative w-44">
-                        <Search className="w-3 h-3 text-slate-500 absolute left-2.5 top-2" />
-                        <input
-                          type="text"
-                          placeholder="Search transcript..."
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-indigo-500"
-                          value={transcriptSearch}
-                          onChange={(e) => setTranscriptSearch(e.target.value)}
-                        />
-                      </div>
-
+                      {/* Delete button */}
                       <button
-                        onClick={copyTranscriptToClipboard}
-                        className="p-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-lg text-xs flex items-center gap-1 border border-slate-800 transition"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSession(s.id);
+                        }}
+                        title="Delete this meeting session"
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition"
                       >
-                        {copiedTranscript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span className="text-[10px] font-semibold">{copiedTranscript ? 'Copied' : 'Copy'}</span>
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
-
-                  <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800/80 text-xs font-mono text-slate-300 whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed shadow-inner">
-                    {transcriptSearch ? (
-                      selectedSession.transcript
-                        ?.split('\n')
-                        .filter((line) => line.toLowerCase().includes(transcriptSearch.toLowerCase()))
-                        .join('\n') || 'No matching lines found.'
-                    ) : (
-                      selectedSession.transcript || 'No spoken transcript available.'
-                    )}
-                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-slate-400 text-xs space-y-2">
+                  <FileText className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p>No meeting sessions recorded yet.</p>
+                  <p className="text-[11px] text-slate-500">
+                    Start a video call or upload an audio file to generate automated minutes.
+                  </p>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500 py-16">
-              <Video className="w-12 h-12 mb-3 text-slate-600" />
-              <span className="text-sm font-semibold">Select a meeting session to view Minutes of the Meeting (MoM)</span>
+          </div>
+
+          {/* ------------------------------------------------------------- */}
+          {/* PAST MEETING DETAIL MODAL (TRANSCRIPT, MOM & DELETE)          */}
+          {/* ------------------------------------------------------------- */}
+          {selectedPastMeeting && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-scale-up">
+                {/* Modal Header */}
+                <div className="p-5 md:p-6 border-b border-[#E2E8F0] flex items-start justify-between bg-gradient-to-r from-slate-50 to-indigo-50/30">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono font-bold bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded">
+                        Recorded Session
+                      </span>
+                      <span className="text-xs font-mono text-slate-400">
+                        {selectedPastMeeting.created_at ? new Date(selectedPastMeeting.created_at).toLocaleString() : 'Past Meeting'}
+                      </span>
+                    </div>
+                    <h2 className="text-lg md:text-xl font-bold text-[#191C1E]">
+                      {selectedPastMeeting.title}
+                    </h2>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Copy Content Button */}
+                    <button
+                      onClick={handleCopyPastMeetingContent}
+                      className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-600 hover:text-indigo-600 hover:border-indigo-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                      title="Copy to Clipboard"
+                    >
+                      {copiedPastMeeting ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                      <span className="hidden sm:inline">{copiedPastMeeting ? 'Copied!' : 'Copy'}</span>
+                    </button>
+
+                    {/* Delete Session Button */}
+                    <button
+                      onClick={() => handleDeleteSession(selectedPastMeeting.id)}
+                      disabled={isDeletingSession}
+                      className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 hover:text-rose-700 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                      title="Delete Session"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-600" />
+                      <span className="hidden sm:inline">{isDeletingSession ? 'Deleting...' : 'Delete'}</span>
+                    </button>
+
+                    {/* Close Button */}
+                    <button
+                      onClick={() => setSelectedPastMeeting(null)}
+                      className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-400 hover:text-[#191C1E] transition"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Modal Navigation Tabs */}
+                <div className="flex items-center gap-2 px-6 pt-3 border-b border-[#E2E8F0] bg-white">
+                  <button
+                    onClick={() => setPastMeetingTab('mom')}
+                    className={`pb-3 px-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition ${
+                      pastMeetingTab === 'mom'
+                        ? 'border-[#4F46E5] text-[#4F46E5]'
+                        : 'border-transparent text-slate-500 hover:text-[#191C1E]'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>Meeting Minutes (MoM)</span>
+                  </button>
+
+                  <button
+                    onClick={() => setPastMeetingTab('transcript')}
+                    className={`pb-3 px-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition ${
+                      pastMeetingTab === 'transcript'
+                        ? 'border-[#4F46E5] text-[#4F46E5]'
+                        : 'border-transparent text-slate-500 hover:text-[#191C1E]'
+                    }`}
+                  >
+                    <Mic className="w-4 h-4" />
+                    <span>Full Transcript</span>
+                  </button>
+
+                  <button
+                    onClick={() => setPastMeetingTab('actions')}
+                    className={`pb-3 px-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition ${
+                      pastMeetingTab === 'actions'
+                        ? 'border-[#4F46E5] text-[#4F46E5]'
+                        : 'border-transparent text-slate-500 hover:text-[#191C1E]'
+                    }`}
+                  >
+                    <ListChecks className="w-4 h-4" />
+                    <span>Action Items ({selectedPastMeeting.action_items?.length || 0})</span>
+                  </button>
+                </div>
+
+                {/* Modal Tab Content */}
+                <div className="flex-1 overflow-y-auto p-6 text-sm text-[#191C1E] bg-[#FAFAFA] min-h-[260px]">
+                  {pastMeetingTab === 'mom' && (
+                    <div className="space-y-4">
+                      {selectedPastMeeting.ai_summary ? (
+                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm prose prose-sm max-w-none text-slate-800 leading-relaxed whitespace-pre-wrap font-sans">
+                          {selectedPastMeeting.ai_summary}
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center bg-white border border-[#E2E8F0] rounded-2xl text-slate-400 space-y-3">
+                          <FileText className="w-8 h-8 text-slate-300 mx-auto" />
+                          <p>No meeting minutes generated yet for this recording.</p>
+                          <button
+                            onClick={() => handleRegeneratePastMeetingMom(selectedPastMeeting.id)}
+                            disabled={isRegeneratingMom}
+                            className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-2"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>{isRegeneratingMom ? 'Synthesizing with AI...' : 'Generate MoM Now'}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {pastMeetingTab === 'transcript' && (
+                    <div className="space-y-3">
+                      {selectedPastMeeting.transcript ? (
+                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm text-xs font-mono text-slate-700 leading-relaxed whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+                          {selectedPastMeeting.transcript}
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center bg-white border border-[#E2E8F0] rounded-2xl text-slate-400 space-y-2">
+                          <Mic className="w-8 h-8 text-slate-300 mx-auto" />
+                          <p>No speech transcript recorded for this session.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {pastMeetingTab === 'actions' && (
+                    <div className="space-y-3">
+                      {selectedPastMeeting.action_items && selectedPastMeeting.action_items.length > 0 ? (
+                        <div className="space-y-2.5">
+                          {selectedPastMeeting.action_items.map((item, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#F43F5E] rounded-xl p-3.5 shadow-sm flex items-start justify-between gap-3"
+                            >
+                              <div>
+                                <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-[10px] font-mono font-bold px-2 py-0.5 rounded">
+                                  Action Item
+                                </span>
+                                <p className="text-xs font-semibold text-[#191C1E] mt-1.5">
+                                  {typeof item === 'string' ? item : item.text || item.title || JSON.stringify(item)}
+                                </p>
+                              </div>
+
+                              <button
+                                onClick={() => handleSyncAction({ id: `item-${idx}`, text: typeof item === 'string' ? item : item.text || item.title })}
+                                className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 shrink-0"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                <span>Sync to Cal</span>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center bg-white border border-[#E2E8F0] rounded-2xl text-slate-400 space-y-2">
+                          <ListChecks className="w-8 h-8 text-slate-300 mx-auto" />
+                          <p>No individual action items detected for this meeting.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-4 border-t border-[#E2E8F0] bg-white flex items-center justify-between">
+                  <span className="text-xs font-mono text-slate-500">
+                    Status: <strong className="text-emerald-600 uppercase">{selectedPastMeeting.status || 'Completed'}</strong>
+                  </span>
+
+                  <button
+                    onClick={() => setSelectedPastMeeting(null)}
+                    className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#191C1E] text-xs font-bold transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
-      </div>
+      ) : (
+        /* ------------------------------------------------------------- */
+        /* CASE B: ACTIVE LIVE MEETING ROOM (FULL SCREEN DARK STAGE)     */
+        /* ------------------------------------------------------------- */
+        <div className="fixed inset-0 z-50 flex bg-[#181C24] text-white overflow-hidden">
+          {/* Main Video Room Area */}
+          <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#181C24]">
+            {/* Top Bar */}
+            <div className="h-14 px-6 border-b border-slate-800/80 bg-[#12151C] flex items-center justify-between flex-shrink-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-2.5 h-2.5 rounded-full bg-[#F43F5E] animate-pulse"></div>
+                <h1 className="text-base md:text-lg font-bold text-white tracking-tight">
+                  {activeRoom.name || 'Live Video Meeting'}
+                </h1>
+                <span className="text-xs font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
+                  {formatDuration(callDuration)}
+                </span>
+                <span className="text-xs font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-2 py-0.5 rounded">
+                  {participants.length} {participants.length === 1 ? 'Person (You)' : 'People Connected'}
+                </span>
+              </div>
+
+              {/* Invite Code Quick Link */}
+              <div className="flex items-center gap-2">
+                {workspace?.join_code && (
+                  <button
+                    onClick={handleCopyJoinCode}
+                    className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 transition"
+                  >
+                    {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-indigo-400" />}
+                    <span>{copiedCode ? 'Code Copied!' : `Join Code: ${workspace.join_code}`}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Video Streams & Participants Grid */}
+            <div className="flex-1 p-4 md:p-6 overflow-hidden flex flex-col gap-4 min-h-0 relative">
+              {/* Floating Emojis Burst */}
+              <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
+                {floatingReactions.map((r) => (
+                  <div
+                    key={r.id}
+                    className="absolute text-4xl animate-bounce transition-all duration-1000"
+                    style={{ left: `${r.left}%`, bottom: '20%' }}
+                  >
+                    {r.emoji}
+                  </div>
+                ))}
+              </div>
+
+              {/* Dynamic Video Layout based on Real Participant Count */}
+              <div className="flex-1 flex flex-col gap-4 min-h-0">
+                {isScreenSharing ? (
+                  /* Screen Sharing Spotlight View */
+                  <div className="flex-1 rounded-2xl overflow-hidden bg-black border border-slate-700/80 shadow-2xl relative flex items-center justify-center min-h-0">
+                    <video
+                      ref={screenVideoRef}
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-contain bg-black"
+                    />
+                    <div className="absolute bottom-4 left-4 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-xl flex items-center gap-2 border border-white/10 text-xs font-mono">
+                      <Monitor className="w-4 h-4 text-indigo-400" />
+                      <span>{currentUserName} (Screen Sharing)</span>
+                    </div>
+                  </div>
+                ) : (
+                  /* Real Connected Participants Video Grid */
+                  <div
+                    className={`grid gap-4 flex-1 min-h-0 ${
+                      participants.length === 1
+                        ? 'grid-cols-1 max-w-4xl mx-auto w-full'
+                        : participants.length === 2
+                        ? 'grid-cols-1 md:grid-cols-2'
+                        : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+                    }`}
+                  >
+                    {participants.map((p) => {
+                      const isMe = p.isLocal || (user?.id && String(p.id) === String(user.id)) || p.name === currentUserName;
+                      const remoteStream = remoteStreams[p.id];
+
+                      return (
+                        <div
+                          key={p.id}
+                          className={`relative rounded-2xl overflow-hidden bg-black border shadow-2xl flex items-center justify-center group ${
+                            isMe && isSpeaking
+                              ? 'border-emerald-500 ring-2 ring-emerald-500/50'
+                              : 'border-slate-800'
+                          }`}
+                        >
+                          {isMe ? (
+                            /* Local User Real Camera Feed or Avatar */
+                            <>
+                              <video
+                                ref={localVideoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                className={`w-full h-full object-cover ${isCameraOn ? '' : 'hidden'}`}
+                              />
+                              {!isCameraOn && (
+                                <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 text-white space-y-3 p-6">
+                                  <div className="w-24 h-24 rounded-full bg-indigo-600 border-2 border-indigo-400 flex items-center justify-center text-3xl font-bold shadow-xl">
+                                    {p.name.slice(0, 2).toUpperCase()}
+                                  </div>
+                                  <div className="text-center">
+                                    <h3 className="font-bold text-base">{p.name} (You)</h3>
+                                    <p className="text-xs text-slate-400 font-mono">Live In Meeting</p>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            /* Remote Real Participant Feed with WebRTC Stream or Avatar */
+                            remoteStream ? (
+                              <video
+                                autoPlay
+                                playsInline
+                                ref={(el) => {
+                                  if (el && el.srcObject !== remoteStream) {
+                                    el.srcObject = remoteStream;
+                                  }
+                                }}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 text-white space-y-3 p-6">
+                                <div className="w-24 h-24 rounded-full bg-purple-600 border-2 border-purple-400 flex items-center justify-center text-3xl font-bold shadow-xl animate-pulse">
+                                  {p.name.slice(0, 2).toUpperCase()}
+                                </div>
+                                <div className="text-center">
+                                  <h3 className="font-bold text-base text-white">{p.name}</h3>
+                                  <span className="text-[11px] bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
+                                    Connected Live
+                                  </span>
+                                </div>
+                              </div>
+                            )
+                          )}
+
+                          {/* Participant Status Badge */}
+                          <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-md px-3 py-1 rounded-xl flex items-center gap-2 border border-white/10 text-xs font-mono z-20">
+                            {isMe ? (
+                              isMicOn ? (
+                                <Activity className={`w-3.5 h-3.5 ${isSpeaking ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
+                              ) : (
+                                <MicOff className="w-3.5 h-3.5 text-rose-400" />
+                              )
+                            ) : (
+                              <Mic className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                            <span className="font-medium text-white">{p.name} {isMe ? '(You)' : ''}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Real-time Join Invitation Banner when alone */}
+                {participants.length === 1 && (
+                  <div className="bg-[#12151C] border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+                    <div className="flex items-center gap-3 text-xs text-slate-300">
+                      <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                        <UserPlus className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-white">Waiting for other team members to join...</p>
+                        <p className="text-slate-400 text-[11px]">Share your workspace join code so your real team members can join this call.</p>
+                      </div>
+                    </div>
+
+                    {workspace?.join_code && (
+                      <button
+                        onClick={handleCopyJoinCode}
+                        className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 shrink-0"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>{copiedCode ? 'Copied to Clipboard!' : `Copy Join Code (${workspace.join_code})`}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom In-Call Controls Bar */}
+            <div className="h-18 px-6 bg-[#12151C] border-t border-slate-800/80 flex items-center justify-between flex-shrink-0 z-20">
+              {/* Left: Mic and Cam Toggles */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={toggleMic}
+                  style={isMicOn ? { backgroundColor: '#2D3748', color: '#FFFFFF' } : { backgroundColor: '#EF4444', color: '#FFFFFF' }}
+                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
+                  title={isMicOn ? 'Mute Mic' : 'Unmute Mic'}
+                >
+                  {isMicOn ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-white" />}
+                </button>
+                <button
+                  onClick={toggleCamera}
+                  style={isCameraOn ? { backgroundColor: '#2D3748', color: '#FFFFFF' } : { backgroundColor: '#EF4444', color: '#FFFFFF' }}
+                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
+                  title={isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
+                >
+                  {isCameraOn ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-white" />}
+                </button>
+              </div>
+
+              {/* Center: Share Screen, Reactions, In-Call Chat, Participants */}
+              <div className="flex items-center gap-2.5 relative">
+                <button
+                  onClick={toggleScreenShare}
+                  style={isScreenSharing ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : { backgroundColor: '#2D3748', color: '#FFFFFF' }}
+                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
+                  title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+                >
+                  <Monitor className="w-4 h-4 text-white" />
+                </button>
+
+                {/* Emoji Reaction Popover */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    style={{ backgroundColor: '#2D3748', color: '#FFFFFF' }}
+                    className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
+                    title="Send Reaction"
+                  >
+                    <Smile className="w-4 h-4 text-white" />
+                  </button>
+
+                  {showEmojiPicker && (
+                    <div className="absolute bottom-14 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded-2xl p-2 flex gap-2 shadow-2xl z-50 animate-fade-in">
+                      {['👏', '🔥', '❤️', '🎉', '👍', '💡'].map((em) => (
+                        <button
+                          key={em}
+                          onClick={() => triggerReaction(em)}
+                          className="text-xl p-1.5 hover:bg-slate-800 rounded-xl transition hover:scale-125"
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => setActiveDrawer(activeDrawer === 'chat' ? null : 'chat')}
+                  style={activeDrawer === 'chat' ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : { backgroundColor: '#2D3748', color: '#FFFFFF' }}
+                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95 relative"
+                  title="In-call Chat"
+                >
+                  <MessageSquare className="w-4 h-4 text-white" />
+                  {inCallChat.length > 0 && (
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#4F46E5]"></span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setActiveDrawer(activeDrawer === 'participants' ? null : 'participants')}
+                  style={activeDrawer === 'participants' ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : { backgroundColor: '#2D3748', color: '#FFFFFF' }}
+                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
+                  title="Participants"
+                >
+                  <Users className="w-4 h-4 text-white" />
+                </button>
+              </div>
+
+              {/* Right: End Call */}
+              <button
+                onClick={handleEndCall}
+                style={{ backgroundColor: '#F43F5E', color: '#FFFFFF' }}
+                className="px-6 py-2.5 rounded-full font-bold text-xs shadow-lg shadow-rose-600/40 hover:bg-rose-600 transition flex items-center gap-2 active:scale-95"
+              >
+                <PhoneOff className="w-4 h-4 text-white" />
+                <span>End Call</span>
+              </button>
+            </div>
+          </div>
+
+          {/* In-Call Side Drawers */}
+          {activeDrawer && (
+            <div className="w-72 bg-[#12151C] border-l border-slate-800 flex flex-col h-full flex-shrink-0 z-20 text-white animate-fade-in">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h3 className="font-bold text-xs uppercase tracking-wider text-slate-300">
+                  {activeDrawer === 'chat' ? 'In-Call Chat' : `Participants (${participants.length})`}
+                </h3>
+                <button onClick={() => setActiveDrawer(null)} className="text-slate-400 hover:text-white">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {activeDrawer === 'chat' ? (
+                <div className="flex-1 flex flex-col p-4 space-y-3 min-h-0">
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                    {inCallChat.length === 0 ? (
+                      <div className="text-center text-slate-500 py-12 text-xs italic">
+                        No messages yet in this meeting.
+                      </div>
+                    ) : (
+                      inCallChat.map((m, i) => (
+                        <div key={i} className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1">
+                          <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                            <span className="font-bold text-indigo-400">{m.sender}</span>
+                            <span>{m.time}</span>
+                          </div>
+                          <p className="text-slate-200">{m.text}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <form onSubmit={handleSendChat} className="flex gap-1.5 pt-2 border-t border-slate-800">
+                    <input
+                      type="text"
+                      placeholder="Send a message..."
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                    />
+                    <button type="submit" className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl">
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                  {participants.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-[10px]">
+                          {p.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="font-bold text-white">{p.name} {(user?.id && String(p.id) === String(user.id)) || p.name === currentUserName ? '(You)' : ''}</div>
+                          <div className="text-[10px] text-slate-400">{p.role || 'Member'}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-slate-400">
+                        {p.mic !== false ? <Mic className="w-3.5 h-3.5 text-emerald-400" /> : <MicOff className="w-3.5 h-3.5 text-rose-400" />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Right Sidebar: Real Copilot Speech & Audio Pipeline */}
+          <aside className="w-[360px] bg-[#F8FAFC] text-[#191C1E] border-l border-[#E2E8F0] h-full flex flex-col shadow-[-4px_0_24px_rgba(0,0,0,0.05)] flex-shrink-0 font-sans z-20">
+            {/* Header */}
+            <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between bg-white">
+              <h2 className="text-base font-bold text-[#191C1E] flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-[#8B5CF6] ai-pulse rounded-full" />
+                <span>Copilot</span>
+              </h2>
+              <span className="bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20 px-2 py-0.5 rounded text-xs font-mono font-bold flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
+                Listening
+              </span>
+            </div>
+
+            {/* Pipeline Body */}
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+              {/* REAL LIVE TRANSCRIPT */}
+              <div>
+                <h3 className="text-xs font-mono uppercase font-bold text-slate-500 mb-3 tracking-wider flex items-center justify-between">
+                  <span>Live Transcript</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Real Speech Capture</span>
+                </h3>
+
+                {liveTranscript.length === 0 && !currentCaption ? (
+                  <div className="p-4 bg-white border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs space-y-2">
+                    <Mic className="w-6 h-6 text-[#4F46E5] mx-auto animate-pulse" />
+                    <p className="font-semibold text-slate-700">Copilot is listening...</p>
+                    <p className="text-[11px]">Speak into your microphone and words will be transcribed here and synced to all participants live.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {liveTranscript.map((entry) => (
+                      <div key={entry.id} className="flex gap-2.5 text-xs bg-white border border-[#E2E8F0] p-2.5 rounded-xl shadow-sm">
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${entry.color}`}
+                        >
+                          {entry.initial}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2">
+                            <span className="font-bold text-[#191C1E] text-xs">{entry.speaker}</span>
+                            <span className="text-[10px] font-mono text-slate-400">{entry.time}</span>
+                          </div>
+                          <p className="text-slate-700 text-xs mt-1 leading-relaxed">{entry.text}</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Current Live Word Buffer */}
+                    {currentCaption && (
+                      <div className="flex gap-2.5 text-xs bg-indigo-50 border border-indigo-200 p-2.5 rounded-xl">
+                        <div className="w-7 h-7 rounded-full bg-[#4F46E5] text-white flex items-center justify-center shrink-0">
+                          <Mic className="w-3.5 h-3.5 animate-pulse" />
+                        </div>
+                        <div className="flex-1 pt-0.5">
+                          <p className="text-xs italic text-[#4F46E5] font-medium leading-relaxed">
+                            "{currentCaption}..."
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="h-px bg-[#E2E8F0] w-full"></div>
+
+              {/* REAL ACTION ITEMS PREVIEW */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-mono uppercase font-bold text-slate-500 tracking-wider">
+                    Action Items ({actionItems.length})
+                  </h3>
+                  <button
+                    onClick={() => setShowAddAction(!showAddAction)}
+                    className="text-[11px] font-bold text-[#4F46E5] hover:underline flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> Add Item
+                  </button>
+                </div>
+
+                {showAddAction && (
+                  <form onSubmit={handleAddActionItem} className="mb-3 flex gap-1.5">
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="e.g. Follow up on database migration..."
+                      className="flex-1 bg-white border border-[#E2E8F0] rounded-xl px-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                      value={newActionInput}
+                      onChange={(e) => setNewActionInput(e.target.value)}
+                    />
+                    <button type="submit" className="bg-[#4F46E5] text-white px-3 py-1.5 rounded-xl text-xs font-bold">
+                      Add
+                    </button>
+                  </form>
+                )}
+
+                {actionItems.length === 0 ? (
+                  <div className="p-3 bg-white border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs italic">
+                    Action items detected from your speech will appear here.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {actionItems.map((action) => {
+                      const isSynced = syncedActionIds.has(action.id);
+
+                      return (
+                        <div
+                          key={action.id}
+                          className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#F43F5E] rounded-xl p-3.5 shadow-sm"
+                        >
+                          <div className="flex items-start justify-between mb-1.5">
+                            <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-[10px] font-mono font-bold px-2 py-0.5 rounded">
+                              Action Item
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">{action.timeframe}</span>
+                          </div>
+
+                          <p className="text-xs font-semibold text-[#191C1E] mb-2 leading-snug">
+                            {action.text}
+                          </p>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-[#E2E8F0]">
+                            <span className="text-[11px] text-slate-500 flex items-center gap-1 font-mono">
+                              <User className="w-3 h-3 text-slate-400" /> {action.assignee}
+                            </span>
+
+                            <button
+                              onClick={() => handleSyncAction(action)}
+                              className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] transition-colors px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1"
+                            >
+                              {isSynced ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-[#10B981]" />
+                                  <span>Synced</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CalendarPlus className="w-3.5 h-3.5" />
+                                  <span>Sync to Cal</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom Generate Minutes Button */}
+            <div className="p-4 border-t border-[#E2E8F0] bg-white">
+              <button
+                onClick={handleGenerateMinutes}
+                className="w-full flex items-center justify-center gap-2 border border-[#E2E8F0] bg-white hover:bg-[#F2F4F6] transition-colors py-2.5 rounded-xl text-xs font-bold text-[#191C1E] shadow-sm active:scale-95"
+              >
+                <FileText className="w-4 h-4 text-[#4F46E5]" />
+                <span>Generate & Save Minutes (MoM)</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

@@ -24,8 +24,26 @@ async def create_video_room(
     user: User,
     room_name: str,
 ) -> dict:
-    """Creates a live video conferencing room with WebRTC / Daily.co / 100ms metadata."""
+    """Creates or joins the single active live video conferencing room for the workspace."""
     await _require_workspace_access(db, workspace_id, user.id)
+
+    # Enforce single active meeting per workspace: reuse ongoing meeting if exists
+    for r in ACTIVE_ROOMS.values():
+        if r.get("workspace_id") == str(workspace_id):
+            if not any(p["id"] == str(user.id) for p in r["participants"]):
+                r["participants"].append({"id": str(user.id), "name": user.name, "role": "participant"})
+                await ws_manager.broadcast_to_workspace(
+                    workspace_id,
+                    {
+                        "event": "video_room_user_joined",
+                        "workspace_id": str(workspace_id),
+                        "room_id": r["room_id"],
+                        "user_id": str(user.id),
+                        "user_name": user.name,
+                        "participants": r["participants"],
+                    },
+                )
+            return r
 
     room_id = f"room-{uuid.uuid4().hex[:12]}"
     room_data = {
@@ -49,6 +67,7 @@ async def create_video_room(
             "room_id": room_id,
             "room_name": room_name,
             "creator": user.name,
+            "participants": room_data["participants"],
         },
     )
 
@@ -66,11 +85,29 @@ async def join_video_room(
 
     room = ACTIVE_ROOMS.get(room_id)
     if not room or room.get("workspace_id") != str(workspace_id):
+        # Look for any active room in this workspace
+        for r in ACTIVE_ROOMS.values():
+            if r.get("workspace_id") == str(workspace_id):
+                room = r
+                break
+
+    if not room:
         raise AuthError("Video meeting room not found or expired", status_code=404)
 
     # Check if participant is already listed
     if not any(p["id"] == str(user.id) for p in room["participants"]):
         room["participants"].append({"id": str(user.id), "name": user.name, "role": "participant"})
+        await ws_manager.broadcast_to_workspace(
+            workspace_id,
+            {
+                "event": "video_room_user_joined",
+                "workspace_id": str(workspace_id),
+                "room_id": room["room_id"],
+                "user_id": str(user.id),
+                "user_name": user.name,
+                "participants": room["participants"],
+            },
+        )
 
     return room
 

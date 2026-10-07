@@ -339,12 +339,12 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
 
       {/* Left Sidebar: Document List & Actions */}
       {!isZenMode && (
-        <div className="w-80 glass-panel p-4 rounded-3xl border border-slate-800 flex flex-col h-full bg-slate-900/80 shadow-2xl">
+        <div className="w-80 p-4 rounded-2xl border border-[#E2E8F0] flex flex-col h-full bg-white shadow-sm">
           {/* Header */}
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-indigo-400" />
-              <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-300">
+              <BookOpen className="w-4 h-4 text-[#4F46E5]" />
+              <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-700">
                 Documents ({filteredDocs.length})
               </h3>
             </div>
@@ -352,13 +352,13 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
               <button
                 onClick={() => fileInputRef.current?.click()}
                 title="Upload document file (.txt, .md, .docx)"
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700/80 transition"
+                className="p-1.5 bg-[#F2F4F6] hover:bg-[#ECEEF0] text-slate-700 rounded-xl border border-[#E2E8F0] transition"
               >
                 <Upload className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md shadow-indigo-600/30 active:scale-95"
+                className="flex items-center gap-1 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm active:scale-95"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>New</span>
@@ -368,11 +368,11 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
 
           {/* Search bar */}
           <div className="relative mb-3">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
               placeholder="Search documents..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -381,13 +381,13 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
           {/* Template Quick Starter Banner */}
           <button
             onClick={() => setShowTemplatesModal(true)}
-            className="w-full mb-3 flex items-center justify-between p-2.5 rounded-2xl bg-gradient-to-r from-indigo-950/60 to-purple-950/60 border border-indigo-500/30 hover:border-indigo-500/60 text-xs text-indigo-300 transition group"
+            className="w-full mb-3 flex items-center justify-between p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200 hover:border-indigo-300 text-xs text-[#4F46E5] transition group"
           >
             <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-12 transition" />
+              <Sparkles className="w-3.5 h-3.5 text-[#4F46E5] group-hover:rotate-12 transition" />
               <span className="font-bold">Starter Templates</span>
             </div>
-            <span className="text-[10px] bg-indigo-500/20 px-2 py-0.5 rounded-full font-mono font-bold">
+            <span className="text-[10px] bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded-full font-mono font-bold">
               3 Specs
             </span>
           </button>
@@ -402,15 +402,15 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                   onClick={() => handleSelectDoc(doc)}
                   className={`w-full text-left p-3 rounded-2xl transition border group relative ${
                     isSelected
-                      ? 'bg-indigo-600/20 border-indigo-500 text-slate-100 font-bold shadow-md shadow-indigo-600/10'
-                      : 'bg-slate-950/40 border-slate-800/80 text-slate-300 hover:bg-slate-800/60'
+                      ? 'bg-indigo-50 border-[#4F46E5] text-[#4F46E5] font-bold shadow-sm'
+                      : 'bg-[#F8FAFC] border-[#E2E8F0] text-slate-700 hover:bg-[#F2F4F6]'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <FileText
                         className={`w-4 h-4 flex-shrink-0 ${
-                          isSelected ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'
+                          isSelected ? 'text-[#4F46E5]' : 'text-slate-400 group-hover:text-slate-600'
                         }`}
                       />
                       <span className="text-xs truncate">{doc.title}</span>
@@ -425,12 +425,12 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
             })}
 
             {filteredDocs.length === 0 && (
-              <div className="text-center text-slate-500 py-12 text-xs space-y-2">
-                <FileText className="w-8 h-8 mx-auto text-slate-600 opacity-50" />
+              <div className="text-center text-slate-400 py-12 text-xs space-y-2">
+                <FileText className="w-8 h-8 mx-auto text-slate-300 opacity-80" />
                 <p>No documents found.</p>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-indigo-400 hover:underline font-bold"
+                  className="text-[#4F46E5] hover:underline font-bold"
                 >
                   Upload a document
                 </button>
@@ -441,14 +441,14 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
       )}
 
       {/* Main Document Canvas & Rich Editor */}
-      <div className="flex-1 glass-panel p-6 rounded-3xl border border-slate-800 flex flex-col h-full bg-slate-950/70 shadow-2xl overflow-hidden">
+      <div className="flex-1 p-6 rounded-2xl border border-[#E2E8F0] flex flex-col h-full bg-white shadow-sm overflow-hidden text-[#191C1E]">
         {selectedDoc ? (
           <div className="flex flex-col h-full space-y-4">
             {/* Top Bar: Title & Primary Actions */}
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3 gap-4">
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3 gap-4">
               <input
                 type="text"
-                className="text-2xl font-black bg-transparent text-slate-100 focus:outline-none flex-1 placeholder-slate-600 tracking-tight"
+                className="text-2xl font-bold bg-transparent text-[#191C1E] focus:outline-none flex-1 placeholder-slate-400 tracking-tight"
                 value={docTitle}
                 onChange={(e) => setDocTitle(e.target.value)}
                 placeholder="Document Title..."
@@ -456,13 +456,13 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
 
               <div className="flex items-center gap-2">
                 {/* View Mode Toggle: Edit | Split | Preview */}
-                <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex items-center gap-1 text-xs">
+                <div className="bg-[#F2F4F6] p-1 rounded-xl border border-[#E2E8F0] flex items-center gap-1 text-xs">
                   <button
                     onClick={() => setEditorMode('edit')}
                     className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
                       editorMode === 'edit'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-[#4F46E5] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                     title="Edit Markdown text"
                   >
@@ -473,8 +473,8 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                     onClick={() => setEditorMode('split')}
                     className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
                       editorMode === 'split'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-[#4F46E5] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                     title="Split view: Editor & Live Preview"
                   >
@@ -485,8 +485,8 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                     onClick={() => setEditorMode('preview')}
                     className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
                       editorMode === 'preview'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-[#4F46E5] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                     title="Full formatted preview"
                   >
@@ -496,19 +496,19 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                 </div>
 
                 {/* Export dropdown */}
-                <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1">
+                <div className="flex items-center gap-1 bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl p-1">
                   <button
                     onClick={() => handleExport('md')}
                     title="Download Markdown (.md)"
-                    className="px-2.5 py-1 text-slate-300 hover:text-white text-xs font-semibold hover:bg-slate-800 rounded-lg transition flex items-center gap-1"
+                    className="px-2.5 py-1 text-slate-700 hover:text-[#191C1E] text-xs font-semibold hover:bg-white rounded-lg transition flex items-center gap-1"
                   >
-                    <Download className="w-3 h-3 text-indigo-400" />
+                    <Download className="w-3 h-3 text-[#4F46E5]" />
                     <span>MD</span>
                   </button>
                   <button
                     onClick={() => handleExport('html')}
                     title="Download HTML"
-                    className="px-2 py-1 text-slate-400 hover:text-slate-200 text-xs font-semibold hover:bg-slate-800 rounded-lg transition"
+                    className="px-2 py-1 text-slate-700 hover:text-[#191C1E] text-xs font-semibold hover:bg-white rounded-lg transition"
                   >
                     HTML
                   </button>
@@ -517,17 +517,17 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                 {/* Fullscreen Zen Mode */}
                 <button
                   onClick={() => setIsZenMode(!isZenMode)}
-                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 rounded-xl border border-slate-800 transition"
+                  className="p-2 text-slate-600 hover:text-slate-900 hover:bg-[#F2F4F6] rounded-xl border border-[#E2E8F0] transition"
                   title={isZenMode ? 'Exit Zen Mode' : 'Distraction-free Zen Mode'}
                 >
-                  {isZenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-indigo-400" />}
+                  {isZenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-[#4F46E5]" />}
                 </button>
 
                 {/* Save Button */}
                 <button
                   onClick={handleSaveDoc}
                   disabled={isSaving}
-                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition active:scale-95"
+                  className="flex items-center gap-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>{isSaving ? 'Saving...' : 'Save'}</span>
@@ -542,7 +542,7 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                       setSelectedDoc(null);
                     }
                   }}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-900 rounded-xl border border-slate-800 transition"
+                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-[#E2E8F0] transition"
                   title="Delete Document"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -552,91 +552,84 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
 
             {/* Quick Formatting Ribbon */}
             {editorMode !== 'preview' && (
-              <div className="flex items-center gap-1 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800/80 overflow-x-auto text-xs">
+              <div className="flex items-center gap-1 bg-[#F8FAFC] p-1.5 rounded-2xl border border-[#E2E8F0] overflow-x-auto text-xs">
                 <button
                   onClick={() => insertFormatting('# ', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 font-bold transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-bold transition flex items-center gap-1"
                   title="Heading 1"
                 >
                   <Heading className="w-3 h-3" /> H1
                 </button>
                 <button
                   onClick={() => insertFormatting('## ', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 font-bold transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-bold transition flex items-center gap-1"
                   title="Heading 2"
                 >
                   <Heading className="w-3 h-3" /> H2
                 </button>
                 <button
                   onClick={() => insertFormatting('**', '**')}
-                  className="px-2.5 py-1 hover:bg-slate-800 rounded-lg text-slate-300 font-black transition"
+                  className="px-2.5 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-black transition"
                   title="Bold"
                 >
                   B
                 </button>
                 <button
                   onClick={() => insertFormatting('*', '*')}
-                  className="px-2.5 py-1 hover:bg-slate-800 rounded-lg text-slate-300 italic font-serif transition"
+                  className="px-2.5 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 italic font-serif transition"
                   title="Italic"
                 >
                   I
                 </button>
-                <div className="w-[1px] h-4 bg-slate-800 mx-1" />
+                <div className="w-[1px] h-4 bg-[#E2E8F0] mx-1" />
                 <button
                   onClick={() => insertFormatting('- ', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
                   title="Bullet List"
                 >
                   <List className="w-3 h-3" /> Bullet
                 </button>
                 <button
                   onClick={() => insertFormatting('1. ', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
                   title="Numbered List"
                 >
                   <ListOrdered className="w-3 h-3" /> 1. 2. 3.
                 </button>
                 <button
                   onClick={() => insertFormatting('- [ ] ', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
                   title="Task Checkbox"
                 >
                   <CheckSquare className="w-3 h-3" /> Task
                 </button>
-                <div className="w-[1px] h-4 bg-slate-800 mx-1" />
+                <div className="w-[1px] h-4 bg-[#E2E8F0] mx-1" />
                 <button
                   onClick={() => insertFormatting('`', '`')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 font-mono transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-mono transition flex items-center gap-1"
                   title="Inline Code"
                 >
                   <Code className="w-3 h-3" /> Code
                 </button>
                 <button
                   onClick={() => insertFormatting('```\n', '\n```')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 font-mono transition"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-mono transition"
                   title="Code Block"
                 >
                   {'{ } Block'}
                 </button>
                 <button
                   onClick={() => insertFormatting('> ', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 transition flex items-center gap-1"
+                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
                   title="Blockquote"
                 >
                   <Quote className="w-3 h-3" /> Quote
-                </button>
-                <button
-                  onClick={() => insertFormatting('\n---\n', '')}
-                  className="px-2 py-1 hover:bg-slate-800 rounded-lg text-slate-300 transition"
-                  title="Horizontal Divider"
-                >
-                  Divider
                 </button>
               </div>
             )}
 
             {/* Document Statistics Footer Info */}
-            <div className="flex items-center justify-between text-[11px] text-slate-500 px-2">
+            <div className="flex items-center justify-between text-[11px] text-slate-500 px-2 font-mono">
               <div className="flex items-center gap-3">
                 <span>{wordCount} words</span>
                 <span>•</span>
@@ -646,7 +639,7 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 text-emerald-400 font-mono">
+                <span className="flex items-center gap-1 text-[#10B981] font-bold">
                   <CheckCircle2 className="w-3 h-3" />
                   <span>Auto-saved to Supabase</span>
                 </span>
@@ -664,21 +657,21 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
                     value={docContent}
                     onChange={(e) => setDocContent(e.target.value)}
                     placeholder="Start typing your document, paste notes, or use Markdown formatting..."
-                    className="w-full flex-1 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 text-sm text-slate-100 focus:outline-none focus:border-indigo-500/60 font-sans leading-relaxed resize-none selection:bg-indigo-600/40"
+                    className="w-full flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-6 text-sm text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-sans leading-relaxed resize-none"
                   />
                 </div>
               )}
 
               {/* Formatted Preview */}
               {(editorMode === 'preview' || editorMode === 'split') && (
-                <div className="flex-1 h-full bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 overflow-y-auto font-sans leading-relaxed text-sm text-slate-200">
-                  <div className="prose prose-invert max-w-none space-y-4">
+                <div className="flex-1 h-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-6 overflow-y-auto font-sans leading-relaxed text-sm text-[#191C1E]">
+                  <div className="max-w-none space-y-4">
                     {docContent ? (
-                      <div className="whitespace-pre-wrap font-sans text-slate-200 leading-relaxed">
+                      <div className="whitespace-pre-wrap font-sans text-[#191C1E] leading-relaxed">
                         {docContent}
                       </div>
                     ) : (
-                      <div className="text-slate-600 italic py-12 text-center">
+                      <div className="text-slate-400 italic py-12 text-center">
                         Document is empty. Write in the editor or choose a starter template.
                       </div>
                     )}
@@ -689,12 +682,12 @@ export default function Documents({ workspaceId, documents, onRefreshDocuments }
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-xl shadow-indigo-600/10">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5] shadow-sm">
               <BookOpen className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-extrabold text-lg text-slate-100">No Document Selected</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              <h3 className="font-bold text-lg text-[#191C1E]">No Document Selected</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 Create a new document, choose a template spec, or upload existing notes (.txt, .md, .docx).
               </p>
             </div>

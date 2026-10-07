@@ -152,8 +152,26 @@ async def workspace_events_websocket(
 
     try:
         while True:
-            # Keep connection open and receive client heartbeats/pings
-            _ = await websocket.receive_text()
+            raw_data = await websocket.receive_text()
+            try:
+                payload = json.loads(raw_data)
+            except json.JSONDecodeError:
+                continue
+
+            event_type = payload.get("event") or payload.get("type")
+            # If WebRTC signaling event, broadcast to workspace peers for P2P video stream
+            if event_type in (
+                "video_signal_offer",
+                "video_signal_answer",
+                "video_signal_ice_candidate",
+                "video_signal_join",
+                "video_signal_ready",
+                "transcript_broadcast",
+                "action_item_broadcast",
+            ):
+                payload["sender_id"] = str(user.id)
+                payload["sender_name"] = user.name
+                await ws_manager.broadcast_to_workspace(workspace_id, payload)
     except WebSocketDisconnect:
         pass
     except Exception as exc:

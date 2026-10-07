@@ -1,33 +1,21 @@
 import React, { useState } from 'react';
 import {
-  Bot,
-  Video,
+  LayoutDashboard,
   FileText,
   FolderKanban,
-  Code2,
+  Calendar,
+  Sparkles,
+  Video,
   MessageSquare,
-  FolderOpen,
-  FileBarChart,
+  Code2,
+  DollarSign,
   Settings,
   LogOut,
   Plus,
-  Key,
-  Copy,
-  Check,
-  Search,
-  Sparkles,
-  Calendar,
   User,
   Users,
-  DollarSign,
-  X,
+  ChevronDown,
 } from 'lucide-react';
-import { SOLO_NAV, GROUP_NAV } from '../lib/navigation';
-
-const ICON_MAP = {
-  Bot, Video, FileText, FolderKanban, Code2, MessageSquare, FolderOpen,
-  FileBarChart, Settings, Sparkles, Calendar, DollarSign,
-};
 
 export default function Sidebar({
   activeTab,
@@ -39,173 +27,229 @@ export default function Sidebar({
   onOpenJoinWs,
   onLogout,
   user,
-  onOpenCommandPalette,
-  isOpen,
-  onClose,
 }) {
-  const [copied, setCopied] = useState(false);
+  const [showWsDropdown, setShowWsDropdown] = useState(false);
+
   const isSolo = currentWorkspace?.type === 'personal';
   const personalWorkspaces = workspaces.filter((w) => w.type === 'personal');
   const teamWorkspaces = workspaces.filter((w) => w.type === 'team');
-  const navItems = isSolo ? SOLO_NAV : GROUP_NAV;
-
-  const copyJoinCode = () => {
-    if (currentWorkspace?.join_code) {
-      navigator.clipboard.writeText(currentWorkspace.join_code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
 
   const handleToggleMode = (targetMode) => {
     if (targetMode === 'personal') {
-      if (personalWorkspaces.length > 0) onSelectWorkspace(personalWorkspaces[0].id);
-    } else if (teamWorkspaces.length > 0) {
-      onSelectWorkspace(teamWorkspaces[0].id);
+      if (personalWorkspaces.length > 0) {
+        onSelectWorkspace(personalWorkspaces[0].id);
+      }
     } else {
-      onOpenJoinWs();
+      if (teamWorkspaces.length > 0) {
+        onSelectWorkspace(teamWorkspaces[0].id);
+      } else {
+        onOpenJoinWs();
+      }
     }
   };
 
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'projects', label: 'Kanban', icon: FolderKanban },
+    { id: 'calendar', label: 'Calendar', icon: Calendar },
+    { id: 'ai_agent', label: 'Copilot', icon: Sparkles },
+    { id: 'meetings', label: 'Meetings', icon: Video },
+    ...(isSolo
+      ? [{ id: 'solo_chat', label: 'Solo Chat', icon: MessageSquare }]
+      : [{ id: 'channels', label: 'Channels', icon: MessageSquare }]),
+    { id: 'code', label: 'Code Repos', icon: Code2 },
+  ];
+
   return (
-    <aside
-      className={`fixed lg:static inset-y-0 left-0 z-50 w-72 border-r border-slate-800/80 bg-slate-900/95 backdrop-blur-xl flex flex-col h-screen shadow-2xl transition-transform duration-200 ${
-        isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      }`}
-    >
-      <div className="p-4 border-b border-slate-800/80 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-extrabold text-white text-base shadow-lg shadow-indigo-500/25">
-              N
-            </div>
-            <div>
-              <span className="font-bold text-slate-100 text-lg leading-none block">NexaMind</span>
-              <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Workspace</span>
-            </div>
-          </div>
-          <button onClick={onClose} className="lg:hidden btn-ghost p-1.5" aria-label="Close sidebar">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="bg-slate-950/80 p-1 rounded-xl border border-slate-800/80 grid grid-cols-2 gap-1">
-          <button
-            onClick={() => handleToggleMode('personal')}
-            className={`py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
-              isSolo ? 'bg-solo text-white shadow-glow-solo' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            Solo
-          </button>
-          <button
-            onClick={() => handleToggleMode('team')}
-            className={`py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
-              !isSolo ? 'bg-accent text-white shadow-glow' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            Group ({teamWorkspaces.length})
-          </button>
-        </div>
-
-        <button
-          onClick={onOpenCommandPalette}
-          className="w-full flex items-center justify-between bg-slate-950/60 hover:bg-slate-950 border border-slate-800/80 px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-slate-200 transition group"
+    <nav className="hidden md:flex flex-col py-5 px-4 space-y-2 bg-[#F8FAFC] text-[#191C1E] border-r border-[#E2E8F0] w-[260px] h-full flex-shrink-0 select-none">
+      {/* Workspace Header (Exact Stitch Spec) */}
+      <div className="relative mb-3">
+        <div
+          onClick={() => setShowWsDropdown(!showWsDropdown)}
+          className="flex items-center gap-3 p-2 rounded-xl hover:bg-[#ECEEF0] transition cursor-pointer group"
         >
-          <div className="flex items-center gap-2">
-            <Search className="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400" />
-            <span>Quick search...</span>
-          </div>
-          <kbd className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-500">⌘K</kbd>
-        </button>
-
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="font-semibold text-slate-500 uppercase tracking-wider">
-              {isSolo ? 'Personal' : 'Team'}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button onClick={onOpenJoinWs} className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-0.5">
-                <Key className="w-2.5 h-2.5" /> Join
-              </button>
-              <button onClick={onOpenCreateWs} className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-0.5">
-                <Plus className="w-2.5 h-2.5" /> New
-              </button>
-            </div>
-          </div>
-          <select
-            className="input-base py-2 text-xs font-medium"
-            value={currentWorkspace?.id || ''}
-            onChange={(e) => onSelectWorkspace(e.target.value)}
+          <div
+            className={`w-10 h-10 rounded-lg flex items-center justify-center border shrink-0 ${
+              isSolo
+                ? 'bg-sky-50 text-sky-600 border-sky-200'
+                : 'bg-purple-50 text-[#8B5CF6] border-purple-200'
+            }`}
           >
-            {personalWorkspaces.length > 0 && (
-              <optgroup label="Personal">
-                {personalWorkspaces.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
-                ))}
-              </optgroup>
-            )}
-            {teamWorkspaces.length > 0 && (
-              <optgroup label="Team">
-                {teamWorkspaces.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-          {!isSolo && currentWorkspace?.join_code && (
-            <div className="flex items-center justify-between text-xs bg-slate-950/80 px-2.5 py-2 rounded-xl border border-slate-800/80 text-slate-400">
-              <span className="text-[10px] text-slate-500">Join code</span>
-              <button onClick={copyJoinCode} className="flex items-center gap-1 font-mono font-bold text-indigo-400 hover:text-indigo-300">
-                {currentWorkspace.join_code}
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            {isSolo ? <User className="w-5 h-5" /> : <Users className="w-5 h-5" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-extrabold text-[#191C1E] truncate tracking-tight">
+              {currentWorkspace?.name || (isSolo ? 'Solo Account' : 'Engineering Hub')}
+            </h2>
+            <p className="text-xs text-slate-500 font-mono">
+              {isSolo ? 'Solo Environment' : 'Group Workspace'}
+            </p>
+          </div>
+          <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-slate-700 transition" />
+        </div>
+
+        {/* Dropdown for workspace switching */}
+        {showWsDropdown && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#E2E8F0] rounded-xl p-2 shadow-xl z-50 space-y-1.5">
+            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 px-2 py-1">
+              Select Workspace
+            </div>
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {workspaces.map((ws) => (
+                <button
+                  key={ws.id}
+                  onClick={() => {
+                    onSelectWorkspace(ws.id);
+                    setShowWsDropdown(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition ${
+                    ws.id === currentWorkspace?.id
+                      ? 'bg-indigo-50 text-[#4F46E5] font-bold border border-indigo-200'
+                      : 'text-slate-700 hover:bg-[#F2F4F6]'
+                  }`}
+                >
+                  <span className="truncate">{ws.name}</span>
+                  <span
+                    className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ${
+                      ws.type === 'personal'
+                        ? 'bg-sky-100 text-sky-700'
+                        : 'bg-purple-100 text-purple-700'
+                    }`}
+                  >
+                    {ws.type}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="border-t border-[#E2E8F0] pt-1.5 flex gap-1">
+              <button
+                onClick={() => {
+                  setShowWsDropdown(false);
+                  onOpenCreateWs();
+                }}
+                className="flex-1 text-center py-1 text-[11px] font-bold text-[#4F46E5] hover:bg-indigo-50 rounded-lg transition"
+              >
+                + Create
+              </button>
+              <button
+                onClick={() => {
+                  setShowWsDropdown(false);
+                  onOpenJoinWs();
+                }}
+                className="flex-1 text-center py-1 text-[11px] font-bold text-slate-700 hover:bg-[#F2F4F6] rounded-lg transition"
+              >
+                Join Code
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
+      {/* Primary Action Button (Exact Stitch Spec) */}
+      <button
+        onClick={() => {
+          if (!isSolo) onTabChange('projects');
+          else onTabChange('documents');
+        }}
+        style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
+        className="w-full mb-4 btn-primary-indigo text-white text-xs font-semibold py-2.5 rounded-xl shadow-sm hover:opacity-95 transition-all flex items-center justify-center gap-2"
+      >
+        <Plus className="w-4 h-4 text-white" />
+        <span className="font-bold text-white">{isSolo ? 'New Draft' : 'New Sprint'}</span>
+      </button>
+
+      {/* Navigation Links */}
+      <div className="flex-1 flex flex-col space-y-1 overflow-y-auto">
         {navItems.map((item) => {
-          const Icon = ICON_MAP[item.icon] || Bot;
+          const Icon = item.icon;
           const isActive = activeTab === item.id;
+
           return (
             <button
               key={item.id}
               onClick={() => onTabChange(item.id)}
-              className={`nav-item ${
+              style={isActive ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : {}}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs transition-all duration-150 text-left ${
                 isActive
-                  ? isSolo
-                    ? 'bg-solo-muted text-emerald-300 border border-emerald-500/30'
-                    : 'bg-accent-muted text-indigo-300 border border-indigo-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'
+                  ? 'nav-item-active text-white font-bold shadow-sm'
+                  : 'text-slate-700 hover:bg-[#ECEEF0] hover:text-[#191C1E]'
               }`}
             >
-              <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? (isSolo ? 'text-solo' : 'text-indigo-400') : ''}`} />
-              <span className="truncate">{item.label}</span>
+              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+              <span className={`font-medium text-xs ${isActive ? 'text-white font-bold' : 'text-slate-700'}`}>
+                {item.label}
+              </span>
             </button>
           );
         })}
-      </nav>
-
-      <div className="p-3 border-t border-slate-800/80">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-200 text-xs flex-shrink-0">
-              {user?.name?.[0]?.toUpperCase() || 'U'}
-            </div>
-            <div className="min-w-0">
-              <span className="text-xs font-semibold text-slate-200 block truncate">{user?.name || 'User'}</span>
-              <span className="text-[10px] text-slate-500 block truncate">{user?.email}</span>
-            </div>
-          </div>
-          <button onClick={onLogout} title="Sign out" className="btn-ghost p-2 text-slate-400 hover:text-rose-400 flex-shrink-0">
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
       </div>
-    </aside>
+
+      {/* Mode Switcher Pill */}
+      <div className="p-1 bg-[#ECEEF0] rounded-xl flex items-center gap-1">
+        <button
+          onClick={() => handleToggleMode('personal')}
+          className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition ${
+            isSolo
+              ? 'bg-white text-sky-600 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <User className="w-3 h-3" /> Solo
+        </button>
+        <button
+          onClick={() => handleToggleMode('team')}
+          className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition ${
+            !isSolo
+              ? 'bg-white text-purple-600 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Users className="w-3 h-3" /> Group
+        </button>
+      </div>
+
+      {/* Bottom Pinned Links (Exact Stitch Spec) */}
+      <div className="mt-auto border-t border-[#E2E8F0] pt-3 space-y-1">
+        <button
+          onClick={() => onTabChange('finance')}
+          style={activeTab === 'finance' ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : {}}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs transition text-left ${
+            activeTab === 'finance'
+              ? 'nav-item-active text-white font-bold'
+              : 'text-slate-700 hover:bg-[#ECEEF0] hover:text-[#191C1E]'
+          }`}
+        >
+          <DollarSign className={`w-4 h-4 ${activeTab === 'finance' ? 'text-white' : 'text-slate-500'}`} />
+          <span className={`font-medium ${activeTab === 'finance' ? 'text-white font-bold' : 'text-slate-700'}`}>
+            Finance
+          </span>
+        </button>
+
+        <button
+          onClick={() => onTabChange('settings')}
+          style={activeTab === 'settings' ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : {}}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs transition text-left ${
+            activeTab === 'settings'
+              ? 'nav-item-active text-white font-bold'
+              : 'text-slate-700 hover:bg-[#ECEEF0] hover:text-[#191C1E]'
+          }`}
+        >
+          <Settings className={`w-4 h-4 ${activeTab === 'settings' ? 'text-white' : 'text-slate-500'}`} />
+          <span className={`font-medium ${activeTab === 'settings' ? 'text-white font-bold' : 'text-slate-700'}`}>
+            Settings
+          </span>
+        </button>
+
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs text-rose-600 hover:bg-rose-50 transition text-left"
+        >
+          <LogOut className="w-4 h-4 text-rose-500" />
+          <span className="font-medium">Logout</span>
+        </button>
+      </div>
+    </nav>
   );
 }

@@ -1,14 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Menu, X } from 'lucide-react';
+import {
+  Bot,
+  Search,
+  Video,
+  Bell,
+  HelpCircle,
+  Plus,
+  User,
+  Users,
+  Sparkles,
+  Calendar,
+} from 'lucide-react';
 import {
   api,
   getAuthToken,
   setAuthToken,
+  getSavedWorkspaceId,
   setSavedWorkspaceId,
 } from './api';
-import { useToast } from './context/ToastContext';
-import { getTabLabel } from './lib/navigation';
-import AuthPage from './pages/AuthPage';
+
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Meetings from './components/Meetings';
@@ -23,20 +33,21 @@ import SoloChat from './components/SoloChat';
 import CalendarView from './components/CalendarView';
 import AiReminderToast from './components/AiReminderToast';
 import FinanceTracker from './components/FinanceTracker';
-import FileManager from './components/FileManager';
-import ReportSynthesizer from './components/ReportSynthesizer';
-import { Modal } from './components/ui';
 
 export default function App() {
-  const { error: toastError, success: toastSuccess } = useToast();
-
+  // Auth state
   const [token, setToken] = useState(getAuthToken());
   const [user, setUser] = useState(null);
-  const [authMode, setAuthMode] = useState('login');
-  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authForm, setAuthForm] = useState({
+    name: '',
+    email: 'admin@nexamind.app',
+    password: 'password123',
+  });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
+  // Workspaces state
   const [workspaces, setWorkspaces] = useState([]);
   const [currentWorkspace, setCurrentWorkspace] = useState(null);
   const [showCreateWsModal, setShowCreateWsModal] = useState(false);
@@ -44,10 +55,13 @@ export default function App() {
   const [newWsName, setNewWsName] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
 
+  // Command Palette State
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Active module navigation
   const [activeTab, setActiveTab] = useState('dashboard');
 
+  // Module data
   const [tasks, setTasks] = useState([]);
   const [channels, setChannels] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -59,8 +73,7 @@ export default function App() {
   const [reports, setReports] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
 
-  const isSolo = currentWorkspace?.type === 'personal';
-
+  // Setup global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -72,12 +85,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Load user data on startup / login
   useEffect(() => {
-    if (token) loadInitialData();
+    if (token) {
+      loadInitialData();
+    }
   }, [token]);
 
+  // Load module data when current workspace changes
   useEffect(() => {
-    if (currentWorkspace) loadWorkspaceData(currentWorkspace.id);
+    if (currentWorkspace) {
+      loadWorkspaceData(currentWorkspace.id);
+    }
   }, [currentWorkspace, activeTab]);
 
   const loadInitialData = async () => {
@@ -86,10 +105,16 @@ export default function App() {
       setUser(userData);
       const wsList = await api.listWorkspaces();
       setWorkspaces(wsList);
-      const personalWs = wsList.find((w) => w.type === 'personal') || wsList[0];
-      if (personalWs) {
-        setCurrentWorkspace(personalWs);
-        setSavedWorkspaceId(personalWs.id);
+
+      // Prioritize saved workspace ID, otherwise default to Team/Group workspace
+      const savedId = getSavedWorkspaceId();
+      const savedWs = wsList.find((w) => w.id === savedId);
+      const teamWs = wsList.find((w) => w.type === 'team' || w.type === 'group');
+      const personalWs = wsList.find((w) => w.type === 'personal');
+      const targetWs = savedWs || teamWs || personalWs || wsList[0];
+      if (targetWs) {
+        setCurrentWorkspace(targetWs);
+        setSavedWorkspaceId(targetWs.id);
       }
     } catch (err) {
       console.error('Initial load error', err);
@@ -112,23 +137,18 @@ export default function App() {
         setSessions(sList);
         setDocuments(dList);
         setChannels(cList);
-      } else if (activeTab === 'meetings') {
-        setSessions(await api.listSessions(wsId));
       } else if (activeTab === 'documents') {
-        setDocuments(await api.listDocuments(wsId));
+        const dList = await api.listDocuments(wsId).catch(() => []);
+        setDocuments(dList);
       } else if (activeTab === 'projects') {
-        setTasks(await api.listTasks(wsId));
-      } else if (activeTab === 'code') {
-        setRepos(await api.listRepos(wsId));
-      } else if (activeTab === 'channels') {
-        setChannels(await api.listChannels(wsId));
-      } else if (activeTab === 'calendar') {
-        const [cEvents, sList] = await Promise.all([
-          api.listCalendarEvents(wsId).catch(() => []),
-          api.listSessions(wsId).catch(() => []),
-        ]);
-        setCalendarEvents(cEvents);
+        const tList = await api.listTasks(wsId).catch(() => []);
+        setTasks(tList);
+      } else if (activeTab === 'meetings') {
+        const sList = await api.listSessions(wsId).catch(() => []);
         setSessions(sList);
+      } else if (activeTab === 'channels') {
+        const cList = await api.listChannels(wsId).catch(() => []);
+        setChannels(cList);
       } else if (activeTab === 'finance') {
         const [fSum, tList] = await Promise.all([
           api.getFinanceSummary(wsId).catch(() => null),
@@ -136,66 +156,21 @@ export default function App() {
         ]);
         setFinanceSummary(fSum);
         setTransactions(tList);
-      } else if (activeTab === 'files') {
-        setFilesList(await api.listFiles(wsId).catch(() => []));
-      } else if (activeTab === 'reports') {
-        const [rList, sList, dList] = await Promise.all([
-          api.listReports(wsId).catch(() => []),
-          api.listSessions(wsId).catch(() => []),
-          api.listDocuments(wsId).catch(() => []),
-        ]);
-        setReports(rList);
-        setSessions(sList);
-        setDocuments(dList);
-      } else if (activeTab === 'settings') {
-        const wsDetail = await api.getWorkspace(wsId);
-        setCurrentWorkspace(wsDetail);
+      } else if (activeTab === 'code') {
+        const rList = await api.listRepos(wsId).catch(() => []);
+        setRepos(rList);
       }
     } catch (err) {
-      console.error('Error fetching workspace data', err);
+      console.error('Error loading module data', err);
     }
-  };
-
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    setAuthLoading(true);
-    try {
-      let res;
-      if (authMode === 'login') {
-        res = await api.login(authForm.email, authForm.password);
-      } else {
-        res = await api.register(authForm.name, authForm.email, authForm.password);
-      }
-      setAuthToken(res.access_token);
-      setToken(res.access_token);
-    } catch (err) {
-      setAuthError(err.message || 'Authentication failed');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
-    setAuthToken('');
-    setToken('');
-    setSavedWorkspaceId('');
-    setUser(null);
-    setCurrentWorkspace(null);
-    setActiveTab('dashboard');
   };
 
   const handleSelectWorkspace = (wsId) => {
-    const ws = workspaces.find((w) => w.id === wsId);
-    if (ws) {
-      setCurrentWorkspace(ws);
-      setSavedWorkspaceId(ws.id);
+    const targetWs = workspaces.find((w) => w.id === wsId);
+    if (targetWs) {
+      setCurrentWorkspace(targetWs);
+      setSavedWorkspaceId(targetWs.id);
     }
-  };
-
-  const handleTabChange = (tab) => {
-    setActiveTab(tab);
-    setSidebarOpen(false);
   };
 
   const handleCreateWorkspace = async (e) => {
@@ -208,9 +183,8 @@ export default function App() {
       setSavedWorkspaceId(created.id);
       setShowCreateWsModal(false);
       setNewWsName('');
-      toastSuccess('Team workspace created');
     } catch (err) {
-      toastError(err.message);
+      alert(err.message || 'Could not create workspace');
     }
   };
 
@@ -218,170 +192,371 @@ export default function App() {
     e.preventDefault();
     if (!joinCodeInput.trim()) return;
     try {
-      const joined = await api.joinWorkspace(joinCodeInput.trim());
-      setWorkspaces((prev) => [...prev, joined]);
+      const joined = await api.joinWorkspace(joinCodeInput.trim().toUpperCase());
+      const wsList = await api.listWorkspaces();
+      setWorkspaces(wsList);
       setCurrentWorkspace(joined);
       setSavedWorkspaceId(joined.id);
       setShowJoinWsModal(false);
       setJoinCodeInput('');
-      toastSuccess(`Joined ${joined.name}`);
     } catch (err) {
-      toastError(err.message);
+      alert(err.message || 'Invalid or expired join code');
     }
   };
 
-  if (!token || !user) {
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      if (authMode === 'register') {
+        await api.register(authForm.name, authForm.email, authForm.password);
+      }
+      const loginRes = await api.login(authForm.email, authForm.password);
+      setAuthToken(loginRes.access_token);
+      setToken(loginRes.access_token);
+    } catch (err) {
+      setAuthError(err.message || 'Authentication failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setAuthToken(null);
+    setToken(null);
+    setUser(null);
+    setWorkspaces([]);
+    setCurrentWorkspace(null);
+  };
+
+  // If not logged in, render clean Auth Screen
+  if (!token) {
     return (
-      <AuthPage
-        authMode={authMode}
-        setAuthMode={(mode) => { setAuthMode(mode); setAuthError(''); }}
-        authForm={authForm}
-        setAuthForm={setAuthForm}
-        authError={authError}
-        authLoading={authLoading}
-        onSubmit={handleAuthSubmit}
-      />
+      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-4 font-sans text-[#191C1E]">
+        <div className="w-full max-w-md bg-white border border-[#E2E8F0] rounded-2xl shadow-xl p-8 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-[#4F46E5]">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-extrabold text-[#191C1E] tracking-tight">
+              NexaMind 2.0
+            </h1>
+            <p className="text-xs text-slate-500 font-mono">
+              Autonomous AI Workspace & Engineering Platform
+            </p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            {authError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
+                {authError}
+              </div>
+            )}
+
+            {authMode === 'register' && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Alex Mitchell"
+                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] outline-none transition font-sans"
+                  value={authForm.name}
+                  onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700">Email Address</label>
+              <input
+                type="email"
+                required
+                placeholder="name@nexamind.app"
+                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] outline-none transition font-sans"
+                value={authForm.email}
+                onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700">Password</label>
+              <input
+                type="password"
+                required
+                placeholder="••••••••"
+                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] outline-none transition font-sans"
+                value={authForm.password}
+                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2"
+            >
+              {authLoading
+                ? 'Authenticating...'
+                : authMode === 'login'
+                ? 'Sign In to Workspace'
+                : 'Create Account & Launch Solo Space'}
+            </button>
+          </form>
+
+          <div className="text-center pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(authMode === 'login' ? 'register' : 'login');
+                setAuthError('');
+              }}
+              className="text-xs text-[#4F46E5] hover:underline font-semibold"
+            >
+              {authMode === 'login'
+                ? "Don't have an account? Register"
+                : 'Already have an account? Sign In'}
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
-  const refresh = () => loadWorkspaceData(currentWorkspace?.id);
-
   return (
-    <div className="flex h-screen bg-surface text-slate-100 overflow-hidden">
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <Sidebar
-        workspaces={workspaces}
-        currentWorkspace={currentWorkspace}
-        onSelectWorkspace={handleSelectWorkspace}
-        onOpenCreateWs={() => setShowCreateWsModal(true)}
-        onOpenJoinWs={() => setShowJoinWsModal(true)}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        user={user}
-        onLogout={handleLogout}
-        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
-
-      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <header className="h-14 lg:h-16 border-b border-slate-800/80 px-4 lg:px-8 flex items-center justify-between bg-slate-900/50 backdrop-blur-md flex-shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden btn-ghost p-2 -ml-1"
-              aria-label="Open menu"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <div className="min-w-0">
-              <h1 className="font-bold text-sm lg:text-base text-slate-100 truncate">
-                {getTabLabel(activeTab, currentWorkspace?.type)}
-              </h1>
-              <p className="text-xs text-slate-500 truncate hidden sm:block">
-                {currentWorkspace?.name}
-              </p>
-            </div>
-            <span
-              className={`hidden sm:inline-flex text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${
-                isSolo
-                  ? 'bg-solo-muted text-solo border-emerald-500/25'
-                  : 'bg-accent-muted text-indigo-300 border-indigo-500/25'
-              }`}
-            >
-              {isSolo ? 'Solo' : 'Group'}
-            </span>
+    <div className="h-screen w-full flex flex-col bg-[#F8FAFC] text-[#191C1E] font-sans antialiased overflow-hidden">
+      {/* TopNavBar (Exact Stitch Specification) */}
+      <header className="fixed top-0 left-0 w-full z-40 flex justify-between items-center px-6 h-16 bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] shadow-sm">
+        <div className="flex items-center gap-6">
+          {/* Brand Logo & Title */}
+          <div className="flex items-center gap-2 text-[#191C1E] font-extrabold text-base tracking-tight">
+            <span className="text-[#4F46E5] text-lg font-bold">⚡</span>
+            <span>NexaMind 2.0</span>
           </div>
 
-          <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
+          {/* Global Workspace Search (Stitch Spec) */}
+          <div className="relative hidden md:block">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              onClick={() => setIsCommandPaletteOpen(true)}
+              placeholder="Search across workspace..."
+              className="pl-9 pr-4 py-1.5 bg-[#F2F4F6] border-b border-[#E2E8F0] focus:border-[#4F46E5] focus:outline-none text-xs w-64 font-mono rounded-none transition-colors text-[#191C1E] placeholder-slate-400 cursor-pointer"
+            />
+          </div>
+        </div>
+
+        {/* Top Right Action Tools */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setActiveTab('meetings')}
+              title="Start Video Meeting"
+              className="text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
+            >
+              <Video className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setActiveTab('calendar')}
+              title="Notifications"
+              className="text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors relative"
+            >
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#F43F5E] rounded-full"></span>
+            </button>
             <button
               onClick={() => setIsCommandPaletteOpen(true)}
-              className="hidden sm:flex items-center gap-2 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-slate-200 transition"
+              title="Help & Shortcuts"
+              className="text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
             >
-              <Search className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Search</span>
-              <kbd className="hidden md:inline text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-500">
-                ⌘K
-              </kbd>
+              <HelpCircle className="w-4 h-4" />
             </button>
-            <span className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Online
-            </span>
           </div>
-        </header>
 
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8">
-          {activeTab === 'dashboard' && (
-            <Dashboard
-              workspaceId={currentWorkspace?.id}
-              isSolo={isSolo}
-              tasks={tasks}
-              channels={channels}
-              sessions={sessions}
-              financeSummary={financeSummary}
-              documents={documents}
-              onNavigateTab={handleTabChange}
-            />
-          )}
-          {activeTab === 'solo_chat' && (
-            <SoloChat workspaceId={currentWorkspace?.id} user={user} onNavigateTab={handleTabChange} onRefreshAll={refresh} />
-          )}
-          {activeTab === 'calendar' && (
-            <CalendarView workspaceId={currentWorkspace?.id} user={user} sessions={sessions} onRefreshSessions={refresh} />
-          )}
-          {activeTab === 'ai_agent' && (
-            <div className="h-full max-w-5xl mx-auto">
-              <AiAssistant
-                workspaceId={currentWorkspace?.id}
-                onNavigateTab={handleTabChange}
-                onRefreshAll={refresh}
-                onSwitchWorkspace={(wsId) => {
-                  const target = workspaces.find((w) => w.id === wsId);
-                  if (target) handleSelectWorkspace(target.id);
-                }}
-                variant="full"
-              />
-            </div>
-          )}
-          {activeTab === 'meetings' && (
-            <Meetings workspaceId={currentWorkspace?.id} sessions={sessions} onRefreshSessions={refresh} onRefreshDocuments={refresh} />
-          )}
-          {activeTab === 'documents' && (
-            <Documents workspaceId={currentWorkspace?.id} documents={documents} onRefreshDocuments={refresh} />
-          )}
-          {activeTab === 'projects' && (
-            <KanbanBoard workspaceId={currentWorkspace?.id} tasks={tasks} onRefreshTasks={refresh} />
-          )}
-          {activeTab === 'code' && (
-            <CodeWorkspace workspaceId={currentWorkspace?.id} repos={repos} onRefreshRepos={refresh} />
-          )}
-          {activeTab === 'channels' && (
-            <Channels workspaceId={currentWorkspace?.id} channels={channels} onRefreshChannels={refresh} />
-          )}
-          {activeTab === 'finance' && (
-            <FinanceTracker workspaceId={currentWorkspace?.id} financeSummary={financeSummary} transactions={transactions} onRefreshFinance={refresh} />
-          )}
-          {activeTab === 'files' && (
-            <FileManager workspaceId={currentWorkspace?.id} filesList={filesList} onRefreshFiles={refresh} />
-          )}
-          {activeTab === 'reports' && (
-            <ReportSynthesizer workspaceId={currentWorkspace?.id} reports={reports} sessions={sessions} documents={documents} onRefreshReports={refresh} onRefreshDocuments={refresh} />
-          )}
-          {activeTab === 'settings' && (
-            <WorkspaceSettings workspace={currentWorkspace} user={user} onRefreshWorkspace={() => loadInitialData()} />
-          )}
+          <button
+            onClick={() => {
+              if (currentWorkspace?.join_code) {
+                navigator.clipboard.writeText(currentWorkspace.join_code);
+                alert(`Join Code copied: ${currentWorkspace.join_code}`);
+              } else {
+                setShowJoinWsModal(true);
+              }
+            }}
+            className="text-xs font-mono font-medium bg-transparent border border-[#E2E8F0] text-[#191C1E] px-4 py-1.5 rounded hover:bg-[#F2F4F6] transition-colors"
+          >
+            Join Code
+          </button>
+
+          <button
+            onClick={() => setShowCreateWsModal(true)}
+            className="text-xs font-semibold bg-[#4F46E5] text-white px-4 py-1.5 rounded hover:opacity-90 transition-opacity shadow-sm"
+          >
+            Invite Team
+          </button>
+
+          {/* User Profile Avatar */}
+          <div
+            onClick={() => setActiveTab('settings')}
+            className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden border border-[#E2E8F0] ml-1 flex items-center justify-center font-bold text-xs text-[#4F46E5] cursor-pointer hover:ring-2 hover:ring-[#4F46E5]/30 transition"
+          >
+            {user?.name ? user.name.slice(0, 2).toUpperCase() : 'EX'}
+          </div>
         </div>
-      </main>
+      </header>
 
-      <AiReminderToast workspaceId={currentWorkspace?.id} onEventCreated={refresh} onNavigateCalendar={() => handleTabChange('calendar')} />
+      {/* Main Workspace Frame */}
+      <div className="flex flex-1 pt-16 overflow-hidden h-full w-full">
+        {/* SideNavBar */}
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          workspaces={workspaces}
+          currentWorkspace={currentWorkspace}
+          onSelectWorkspace={handleSelectWorkspace}
+          onOpenCreateWs={() => setShowCreateWsModal(true)}
+          onOpenJoinWs={() => setShowJoinWsModal(true)}
+          onLogout={handleLogout}
+          user={user}
+        />
 
+        {/* Canvas Area */}
+        <main className="flex-1 flex overflow-hidden bg-[#F8FAFC] relative">
+          <div className="flex-1 p-6 md:p-8 overflow-y-auto h-full">
+            {activeTab === 'dashboard' && (
+              <Dashboard
+                workspaceId={currentWorkspace?.id}
+                user={user}
+                tasks={tasks}
+                channels={channels}
+                sessions={sessions}
+                financeSummary={financeSummary}
+                documents={documents}
+                onNavigateTab={setActiveTab}
+                onRefreshAll={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'solo_chat' && (
+              <SoloChat
+                workspaceId={currentWorkspace?.id}
+                user={user}
+                onNavigateTab={setActiveTab}
+                onRefreshAll={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'calendar' && (
+              <CalendarView
+                workspaceId={currentWorkspace?.id}
+                user={user}
+                sessions={sessions}
+                onRefreshSessions={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'ai_agent' && (
+              <div className="h-full max-w-5xl mx-auto">
+                <AiAssistant
+                  workspaceId={currentWorkspace?.id}
+                  onNavigateTab={setActiveTab}
+                  onRefreshAll={() => loadWorkspaceData(currentWorkspace?.id)}
+                  onSwitchWorkspace={(wsId) => {
+                    const target = workspaces.find((w) => w.id === wsId);
+                    if (target) handleSelectWorkspace(target.id);
+                  }}
+                />
+              </div>
+            )}
+
+            {activeTab === 'meetings' && (
+              <Meetings
+                workspaceId={currentWorkspace?.id}
+                workspace={currentWorkspace}
+                workspaces={workspaces}
+                onSelectWorkspace={handleSelectWorkspace}
+                user={user}
+                sessions={sessions}
+                onRefreshSessions={() => loadWorkspaceData(currentWorkspace?.id)}
+                onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'documents' && (
+              <Documents
+                workspaceId={currentWorkspace?.id}
+                documents={documents}
+                onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'projects' && (
+              <KanbanBoard
+                workspaceId={currentWorkspace?.id}
+                tasks={tasks}
+                onRefreshTasks={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'code' && (
+              <CodeWorkspace
+                workspaceId={currentWorkspace?.id}
+                repos={repos}
+                onRefreshRepos={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'channels' && (
+              <Channels
+                workspaceId={currentWorkspace?.id}
+                workspace={currentWorkspace}
+                user={user}
+                channels={channels}
+                onRefreshChannels={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'finance' && (
+              <FinanceTracker
+                workspaceId={currentWorkspace?.id}
+                financeSummary={financeSummary}
+                transactions={transactions}
+                onRefreshFinance={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'settings' && (
+              <WorkspaceSettings
+                workspace={currentWorkspace}
+                user={user}
+                onRefreshWorkspace={() => loadInitialData()}
+              />
+            )}
+          </div>
+        </main>
+      </div>
+
+      {/* Floating AI Autonomous Reminder Toast */}
+      <AiReminderToast
+        workspaceId={currentWorkspace?.id}
+        onEventCreated={() => loadWorkspaceData(currentWorkspace?.id)}
+        onNavigateCalendar={() => setActiveTab('calendar')}
+      />
+
+      {/* Floating AI Copilot FAB (Stitch Spec) */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <button
+          onClick={() => setActiveTab('ai_agent')}
+          title="Open Copilot"
+          className="bg-white hover:bg-slate-50 text-[#4F46E5] rounded-full p-3.5 shadow-xl hover:shadow-2xl hover:-translate-y-1 transition-all duration-200 flex items-center justify-center relative border border-[#E2E8F0]"
+        >
+          <Bot className="w-6 h-6 text-[#8B5CF6]" />
+          <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-[#8B5CF6] rounded-full border-2 border-white ai-pulse"></span>
+        </button>
+      </div>
+
+      {/* Global Command Palette */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
@@ -391,44 +566,78 @@ export default function App() {
         channels={channels}
         repos={repos}
         reports={reports}
-        onNavigate={handleTabChange}
+        onNavigate={(tab) => setActiveTab(tab)}
       />
 
-      <Modal open={showCreateWsModal} onClose={() => setShowCreateWsModal(false)} title="Create Team Workspace" size="sm">
-        <form onSubmit={handleCreateWorkspace} className="space-y-4">
-          <input
-            type="text"
-            required
-            autoFocus
-            placeholder="e.g. Core Engineering Team"
-            className="input-base"
-            value={newWsName}
-            onChange={(e) => setNewWsName(e.target.value)}
-          />
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setShowCreateWsModal(false)} className="btn-ghost">Cancel</button>
-            <button type="submit" className="btn-primary">Create Space</button>
+      {/* Create Team Workspace Modal */}
+      {showCreateWsModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-[#191C1E]">Create Team Workspace</h3>
+            <form onSubmit={handleCreateWorkspace} className="space-y-4">
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="e.g. Core Engineering Team"
+                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                value={newWsName}
+                onChange={(e) => setNewWsName(e.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateWsModal(false)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30"
+                >
+                  Create Space
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-      </Modal>
+        </div>
+      )}
 
-      <Modal open={showJoinWsModal} onClose={() => setShowJoinWsModal(false)} title="Join Team Workspace" size="sm">
-        <form onSubmit={handleJoinWorkspace} className="space-y-4">
-          <input
-            type="text"
-            required
-            autoFocus
-            placeholder="Enter 8-digit join code"
-            className="input-base uppercase tracking-widest font-mono text-center"
-            value={joinCodeInput}
-            onChange={(e) => setJoinCodeInput(e.target.value)}
-          />
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setShowJoinWsModal(false)} className="btn-ghost">Cancel</button>
-            <button type="submit" className="btn-primary">Join Space</button>
+      {/* Join Team Workspace Modal */}
+      {showJoinWsModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-[#191C1E]">Join Team Workspace</h3>
+            <form onSubmit={handleJoinWorkspace} className="space-y-4">
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="ENTER 8-DIGIT JOIN CODE"
+                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] uppercase tracking-widest font-mono text-center focus:outline-none focus:border-[#4F46E5]"
+                value={joinCodeInput}
+                onChange={(e) => setJoinCodeInput(e.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowJoinWsModal(false)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30"
+                >
+                  Join Space
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-      </Modal>
+        </div>
+      )}
     </div>
   );
 }

@@ -64,6 +64,14 @@ async def auth_error_handler(_: Request, exc: AuthError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    import traceback
+    traceback.print_exc()
+    logger.error("Unhandled Exception: %s", exc, exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": str(exc), "type": type(exc).__name__})
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Bot,
   Send,
   Sparkles,
   CheckCircle2,
@@ -9,43 +8,36 @@ import {
   DollarSign,
   Code2,
   MessageSquare,
-  FileBarChart,
   Mic,
   MicOff,
-  Maximize2,
-  Minimize2,
-  ArrowRight,
-  Zap,
-  Check,
-  Play,
   RotateCcw,
-  Terminal,
   Calendar,
   Trash2,
   ExternalLink,
+  Bot,
+  User,
+  ArrowRight,
+  Terminal,
 } from 'lucide-react';
 import { api } from '../api';
-import { useToast } from '../context/ToastContext';
 
 export default function AiAssistant({
   workspaceId,
   onNavigateTab,
   onRefreshAll,
   onSwitchWorkspace,
-  variant = 'full',
 }) {
-  const { error: toastError, confirm } = useToast();
   const defaultGreeting = {
     role: 'assistant',
     content:
-      'Hello! I am your **NexaMind Autonomous Omni-Agent (Chief AI Officer)**.\n' +
-      'I have full execution authority over your workspace. You can tell me to:\n\n' +
-      '- 📄 *Create, edit & read files & documents*\n' +
-      '- 📊 *Create & organize sprint tasks on Kanban*\n' +
+      'Hello! I am your **NexaMind Autonomous Copilot**.\n\n' +
+      'I have direct database and workspace authority. You can tell me in natural language to:\n' +
+      '- 📄 *Create or edit files & documents in Supabase*\n' +
+      '- 📊 *Create, assign & update tasks on Kanban*\n' +
       '- 📅 *Schedule meetings & calendar reminders*\n' +
-      '- 💬 *Send announcements & share files to channels*\n' +
-      '- 💻 *Create repositories, log commits & manage issues*\n\n' +
-      'What would you like me to execute for you today?',
+      '- 💬 *Broadcast messages & share docs to channels*\n' +
+      '- 🔄 *Switch between Solo & Group workspaces*\n\n' +
+      'What would you like to execute next?',
     tool_calls: [],
     timestamp: new Date().toISOString(),
   };
@@ -59,7 +51,7 @@ export default function AiAssistant({
   const messagesEndRef = useRef(null);
   const speechRecognitionRef = useRef(null);
 
-  // Load chat history from localStorage for this workspace
+  // Load chat history
   useEffect(() => {
     if (!workspaceId) return;
     const storageKey = `nexamind_ai_chat_${workspaceId}`;
@@ -78,7 +70,7 @@ export default function AiAssistant({
     setMessages([defaultGreeting]);
   }, [workspaceId]);
 
-  // Save chat history to localStorage whenever messages update
+  // Save chat history
   useEffect(() => {
     if (!workspaceId || messages.length === 0) return;
     const storageKey = `nexamind_ai_chat_${workspaceId}`;
@@ -89,20 +81,19 @@ export default function AiAssistant({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activePlanSteps]);
 
-  // Clear chat history
-  const handleClearChat = async () => {
-    if (await confirm('Clear chat history for this workspace?')) {
+  const handleClearChat = () => {
+    if (confirm('Clear chat history for this workspace?')) {
       const storageKey = `nexamind_ai_chat_${workspaceId}`;
       localStorage.removeItem(storageKey);
       setMessages([defaultGreeting]);
     }
   };
 
-  // Voice Recognition Web API
+  // Voice Recognition
   const toggleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      toastError('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
       return;
     }
 
@@ -120,14 +111,8 @@ export default function AiAssistant({
           setInputPrompt(text);
         };
 
-        recognition.onend = () => {
-          setIsRecording(false);
-        };
-
-        recognition.onerror = (e) => {
-          console.warn('Voice input error:', e.error);
-          setIsRecording(false);
-        };
+        recognition.onend = () => setIsRecording(false);
+        recognition.onerror = () => setIsRecording(false);
 
         recognition.start();
         speechRecognitionRef.current = recognition;
@@ -136,9 +121,7 @@ export default function AiAssistant({
         console.error('Speech recognition error:', err);
       }
     } else {
-      if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.stop();
-      }
+      if (speechRecognitionRef.current) speechRecognitionRef.current.stop();
       setIsRecording(false);
     }
   };
@@ -153,7 +136,7 @@ export default function AiAssistant({
         ...prev,
         {
           role: 'assistant',
-          content: '⚠️ No active workspace selected. Please select your Solo or Group workspace to proceed.',
+          content: '⚠️ No active workspace selected. Please select your Solo or Group workspace from the sidebar.',
           tool_calls: [],
           timestamp: new Date().toISOString(),
         },
@@ -165,7 +148,7 @@ export default function AiAssistant({
     const userMsg = { role: 'user', content: prompt, timestamp: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
     setIsProcessing(true);
-    setActivePlanSteps(['Analyzing intent & scoping workspace tools...', 'Executing autonomous operations in Supabase...']);
+    setActivePlanSteps(['Analyzing intent & scoping tools...', 'Executing autonomous operations in Supabase...']);
 
     try {
       const res = await api.chatWithAgent(workspaceId, prompt);
@@ -178,7 +161,7 @@ export default function AiAssistant({
       };
       setMessages((prev) => [...prev, assistantMsg]);
 
-      // Check if AI performed a workspace switch
+      // Check if workspace switch tool was executed
       if (res.tool_calls && onSwitchWorkspace) {
         const switchCall = res.tool_calls.find(
           (t) => t.tool === 'switch_workspace' || t.result?.type === 'workspace_switch'
@@ -188,9 +171,7 @@ export default function AiAssistant({
         }
       }
 
-      if (onRefreshAll) {
-        await onRefreshAll();
-      }
+      if (onRefreshAll) await onRefreshAll();
     } catch (err) {
       setActivePlanSteps([]);
       const errorMsg = {
@@ -220,7 +201,7 @@ export default function AiAssistant({
       return {
         label: 'Workspace Switched',
         icon: RotateCcw,
-        color: 'text-amber-400',
+        color: 'text-amber-600',
         tab: 'dashboard',
         tabLabel: `Active: ${res.workspace_name || 'Space'}`,
       };
@@ -229,7 +210,7 @@ export default function AiAssistant({
       return {
         label: 'Kanban Task Created',
         icon: FolderKanban,
-        color: 'text-indigo-400',
+        color: 'text-[#4F46E5]',
         tab: 'projects',
         tabLabel: 'Open Kanban Board',
       };
@@ -238,7 +219,7 @@ export default function AiAssistant({
       return {
         label: name === 'edit_document' ? 'Document / File Edited' : name === 'get_document' ? 'Document Retrieved' : 'Document / File Created',
         icon: FileText,
-        color: 'text-purple-400',
+        color: 'text-[#8B5CF6]',
         tab: 'documents',
         tabLabel: 'Open in Documents',
       };
@@ -247,7 +228,7 @@ export default function AiAssistant({
       return {
         label: 'Channel Communication',
         icon: MessageSquare,
-        color: 'text-emerald-400',
+        color: 'text-[#10B981]',
         tab: 'channels',
         tabLabel: 'Open Channel',
       };
@@ -256,141 +237,158 @@ export default function AiAssistant({
       return {
         label: 'Calendar Event Scheduled',
         icon: Calendar,
-        color: 'text-indigo-400',
+        color: 'text-[#4F46E5]',
         tab: 'calendar',
-        tabLabel: 'Open Calendar & Schedule',
-      };
-    }
-    if (name === 'create_repo' || name === 'create_commit' || res.type === 'code_repo' || res.type === 'commit') {
-      return {
-        label: 'Code Repository / Commit',
-        icon: Code2,
-        color: 'text-cyan-400',
-        tab: 'code',
-        tabLabel: 'Open Code Workspace',
+        tabLabel: 'Open Calendar',
       };
     }
     return {
-      label: 'Workspace Query',
+      label: 'Operation Executed',
       icon: Terminal,
-      color: 'text-slate-400',
+      color: 'text-slate-600',
       tab: 'dashboard',
-      tabLabel: 'View Overview',
+      tabLabel: 'View Dashboard',
     };
   };
 
-  const samplePrompts = [
-    "Create a file named notes.txt with text 'Sprint deliverables and milestones'",
-    "Edit document notes.txt and add 'Verify all tests pass 100%'",
-    "Send message 'Sprint review is today at 4 PM' to channel general",
-    "Schedule a meeting for 'Architecture Review' tomorrow at 3 PM",
-    "Create an urgent task 'Optimize database indexes'",
+  const promptSuggestions = [
+    'Create a file named release_specs.txt with text "API v2 architecture and caching."',
+    'Schedule meeting for "Architecture Review" tomorrow at 3 PM',
+    'Edit document release_specs.txt and add "Verified on staging."',
+    'What is our current cash balance and runway?',
+    'Send message "Sprint review starts in 10 mins" to channel general',
   ];
 
   return (
-    <div className={`glass-panel rounded-2xl border border-slate-800/80 flex flex-col overflow-hidden bg-slate-900/90 shadow-panel relative ${variant === 'full' ? 'h-full min-h-[600px]' : ''}`}>
-      <div className="p-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/50">
+    <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm flex flex-col h-full max-w-4xl mx-auto overflow-hidden font-sans text-[#191C1E]">
+      {/* Copilot Header */}
+      <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/25">
+          <div className="w-8 h-8 rounded-xl bg-purple-50 text-[#8B5CF6] border border-purple-200 flex items-center justify-center">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-slate-100">NexaMind AI Copilot</span>
-              <span className="text-[10px] bg-indigo-500/15 text-indigo-300 font-semibold px-2 py-0.5 rounded-full border border-indigo-500/25">
-                Agent
+            <h2 className="text-sm font-bold text-[#191C1E] flex items-center gap-2">
+              <span>Copilot Intelligence Engine</span>
+              <span className="text-[9px] font-mono font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                AUTONOMOUS
               </span>
-            </div>
-            <span className="text-[11px] text-slate-500">Docs, tasks, calendar, channels & code</span>
+            </h2>
+            <p className="text-[10px] font-mono text-slate-500">
+              Direct Supabase Database Authority & Tool Execution
+            </p>
           </div>
         </div>
-        <button onClick={handleClearChat} title="Clear chat" className="btn-ghost p-2 text-slate-400 hover:text-rose-400">
+
+        <button
+          onClick={handleClearChat}
+          title="Clear Chat History"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+        >
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Messages Canvas */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4 font-sans">
-        {messages.map((msg, index) => {
+      {/* Messages Stream */}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-white">
+        {messages.map((msg, idx) => {
           const isUser = msg.role === 'user';
+
           return (
             <div
-              key={index}
-              className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
+              key={idx}
+              className={`flex gap-3 text-xs leading-relaxed ${
+                isUser ? 'justify-end' : 'justify-start'
+              }`}
             >
               {!isUser && (
-                <div className="w-8 h-8 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400 flex-shrink-0 mt-1">
-                  <Bot className="w-4 h-4" />
+                <div className="w-7 h-7 rounded-xl bg-purple-50 text-[#8B5CF6] border border-purple-200 flex items-center justify-center shrink-0 mt-0.5">
+                  <Sparkles className="w-3.5 h-3.5" />
                 </div>
               )}
 
-              <div className={`space-y-2 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
-                <div
-                  className={`p-4 rounded-2xl text-xs leading-relaxed ${
-                    isUser
-                      ? 'bg-indigo-600 text-white font-medium rounded-tr-none shadow-md shadow-indigo-600/20'
-                      : 'bg-slate-950/80 border border-slate-800 text-slate-200 rounded-tl-none shadow-sm font-sans whitespace-pre-wrap'
-                  }`}
-                >
-                  {msg.content}
-                </div>
+              <div
+                className={`rounded-2xl p-4 max-w-[82%] space-y-2.5 shadow-sm ${
+                  isUser
+                    ? 'bg-[#4F46E5] text-white rounded-br-none'
+                    : 'bg-[#F2F4F6] text-[#191C1E] border border-[#E2E8F0] rounded-bl-none'
+                }`}
+              >
+                <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
 
-                {/* Executed Tools Badges */}
-                {msg.tool_calls && msg.tool_calls.length > 0 && (
-                  <div className="space-y-1.5 pt-1">
-                    {msg.tool_calls.map((tc, tcIdx) => {
-                      const meta = getToolActionMeta(tc);
+                {/* Executed Tools Action Cards */}
+                {!isUser && msg.tool_calls && msg.tool_calls.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+                    <div className="text-[10px] font-mono uppercase font-bold text-slate-500 tracking-wider">
+                      Executed Platform Actions
+                    </div>
+
+                    {msg.tool_calls.map((toolCall, tIdx) => {
+                      const meta = getToolActionMeta(toolCall);
                       const Icon = meta.icon;
-                      const res = tc.result || {};
-                      const resultMsg = res.message || `Executed ${tc.tool}`;
+
                       return (
                         <div
-                          key={tcIdx}
-                          className="flex items-center justify-between gap-3 bg-slate-950/90 border border-slate-800/90 px-3.5 py-2 rounded-xl text-xs group hover:border-indigo-500/50 transition shadow-md"
+                          key={tIdx}
+                          className="bg-white rounded-xl p-3 border border-[#E2E8F0] space-y-1.5 shadow-sm"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Icon className={`w-3.5 h-3.5 ${meta.color} flex-shrink-0`} />
-                            <span className="font-bold text-slate-300 truncate">{meta.label}:</span>
-                            <span className="text-[11px] text-slate-400 truncate max-w-[200px]">
-                              {resultMsg}
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`text-[11px] font-mono font-bold flex items-center gap-1.5 ${meta.color}`}
+                            >
+                              <Icon className="w-3.5 h-3.5" />
+                              <span>{meta.label}</span>
+                            </span>
+                            <span className="text-[10px] font-mono text-[#10B981] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-bold">
+                              SUCCESS
                             </span>
                           </div>
 
-                          <button
-                            onClick={() => onNavigateTab && onNavigateTab(meta.tab)}
-                            className="flex items-center gap-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded-lg border border-indigo-500/20 transition flex-shrink-0"
-                          >
-                            <span>{meta.tabLabel}</span>
-                            <ArrowRight className="w-3 h-3" />
-                          </button>
+                          <div className="text-[11px] text-slate-700 font-mono">
+                            {toolCall.result?.message || toolCall.result?.title || 'Operation committed to database.'}
+                          </div>
+
+                          {meta.tab && (
+                            <button
+                              onClick={() => onNavigateTab && onNavigateTab(meta.tab)}
+                              className="text-[10px] font-mono font-bold text-[#4F46E5] hover:underline flex items-center gap-1 transition pt-0.5"
+                            >
+                              <span>{meta.tabLabel}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 )}
               </div>
+
+              {isUser && (
+                <div className="w-7 h-7 rounded-xl bg-indigo-50 text-[#4F46E5] border border-indigo-200 flex items-center justify-center shrink-0 mt-0.5">
+                  <User className="w-3.5 h-3.5" />
+                </div>
+              )}
             </div>
           );
         })}
 
-        {/* Live Multi-Step Execution Plan */}
-        {isProcessing && activePlanSteps.length > 0 && (
-          <div className="flex gap-3 items-start">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400 flex-shrink-0 animate-pulse">
-              <Zap className="w-4 h-4" />
+        {/* Processing State */}
+        {isProcessing && (
+          <div className="flex gap-3 text-xs justify-start">
+            <div className="w-7 h-7 rounded-xl bg-purple-50 text-[#8B5CF6] border border-purple-200 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5 animate-spin" />
             </div>
-            <div className="bg-slate-950/90 border border-indigo-500/40 p-4 rounded-2xl max-w-[85%] space-y-2 shadow-lg shadow-indigo-500/10">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-400 block">
-                Autonomous Execution In Progress
-              </span>
-              <div className="space-y-1.5">
-                {activePlanSteps.map((step, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-xs text-slate-300">
-                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-                    <span>{step}</span>
-                  </div>
-                ))}
+            <div className="bg-[#F2F4F6] text-[#191C1E] border border-[#E2E8F0] rounded-2xl rounded-bl-none p-4 space-y-1.5 shadow-sm">
+              <div className="flex items-center gap-2 text-[#4F46E5] font-mono text-[11px] font-bold">
+                <span className="w-2 h-2 rounded-full bg-[#4F46E5] animate-pulse"></span>
+                <span>Executing autonomous agent flow...</span>
               </div>
+              {activePlanSteps.map((step, sIdx) => (
+                <div key={sIdx} className="text-[10px] font-mono text-slate-500 pl-4">
+                  › {step}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -398,47 +396,53 @@ export default function AiAssistant({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Suggested Quick Commands */}
-      <div className="px-4 py-2 border-t border-slate-800/60 bg-slate-950/40 flex items-center gap-2 overflow-x-auto no-scrollbar">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex-shrink-0 flex items-center gap-1">
-          <Sparkles className="w-3 h-3 text-indigo-400" /> Commands:
-        </span>
-        {samplePrompts.map((p, idx) => (
-          <button
-            key={idx}
-            onClick={() => setInputPrompt(p)}
-            className="text-[11px] bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg whitespace-nowrap transition"
-          >
-            {p}
-          </button>
-        ))}
-      </div>
+      {/* Fast Prompt Suggestions */}
+      {messages.length <= 2 && (
+        <div className="px-4 py-2 border-t border-[#E2E8F0] bg-[#F8FAFC] flex gap-2 overflow-x-auto">
+          {promptSuggestions.map((sug, sIdx) => (
+            <button
+              key={sIdx}
+              onClick={() => setInputPrompt(sug)}
+              className="text-[11px] font-mono text-slate-600 hover:text-[#191C1E] bg-white hover:bg-[#F2F4F6] border border-[#E2E8F0] px-3 py-1.5 rounded-lg whitespace-nowrap transition flex-shrink-0 shadow-sm"
+            >
+              {sug.slice(0, 36)}...
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Input Composer Form */}
-      <form onSubmit={handleSend} className="p-4 border-t border-slate-800 bg-slate-950/80 flex items-center gap-2">
+      {/* Input Form Bar */}
+      <form
+        onSubmit={handleSend}
+        className="p-3 sm:p-4 border-t border-[#E2E8F0] bg-[#F8FAFC] flex items-center gap-2"
+      >
         <button
           type="button"
           onClick={toggleVoiceInput}
-          title={isRecording ? 'Listening... click to stop' : 'Voice Command'}
+          title={isRecording ? 'Stop Recording' : 'Voice Input'}
           className={`p-2.5 rounded-xl border transition ${
             isRecording
-              ? 'bg-rose-600 text-white border-rose-500 animate-bounce'
-              : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+              ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
+              : 'bg-white border-[#E2E8F0] text-slate-500 hover:text-slate-900 hover:bg-[#ECEEF0]'
           }`}
         >
           {isRecording ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
         </button>
 
-        <textarea
-          rows={1}
+        <input
+          type="text"
           value={inputPrompt}
           onChange={(e) => setInputPrompt(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Command AI to create a file, edit documents, send messages, schedule meetings..."
-          className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 resize-none placeholder-slate-500 font-sans"
+          placeholder="Command Copilot: create doc, schedule meeting, edit file, send message..."
+          className="flex-1 bg-white border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] placeholder-slate-400 focus:outline-none transition font-sans shadow-sm"
         />
 
-        <button type="submit" disabled={!inputPrompt.trim() || isProcessing} className="btn-primary p-2.5 rounded-xl">
+        <button
+          type="submit"
+          disabled={!inputPrompt.trim() || isProcessing}
+          className="bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-50 text-white p-2.5 rounded-xl transition shadow-sm flex items-center justify-center shrink-0"
+        >
           <Send className="w-4 h-4" />
         </button>
       </form>

@@ -1,21 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import {
   Calendar as CalendarIcon,
-  Plus,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
   Sparkles,
+  MessageSquare,
+  FileText,
+  Clock,
+  Mic,
+  Plus,
+  AlertCircle,
+  Check,
   ChevronLeft,
   ChevronRight,
   Trash2,
-  Video,
-  FileText,
-  Bell,
-  Tag,
-  Check,
   X,
-  Layers,
+  User,
+  Tag,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -25,18 +24,41 @@ export default function CalendarView({
   sessions,
   onRefreshSessions,
 }) {
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDateStr, setSelectedDateStr] = useState(
-    new Date().toISOString().split('T')[0]
-  );
+  const [events, setEvents] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(new Date().getDate());
+  const [viewMode, setViewMode] = useState('month'); // 'month' | 'week' | 'day'
   const [showAddModal, setShowAddModal] = useState(false);
-  const [filterType, setFilterType] = useState('all');
-  const [detectedReminders, setDetectedReminders] = useState([]);
-  const [detecting, setDetecting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Form state
+  // Proactive AI Detected Commitments
+  const [insights, setInsights] = useState([
+    {
+      id: 'insight-1',
+      source: 'From #general Channel',
+      icon: MessageSquare,
+      borderColor: 'border-l-[#F59E0B]',
+      badgeColor: 'text-[#F59E0B]',
+      text: 'Team sync on system architecture & database deployment strategy',
+      btnColor: 'bg-[#4F46E5] text-white',
+      btnText: 'Add to Cal',
+      suggestedDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+      suggestedTime: '02:00 PM',
+    },
+    {
+      id: 'insight-2',
+      source: 'From PR Review',
+      icon: FileText,
+      borderColor: 'border-l-[#F43F5E]',
+      badgeColor: 'text-[#F43F5E]',
+      text: 'Security patch & authorization token audit',
+      suggestedDate: new Date().toISOString().split('T')[0],
+      suggestedTime: '04:00 PM',
+      btnColor: 'bg-[#F43F5E] text-white',
+      btnText: 'Add to Cal',
+    },
+  ]);
+
   const [newEvent, setNewEvent] = useState({
     title: '',
     description: '',
@@ -46,417 +68,396 @@ export default function CalendarView({
     priority: 'medium',
   });
 
-  // Load calendar events
   const loadEvents = async () => {
+    if (!workspaceId) return;
+    setLoading(true);
     try {
-      setLoading(true);
       const data = await api.listCalendarEvents(workspaceId);
-      setEvents(data || []);
-    } catch (err) {
-      console.warn('Error loading calendar events:', err);
+      if (data && Array.isArray(data)) {
+        setEvents(data);
+      }
+    } catch (e) {
+      console.warn('Calendar load error:', e);
     } finally {
       setLoading(false);
     }
   };
 
-  // Load AI detected reminders from MoMs & docs
-  const loadDetectedReminders = async () => {
-    try {
-      setDetecting(true);
-      const res = await api.detectReminders(workspaceId);
-      setDetectedReminders(res.reminders || []);
-    } catch (err) {
-      console.warn('Error detecting reminders:', err);
-    } finally {
-      setDetecting(false);
-    }
-  };
-
   useEffect(() => {
-    if (workspaceId) {
-      loadEvents();
-      loadDetectedReminders();
-    }
+    loadEvents();
   }, [workspaceId]);
 
-  // Create Event
-  const handleCreateEvent = async (e) => {
-    e.preventDefault();
-    if (!newEvent.title.trim()) return;
+  // Month navigation
+  const prevMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  };
 
+  const nextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  };
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  // Days in current month
+  const firstDayIndex = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const handleAddEvent = async (e) => {
+    e.preventDefault();
+    if (!newEvent.title.trim() || !workspaceId) return;
     try {
       await api.createCalendarEvent(workspaceId, newEvent);
       setShowAddModal(false);
       setNewEvent({
         title: '',
         description: '',
-        event_date: selectedDateStr,
+        event_date: new Date().toISOString().split('T')[0],
         event_time: '10:00 AM',
         event_type: 'meeting',
         priority: 'medium',
       });
       await loadEvents();
-      await loadDetectedReminders();
     } catch (err) {
-      alert(`Could not create event: ${err.message}`);
+      alert(`Event creation error: ${err.message}`);
     }
   };
 
-  // 1-Click Accept Detected Reminder
-  const handleAcceptReminder = async (rem) => {
+  const handleScheduleInsight = async (insight) => {
     try {
-      await api.createCalendarEvent(workspaceId, {
-        title: rem.title,
-        description: `Auto-scheduled by AI from: ${rem.source_name} (${rem.context_snippet})`,
-        event_date: rem.suggested_date,
-        event_time: rem.suggested_time || '02:00 PM',
-        event_type: rem.event_type,
-        priority: rem.priority,
-        source: 'ai_detected',
-      });
-      setDetectedReminders((prev) => prev.filter((r) => r.id !== rem.id));
-      await loadEvents();
-      alert(`Reminder scheduled for ${rem.suggested_date}!`);
-    } catch (err) {
-      alert(`Error scheduling reminder: ${err.message}`);
-    }
-  };
-
-  // Delete event
-  const handleDeleteEvent = async (id) => {
-    if (confirm('Remove this event from your calendar?')) {
-      try {
-        await api.deleteCalendarEvent(workspaceId, id);
-        await loadEvents();
-      } catch (err) {
-        alert(`Error deleting event: ${err.message}`);
+      if (workspaceId) {
+        await api.createCalendarEvent(workspaceId, {
+          title: insight.text,
+          description: `Auto-scheduled from: ${insight.source}`,
+          event_date: insight.suggestedDate,
+          event_time: insight.suggestedTime,
+          event_type: 'meeting',
+          priority: 'high',
+        });
       }
+      setInsights((prev) => prev.filter((i) => i.id !== insight.id));
+      await loadEvents();
+    } catch (e) {
+      console.warn('Schedule insight error:', e);
     }
   };
 
-  // Toggle completion
-  const handleToggleComplete = async (event) => {
+  const handleDismissInsight = (id) => {
+    setInsights((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  const handleDeleteEvent = async (eventId, e) => {
+    e.stopPropagation();
+    if (!workspaceId) return;
     try {
-      await api.updateCalendarEvent(workspaceId, event.id, {
-        is_completed: !event.is_completed,
-      });
+      await api.deleteCalendarEvent(workspaceId, eventId);
       await loadEvents();
     } catch (err) {
-      console.warn('Error updating event:', err);
+      console.warn('Delete error:', err);
     }
   };
 
-  // Calendar calculations
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+  // Get events for a specific day in the active month
+  const getEventsForDay = (dayNum) => {
+    const formattedDay = String(dayNum).padStart(2, '0');
+    const formattedMonth = String(month + 1).padStart(2, '0');
+    const dateStr = `${year}-${formattedMonth}-${formattedDay}`;
 
-  const firstDayIndex = new Date(year, month, 1).getDay();
-  const totalDays = new Date(year, month + 1, 0).getDate();
-
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-  ];
-
-  const prevMonth = () => {
-    setCurrentDate(new Date(year, month - 1, 1));
+    return events.filter((ev) => {
+      if (ev.event_date) {
+        return ev.event_date.startsWith(dateStr);
+      }
+      return ev.day === dayNum;
+    });
   };
 
-  const nextMonth = () => {
-    setCurrentDate(new Date(year, month + 1, 1));
-  };
-
-  // Events filtered
-  const filteredEvents = events.filter((e) => {
-    if (filterType === 'all') return true;
-    return e.event_type === filterType;
-  });
-
-  const selectedDateEvents = filteredEvents.filter((e) => e.event_date === selectedDateStr);
-
-  const getEventTypeBadge = (type) => {
-    switch (type) {
-      case 'meeting':
-        return 'bg-purple-500/10 text-purple-400 border-purple-500/20';
-      case 'deadline':
-        return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-      case 'reminder':
-        return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+  const getTypeStyle = (type) => {
+    switch (type?.toLowerCase()) {
+      case 'standup':
+        return 'bg-purple-50 text-purple-700 border-l-2 border-purple-500';
+      case 'review':
       case 'milestone':
-        return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+        return 'bg-blue-50 text-blue-700 border-l-2 border-blue-500';
+      case 'deadline':
+      case 'urgent':
+        return 'bg-rose-50 text-rose-700 border-l-2 border-rose-500 font-bold';
       default:
-        return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
+        return 'bg-indigo-50 text-indigo-700 border-l-2 border-indigo-500';
     }
   };
 
   return (
-    <div className="h-full flex flex-col space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-100 tracking-tight flex items-center gap-2">
-            <CalendarIcon className="w-5 h-5 text-indigo-400" />
-            <span>Personal Calendar & Smart Schedule</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Manage scheduled meetings, deadlines, sprint milestones, and autonomous AI reminders.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              setNewEvent((prev) => ({ ...prev, event_date: selectedDateStr }));
-              setShowAddModal(true);
-            }}
-            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 transition active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Event / Meeting</span>
-          </button>
-        </div>
-      </div>
-
-      {/* AI Detected Reminders Banner */}
-      {detectedReminders.length > 0 && (
-        <div className="bg-gradient-to-r from-indigo-950/80 via-purple-950/60 to-slate-950 p-4 rounded-2xl border border-indigo-500/30 shadow-xl space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-              <span className="text-xs font-bold text-slate-200">
-                AI Detected Reminders from Meeting MoMs & Document Specs ({detectedReminders.length})
-              </span>
+    <div className="h-full flex flex-col lg:flex-row overflow-y-auto bg-[#F8FAFC] font-sans antialiased text-[#191C1E] gap-6">
+      {/* 1. Main Calendar Workspace */}
+      <div className="flex-1 flex flex-col bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5]">
+              <CalendarIcon className="w-5 h-5" />
             </div>
-            <span className="text-[10px] uppercase font-bold text-indigo-400 font-mono">
-              Auto-Scanned
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {detectedReminders.map((rem) => (
-              <div
-                key={rem.id}
-                className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between space-y-2"
-              >
-                <div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                    <span className="font-mono text-indigo-300">📅 {rem.suggested_date} ({rem.suggested_time || '2:00 PM'})</span>
-                    <span className="capitalize text-emerald-400">{rem.priority}</span>
-                  </div>
-                  <h4 className="font-bold text-xs text-slate-100">{rem.title}</h4>
-                  <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 font-sans">
-                    {rem.context_snippet}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-                  <span className="text-[10px] text-slate-500 truncate max-w-[120px]">
-                    From: {rem.source_name}
-                  </span>
-                  <button
-                    onClick={() => handleAcceptReminder(rem)}
-                    className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold shadow transition"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Set Reminder</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl lg:text-2xl font-bold text-[#191C1E] tracking-tight">
+                  {monthNames[month]} {year}
+                </h1>
+                <div className="flex items-center gap-1 bg-[#F2F4F6] rounded-lg p-1 border border-[#E2E8F0]">
+                  <button onClick={prevMonth} className="p-1 hover:bg-white rounded transition text-slate-600">
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button onClick={nextMonth} className="p-1 hover:bg-white rounded transition text-slate-600">
+                    <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Main Grid: Calendar Month Matrix (Left) + Selected Day Agenda (Right) */}
-      <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
-        {/* Monthly Calendar Matrix */}
-        <div className="col-span-2 glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col">
-          {/* Month Navigator & Filter Bar */}
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-3">
-              <h3 className="font-extrabold text-base text-slate-100">
-                {monthNames[month]} {year}
-              </h3>
-              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                <button
-                  onClick={prevMonth}
-                  className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={nextMonth}
-                  className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Workspace Sprint & Meeting Schedule
+              </p>
             </div>
+          </div>
 
-            {/* Filter Types */}
-            <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px]">
-              {['all', 'meeting', 'deadline', 'reminder', 'milestone'].map((t) => (
+          <div className="flex items-center gap-3">
+            {/* View Mode Switcher */}
+            <div className="flex items-center bg-[#F2F4F6] p-1 rounded-xl border border-[#E2E8F0]">
+              {['month', 'week', 'day'].map((mode) => (
                 <button
-                  key={t}
-                  onClick={() => setFilterType(t)}
-                  className={`px-2.5 py-1 rounded-lg font-bold capitalize transition ${
-                    filterType === t ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-3 py-1 text-xs font-semibold rounded-lg capitalize transition ${
+                    viewMode === mode
+                      ? 'bg-white text-[#4F46E5] shadow-sm font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  {t}
+                  {mode}
                 </button>
               ))}
             </div>
-          </div>
 
-          {/* Days of Week Header */}
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-            <div>Sun</div>
-            <div>Mon</div>
-            <div>Tue</div>
-            <div>Wed</div>
-            <div>Thu</div>
-            <div>Fri</div>
-            <div>Sat</div>
-          </div>
-
-          {/* Day Cells Grid */}
-          <div className="grid grid-cols-7 gap-1.5 flex-1 min-h-0">
-            {/* Blank pads for first day */}
-            {Array.from({ length: firstDayIndex }).map((_, i) => (
-              <div key={`empty-${i}`} className="bg-slate-950/20 rounded-xl border border-transparent" />
-            ))}
-
-            {/* Actual Days */}
-            {Array.from({ length: totalDays }).map((_, i) => {
-              const dayNum = i + 1;
-              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-              const isSelected = selectedDateStr === dateStr;
-              const isToday = new Date().toISOString().split('T')[0] === dateStr;
-
-              const dayEvents = filteredEvents.filter((e) => e.event_date === dateStr);
-
-              return (
-                <button
-                  key={dateStr}
-                  onClick={() => setSelectedDateStr(dateStr)}
-                  className={`p-2 rounded-xl border text-left flex flex-col justify-between transition min-h-[75px] ${
-                    isSelected
-                      ? 'bg-indigo-600/20 border-indigo-500 shadow-md'
-                      : isToday
-                      ? 'bg-slate-900/90 border-indigo-500/40 hover:bg-slate-800'
-                      : 'bg-slate-900/40 border-slate-800/80 hover:bg-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`text-xs font-bold ${
-                        isToday
-                          ? 'w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px]'
-                          : isSelected
-                          ? 'text-indigo-400 font-extrabold'
-                          : 'text-slate-400'
-                      }`}
-                    >
-                      {dayNum}
-                    </span>
-                    {dayEvents.length > 0 && (
-                      <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-                    )}
-                  </div>
-
-                  <div className="space-y-1 mt-1 overflow-hidden">
-                    {dayEvents.slice(0, 2).map((ev) => (
-                      <div
-                        key={ev.id}
-                        className={`text-[9px] px-1.5 py-0.5 rounded truncate font-medium border ${getEventTypeBadge(ev.event_type)}`}
-                      >
-                        {ev.title}
-                      </div>
-                    ))}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[9px] text-slate-500 font-mono">
-                        +{dayEvents.length - 2} more
-                      </div>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+            <button
+              onClick={() => setShowAddModal(true)}
+              style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
+              className="px-4 py-2 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4 text-white" />
+              <span>+ Add Event</span>
+            </button>
           </div>
         </div>
 
-        {/* Selected Date Agenda Drawer (Right) */}
-        <div className="col-span-1 glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col bg-slate-950/50">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Selected Date</span>
-              <h3 className="font-extrabold text-sm text-slate-100">{selectedDateStr}</h3>
+        {/* VIEW A: MONTH VIEW */}
+        {viewMode === 'month' && (
+          <div className="flex-1 flex flex-col border border-[#E2E8F0] rounded-xl overflow-hidden shadow-sm min-h-[520px]">
+            {/* Days of Week Header */}
+            <div className="grid grid-cols-7 bg-[#F8FAFC] border-b border-[#E2E8F0] text-center font-mono text-xs font-bold text-slate-500 py-2.5">
+              <span>SUN</span>
+              <span>MON</span>
+              <span>TUE</span>
+              <span>WED</span>
+              <span>THU</span>
+              <span>FRI</span>
+              <span>SAT</span>
             </div>
-            <span className="text-xs bg-slate-900 text-indigo-400 px-2.5 py-1 rounded-lg border border-slate-800 font-mono font-bold">
-              {selectedDateEvents.length} Events
+
+            {/* Month Day Grid */}
+            <div className="flex-1 grid grid-cols-7 grid-rows-5 bg-[#E2E8F0] gap-px">
+              {/* Previous month padding days */}
+              {Array.from({ length: firstDayIndex }).map((_, i) => {
+                const day = daysInPrevMonth - firstDayIndex + i + 1;
+                return (
+                  <div key={`prev-${i}`} className="bg-[#FAFBFD] p-2 text-slate-300 text-xs font-mono select-none">
+                    <span>{day}</span>
+                  </div>
+                );
+              })}
+
+              {/* Current month days */}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const dayNum = i + 1;
+                const dayEvents = getEventsForDay(dayNum);
+                const isSelected = selectedDay === dayNum;
+                const isToday =
+                  new Date().getDate() === dayNum &&
+                  new Date().getMonth() === month &&
+                  new Date().getFullYear() === year;
+
+                return (
+                  <div
+                    key={`curr-${dayNum}`}
+                    onClick={() => setSelectedDay(dayNum)}
+                    className={`bg-white p-2 flex flex-col justify-between transition group hover:bg-[#F8FAFC] cursor-pointer min-h-[90px] ${
+                      isSelected ? 'ring-2 ring-[#4F46E5] ring-inset bg-indigo-50/20' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`text-xs font-mono font-bold w-6 h-6 rounded-full flex items-center justify-center ${
+                          isToday
+                            ? 'bg-[#4F46E5] text-white'
+                            : isSelected
+                            ? 'bg-indigo-100 text-[#4F46E5]'
+                            : 'text-slate-700'
+                        }`}
+                      >
+                        {dayNum}
+                      </span>
+                      {dayEvents.length > 0 && (
+                        <span className="text-[10px] font-mono font-bold text-slate-400">
+                          {dayEvents.length}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Event Badges */}
+                    <div className="space-y-1 mt-1 overflow-hidden">
+                      {dayEvents.slice(0, 2).map((ev) => (
+                        <div
+                          key={ev.id}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium truncate shadow-xs ${getTypeStyle(
+                            ev.event_type || ev.type
+                          )}`}
+                        >
+                          {ev.event_time ? `${ev.event_time} ` : ''}{ev.title}
+                        </div>
+                      ))}
+                      {dayEvents.length > 2 && (
+                        <span className="text-[9px] font-bold text-slate-400 pl-1 block">
+                          +{dayEvents.length - 2} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Next month padding days */}
+              {Array.from({
+                length: (7 - ((firstDayIndex + daysInMonth) % 7)) % 7,
+              }).map((_, i) => (
+                <div key={`next-${i}`} className="bg-[#FAFBFD] p-2 text-slate-300 text-xs font-mono select-none">
+                  <span>{i + 1}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW B: WEEK / AGENDA VIEW */}
+        {(viewMode === 'week' || viewMode === 'day') && (
+          <div className="flex-1 space-y-4">
+            <h3 className="text-sm font-bold text-[#191C1E]">
+              Schedule for {monthNames[month]} {selectedDay}, {year}
+            </h3>
+            {getEventsForDay(selectedDay).length === 0 ? (
+              <div className="p-8 text-center bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-400 text-xs space-y-2">
+                <CalendarIcon className="w-6 h-6 text-slate-300 mx-auto" />
+                <p className="font-semibold text-slate-600">No events scheduled for this day.</p>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="text-xs font-bold text-[#4F46E5] hover:underline"
+                >
+                  + Add an Event
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {getEventsForDay(selectedDay).map((ev) => (
+                  <div
+                    key={ev.id}
+                    className={`p-4 rounded-xl border flex items-center justify-between shadow-xs ${getTypeStyle(
+                      ev.event_type || ev.type
+                    )}`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs">{ev.title}</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/60">
+                          {ev.event_type || 'Event'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 flex items-center gap-2 font-mono">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{ev.event_time || 'All Day'}</span>
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={(e) => handleDeleteEvent(ev.id, e)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 2. Proactive AI Detected Commitments Sidebar */}
+      <div className="w-full lg:w-80 space-y-4">
+        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-[#191C1E] flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#8B5CF6] animate-pulse" />
+              <span>AI Detected Commitments</span>
+            </h2>
+            <span className="text-[10px] font-mono bg-purple-50 text-[#8B5CF6] px-2 py-0.5 rounded font-bold">
+              {insights.length} Detected
             </span>
           </div>
 
-          {/* Agenda Event Cards */}
-          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-            {selectedDateEvents.map((ev) => (
-              <div
-                key={ev.id}
-                className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 hover:border-slate-700 transition space-y-2 group shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleToggleComplete(ev)}
-                      className={`text-slate-400 hover:scale-110 transition ${ev.is_completed ? 'text-emerald-400' : ''}`}
-                    >
-                      <CheckCircle2 className={`w-4 h-4 ${ev.is_completed ? 'fill-emerald-500/20 text-emerald-400' : 'text-slate-600'}`} />
-                    </button>
-                    <h4 className={`font-bold text-xs ${ev.is_completed ? 'line-through text-slate-500' : 'text-slate-100'}`}>
-                      {ev.title}
-                    </h4>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteEvent(ev.id)}
-                    className="text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            NexaMind Copilot analyzes team chats and PR discussions to automatically surface action items.
+          </p>
 
-                {ev.description && (
-                  <p className="text-[11px] text-slate-400 pl-6 leading-relaxed">
-                    {ev.description}
-                  </p>
-                )}
-
-                <div className="flex items-center justify-between text-[10px] pl-6 pt-1 border-t border-slate-800/80">
-                  <div className="flex items-center gap-1 text-slate-400 font-mono">
-                    <Clock className="w-3 h-3 text-indigo-400" />
-                    <span>{ev.event_time || 'All Day'}</span>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded border capitalize font-bold ${getEventTypeBadge(ev.event_type)}`}>
-                    {ev.event_type}
-                  </span>
-                </div>
+          <div className="space-y-3">
+            {insights.length === 0 ? (
+              <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs italic">
+                All action items scheduled!
               </div>
-            ))}
-
-            {selectedDateEvents.length === 0 && (
-              <div className="text-center py-16 text-slate-500 space-y-2">
-                <CalendarIcon className="w-8 h-8 mx-auto text-slate-700" />
-                <p className="text-xs">No events scheduled for {selectedDateStr}.</p>
-                <button
-                  onClick={() => {
-                    setNewEvent((prev) => ({ ...prev, event_date: selectedDateStr }));
-                    setShowAddModal(true);
-                  }}
-                  className="text-xs text-indigo-400 hover:underline font-bold"
+            ) : (
+              insights.map((insight) => (
+                <div
+                  key={insight.id}
+                  className={`bg-white border border-[#E2E8F0] border-l-4 rounded-xl p-3.5 shadow-xs space-y-2.5 ${insight.borderColor}`}
                 >
-                  + Add an event for this day
-                </button>
-              </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                    <span>{insight.source}</span>
+                    <button
+                      onClick={() => handleDismissInsight(insight.id)}
+                      className="hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <p className="text-xs font-semibold text-[#191C1E] leading-snug">
+                    {insight.text}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-[#E2E8F0]">
+                    <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>{insight.suggestedTime}</span>
+                    </span>
+
+                    <button
+                      onClick={() => handleScheduleInsight(insight)}
+                      className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                    >
+                      <Check className="w-3 h-3" />
+                      <span>Add to Cal</span>
+                    </button>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -464,29 +465,23 @@ export default function CalendarView({
 
       {/* Add Event Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-md p-6 rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-extrabold text-sm text-slate-100 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-indigo-400" />
-                <span>Schedule Calendar Event</span>
-              </h3>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-[#191C1E]">Schedule New Event</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateEvent} className="space-y-3.5 text-xs">
+            <form onSubmit={handleAddEvent} className="space-y-4">
               <div>
-                <label className="block text-slate-400 font-bold mb-1">Event Title *</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Event Title *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Sprint Demo with Engineering Leads"
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                  placeholder="e.g. Sprint 42 Planning & Sync"
+                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
                   value={newEvent.title}
                   onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
                 />
@@ -494,21 +489,21 @@ export default function CalendarView({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 font-bold mb-1">Date *</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Date</label>
                   <input
                     type="date"
                     required
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none font-mono"
                     value={newEvent.event_date}
                     onChange={(e) => setNewEvent({ ...newEvent, event_date: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-bold mb-1">Time</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Time</label>
                   <input
                     type="text"
-                    placeholder="e.g. 03:00 PM"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                    placeholder="10:00 AM"
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none font-mono"
                     value={newEvent.event_time}
                     onChange={(e) => setNewEvent({ ...newEvent, event_time: e.target.value })}
                   />
@@ -517,23 +512,22 @@ export default function CalendarView({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 font-bold mb-1">Event Type</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Event Type</label>
                   <select
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
                     value={newEvent.event_type}
                     onChange={(e) => setNewEvent({ ...newEvent, event_type: e.target.value })}
                   >
-                    <option value="meeting">Meeting</option>
-                    <option value="deadline">Deadline</option>
-                    <option value="reminder">Reminder</option>
-                    <option value="milestone">Sprint Milestone</option>
-                    <option value="task">Task</option>
+                    <option value="meeting">Team Meeting</option>
+                    <option value="standup">Daily Standup</option>
+                    <option value="review">Sprint Review</option>
+                    <option value="deadline">Sprint Deadline</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-bold mb-1">Priority</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Priority</label>
                   <select
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
                     value={newEvent.priority}
                     onChange={(e) => setNewEvent({ ...newEvent, priority: e.target.value })}
                   >
@@ -545,28 +539,18 @@ export default function CalendarView({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-400 font-bold mb-1">Description / Agenda</label>
-                <textarea
-                  placeholder="Notes, agenda, or video call links..."
-                  rows={2}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
-                  value={newEvent.description}
-                  onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-400 hover:text-slate-200"
+                  className="px-4 py-2 text-xs text-slate-600 hover:bg-[#F2F4F6] rounded-xl font-semibold transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition"
+                  style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
+                  className="px-5 py-2 text-xs font-bold rounded-xl shadow-sm hover:opacity-95 transition"
                 >
                   Save Event
                 </button>

@@ -182,11 +182,13 @@ export const api = {
     }),
   listMessages: (wsId, channelId) =>
     request(`/workspaces/${wsId}/channels/${channelId}/messages`),
-  postMessage: (wsId, channelId, content) =>
-    request(`/workspaces/${wsId}/channels/${channelId}/messages`, {
+  postMessage: (wsId, channelId, data) => {
+    const payload = typeof data === 'string' ? { content: data } : data;
+    return request(`/workspaces/${wsId}/channels/${channelId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
-    }),
+      body: JSON.stringify(payload),
+    });
+  },
 
   // Files
   listFiles: (wsId) => request(`/workspaces/${wsId}/files`),
@@ -236,20 +238,26 @@ export const api = {
     }),
 
   // Video Meetings
+  createVideoRoom: (wsId, name) =>
+    request(`/workspaces/${wsId}/video/rooms`, {
+      method: 'POST',
+      body: JSON.stringify(typeof name === 'string' ? { name } : name),
+    }),
   startVideoRoom: (wsId, name) =>
     request(`/workspaces/${wsId}/video/rooms`, {
       method: 'POST',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(typeof name === 'string' ? { name } : name),
     }),
   listVideoRooms: (wsId) => request(`/workspaces/${wsId}/video/rooms`),
+  listActiveVideoRooms: (wsId) => request(`/workspaces/${wsId}/video/rooms`),
   joinVideoRoom: (wsId, roomId) =>
     request(`/workspaces/${wsId}/video/rooms/${roomId}/join`, {
       method: 'POST',
     }),
-  endVideoRoom: (wsId, roomId, notes) =>
+  endVideoRoom: (wsId, roomId, data) =>
     request(`/workspaces/${wsId}/video/rooms/${roomId}/end`, {
       method: 'POST',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(typeof data === 'string' ? { notes: data } : (data || {})),
     }),
 
   // Reports
