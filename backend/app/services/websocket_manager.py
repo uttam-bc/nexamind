@@ -15,11 +15,27 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._channel_connections: dict[UUID, set[WebSocket]] = defaultdict(set)
         self._workspace_connections: dict[UUID, set[WebSocket]] = defaultdict(set)
+        self._workspace_presence: dict[UUID, dict[str, dict]] = defaultdict(dict)
+
+    def set_presence(self, workspace_id: UUID, user_id: UUID, name: str, status: str = "online") -> None:
+        self._workspace_presence[workspace_id][str(user_id)] = {
+            "user_id": str(user_id),
+            "name": name,
+            "status": status,
+        }
+
+    def remove_presence(self, workspace_id: UUID, user_id: UUID) -> None:
+        if workspace_id in self._workspace_presence:
+            self._workspace_presence[workspace_id].pop(str(user_id), None)
+
+    def get_workspace_presence(self, workspace_id: UUID) -> list[dict]:
+        return list(self._workspace_presence.get(workspace_id, {}).values())
 
     async def connect_channel(self, channel_id: UUID, websocket: WebSocket) -> None:
         await websocket.accept()
         self._channel_connections[channel_id].add(websocket)
         logger.debug("WebSocket client connected to channel %s (total: %d)", channel_id, len(self._channel_connections[channel_id]))
+
 
     def disconnect_channel(self, channel_id: UUID, websocket: WebSocket) -> None:
         self._channel_connections[channel_id].discard(websocket)

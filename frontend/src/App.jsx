@@ -41,8 +41,8 @@ export default function App() {
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [authForm, setAuthForm] = useState({
     name: '',
-    email: 'admin@nexamind.app',
-    password: 'password123',
+    email: '',
+    password: '',
   });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -72,6 +72,8 @@ export default function App() {
   const [repos, setRepos] = useState([]);
   const [reports, setReports] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const [userPresence, setUserPresence] = useState('online');
 
   // Setup global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -124,6 +126,9 @@ export default function App() {
 
   const loadWorkspaceData = async (wsId) => {
     try {
+      // Always keep unread counts updated
+      api.getChannelUnreads(wsId).then(setUnreadCounts).catch(() => {});
+
       if (activeTab === 'dashboard') {
         const [tList, fSum, sList, dList, cList] = await Promise.all([
           api.listTasks(wsId).catch(() => []),
@@ -419,6 +424,11 @@ export default function App() {
           onOpenJoinWs={() => setShowJoinWsModal(true)}
           onLogout={handleLogout}
           user={user}
+          documents={documents}
+          channels={channels}
+          unreadCounts={unreadCounts}
+          userPresence={userPresence}
+          onChangePresence={setUserPresence}
         />
 
         {/* Canvas Area */}
@@ -513,7 +523,11 @@ export default function App() {
                 workspace={currentWorkspace}
                 user={user}
                 channels={channels}
+                unreadCounts={unreadCounts}
                 onRefreshChannels={() => loadWorkspaceData(currentWorkspace?.id)}
+                onMarkRead={(chanId) =>
+                  setUnreadCounts((prev) => ({ ...prev, [chanId]: 0 }))
+                }
               />
             )}
 

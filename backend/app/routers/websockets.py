@@ -131,6 +131,21 @@ async def channel_websocket(
         )
 
 
+from app.dependencies import get_current_user
+
+
+@router.get("/workspaces/{workspace_id}/presence")
+async def get_presence(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    membership = await get_workspace_membership(db, workspace_id, current_user.id)
+    if not membership:
+        raise AuthError("Workspace access denied", status_code=403)
+    return ws_manager.get_workspace_presence(workspace_id)
+
+
 @router.websocket("/workspaces/{workspace_id}/events")
 async def workspace_events_websocket(
     websocket: WebSocket,
@@ -148,7 +163,18 @@ async def workspace_events_websocket(
         return
 
     await ws_manager.connect_workspace(workspace_id, websocket)
+    ws_manager.set_presence(workspace_id, user.id, user.name, "online")
     await websocket.send_json({"event": "connected", "workspace_id": str(workspace_id)})
+
+    # Broadcast presence
+    await ws_manager.broadcast_to_workspace(
+        workspace_id,
+        {
+            "event": "presence_update",
+            "workspace_id": str(workspace_id),
+            "user": {"user_id": str(user.id), "name": user.name, "status": "online"},
+        },
+    )
 
     try:
         while True:
@@ -159,8 +185,18 @@ async def workspace_events_websocket(
                 continue
 
             event_type = payload.get("event") or payload.get("type")
-            # If WebRTC signaling event, broadcast to workspace peers for P2P video stream
-            if event_type in (
+            if event_type == "presence_update":
+                new_status = payload.get("status", "online")
+                ws_manager.set_presence(workspace_id, user.id, user.name, new_status)
+                await ws_manager.broadcast_to_workspace(
+                    workspace_id,
+                    {
+                        "event": "presence_update",
+                        "workspace_id": str(workspace_id),
+                        "user": {"user_id": str(user.id), "name": user.name, "status": new_status},
+                    },
+                )
+            elif event_type in (
                 "video_signal_offer",
                 "video_signal_answer",
                 "video_signal_ice_candidate",
@@ -177,6 +213,16 @@ async def workspace_events_websocket(
     except Exception as exc:
         logger.warning("Workspace events websocket error: %s", exc)
     finally:
+        ws_manager.remove_presence(workspace_id, user.id)
         ws_manager.disconnect_workspace(workspace_id, websocket)
+        await ws_manager.broadcast_to_workspace(
+            workspace_id,
+            {
+                "event": "presence_update",
+                "workspace_id": str(workspace_id),
+                "user": {"user_id": str(user.id), "name": user.name, "status": "offline"},
+            },
+        )
+
 
 

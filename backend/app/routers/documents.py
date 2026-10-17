@@ -10,13 +10,17 @@ from app.schemas.document import (
     DocumentCreate,
     DocumentListItem,
     DocumentResponse,
+    DocumentSearchResult,
+    DocumentTreeNode,
     DocumentUpdate,
 )
 from app.services.document_service import (
     create_document,
     delete_document,
     get_document,
+    get_document_tree,
     list_documents,
+    search_documents,
     update_document,
 )
 
@@ -33,6 +37,27 @@ async def get_documents(
     return [DocumentListItem.model_validate(document) for document in documents]
 
 
+@router.get("/search", response_model=list[DocumentSearchResult])
+async def search_workspace_documents(
+    workspace_id: UUID,
+    q: str = "",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DocumentSearchResult]:
+    results = await search_documents(db, workspace_id, current_user.id, q)
+    return [DocumentSearchResult.model_validate(r) for r in results]
+
+
+@router.get("/tree", response_model=list[DocumentTreeNode])
+async def get_workspace_document_tree(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DocumentTreeNode]:
+    tree = await get_document_tree(db, workspace_id, current_user.id)
+    return [DocumentTreeNode.model_validate(node) for node in tree]
+
+
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 async def create_workspace_document(
     workspace_id: UUID,
@@ -42,6 +67,7 @@ async def create_workspace_document(
 ) -> DocumentResponse:
     document = await create_document(db, workspace_id, current_user, data)
     return DocumentResponse.model_validate(document)
+
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)

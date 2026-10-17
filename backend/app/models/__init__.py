@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
 from app.database import Base
-from app.models.channel import Channel, Message  # noqa: F401
+from app.models.channel import Channel, ChannelReadState, Message, MessageReaction  # noqa: F401
 from app.models.document import Document  # noqa: F401
 from app.models.file import FileRecord  # noqa: F401
 from app.models.finance import FinanceTransaction  # noqa: F401

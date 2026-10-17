@@ -44,5 +44,15 @@ class Document(Base):
         nullable=False,
     )
 
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    icon: Mapped[str | None] = mapped_column(String(32), nullable=True, default="📄")
+
     workspace: Mapped["Workspace"] = relationship(back_populates="documents")
     author: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+    parent: Mapped["Document | None"] = relationship("Document", remote_side=[id], back_populates="children")
+    children: Mapped[list["Document"]] = relationship("Document", back_populates="parent", cascade="all, delete-orphan")

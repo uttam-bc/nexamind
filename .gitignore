@@ -12,8 +12,23 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# Database
+# Database & Backups
 *.db
+*.bak
+
+# Media & Uploads
+backend/uploads/
+uploads/
+
+# Build & Frontend Outputs
+dist/
+frontend/dist/
+.expo/
+*.tgz
+*.log
+
+# Dependencies
+node_modules/
 
 # IDE
 .idea/
@@ -22,3 +37,4 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+

@@ -52,7 +52,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,10 +66,10 @@ async def auth_error_handler(_: Request, exc: AuthError) -> JSONResponse:
 
 @app.exception_handler(Exception)
 async def global_exception_handler(_: Request, exc: Exception) -> JSONResponse:
-    import traceback
-    traceback.print_exc()
     logger.error("Unhandled Exception: %s", exc, exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": str(exc), "type": type(exc).__name__})
+    if settings.debug:
+        return JSONResponse(status_code=500, content={"detail": str(exc), "type": type(exc).__name__})
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/health")

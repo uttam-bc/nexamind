@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://10.0.2.2:8000'; // Default Android Emulator host (or localhost for iOS)
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ||
+  (typeof window !== 'undefined' && window.location ? window.location.origin : 'http://127.0.0.1:8000');
 
 let authToken = '';
 
@@ -53,6 +55,9 @@ export const mobileApi = {
     }),
   listSessions: (wsId) => request(`/workspaces/${wsId}/sessions`),
   getFinanceSummary: (wsId) => request(`/workspaces/${wsId}/finance/summary`),
+  listDocuments: (wsId) => request(`/workspaces/${wsId}/documents`),
+  listChannels: (wsId) => request(`/workspaces/${wsId}/channels`),
+  listMessages: (wsId, channelId) => request(`/workspaces/${wsId}/channels/${channelId}/messages`),
   chatWithAgent: (wsId, prompt) =>
     request(`/workspaces/${wsId}/ai/chat`, {
       method: 'POST',

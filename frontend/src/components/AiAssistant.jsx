@@ -32,7 +32,7 @@ export default function AiAssistant({
     content:
       'Hello! I am your **NexaMind Autonomous Copilot**.\n\n' +
       'I have direct database and workspace authority. You can tell me in natural language to:\n' +
-      '- 📄 *Create or edit files & documents in Supabase*\n' +
+      '- 📄 *Create or edit files & documents in NexaMind*\n' +
       '- 📊 *Create, assign & update tasks on Kanban*\n' +
       '- 📅 *Schedule meetings & calendar reminders*\n' +
       '- 💬 *Broadcast messages & share docs to channels*\n' +
@@ -148,7 +148,7 @@ export default function AiAssistant({
     const userMsg = { role: 'user', content: prompt, timestamp: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
     setIsProcessing(true);
-    setActivePlanSteps(['Analyzing intent & scoping tools...', 'Executing autonomous operations in Supabase...']);
+    setActivePlanSteps(['Analyzing intent & scoping tools...', 'Executing autonomous operations in NexaMind...']);
 
     try {
       const res = await api.chatWithAgent(workspaceId, prompt);
@@ -275,7 +275,7 @@ export default function AiAssistant({
               </span>
             </h2>
             <p className="text-[10px] font-mono text-slate-500">
-              Direct Supabase Database Authority & Tool Execution
+              Direct NexaMind Database Authority & Tool Execution
             </p>
           </div>
         </div>

@@ -114,10 +114,13 @@ export const api = {
 
   // Documents
   listDocuments: (wsId) => request(`/workspaces/${wsId}/documents`),
-  createDocument: (wsId, title, content) =>
+  searchDocuments: (wsId, query) =>
+    request(`/workspaces/${wsId}/documents/search?q=${encodeURIComponent(query || '')}`),
+  getDocumentTree: (wsId) => request(`/workspaces/${wsId}/documents/tree`),
+  createDocument: (wsId, title, content, parentId = null, icon = '📄') =>
     request(`/workspaces/${wsId}/documents`, {
       method: 'POST',
-      body: JSON.stringify({ title, content }),
+      body: JSON.stringify({ title, content, parent_id: parentId, icon }),
     }),
   getDocument: (wsId, docId) => request(`/workspaces/${wsId}/documents/${docId}`),
   updateDocument: (wsId, docId, data) =>
@@ -129,6 +132,7 @@ export const api = {
     request(`/workspaces/${wsId}/documents/${docId}`, {
       method: 'DELETE',
     }),
+
 
   // Tasks (Kanban)
   listTasks: (wsId, status) =>
@@ -173,15 +177,20 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // Channels
+  // Channels (Teams-Style)
   listChannels: (wsId) => request(`/workspaces/${wsId}/channels`),
+  getChannelUnreads: (wsId) => request(`/workspaces/${wsId}/channels/unread`),
   createChannel: (wsId, data) =>
     request(`/workspaces/${wsId}/channels`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  listMessages: (wsId, channelId) =>
-    request(`/workspaces/${wsId}/channels/${channelId}/messages`),
+  listMessages: (wsId, channelId, parentId = null, rootOnly = false) => {
+    let url = `/workspaces/${wsId}/channels/${channelId}/messages?`;
+    if (parentId) url += `parent_id=${parentId}&`;
+    if (rootOnly) url += `root_only=true&`;
+    return request(url);
+  },
   postMessage: (wsId, channelId, data) => {
     const payload = typeof data === 'string' ? { content: data } : data;
     return request(`/workspaces/${wsId}/channels/${channelId}/messages`, {
@@ -189,6 +198,19 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  toggleReaction: (wsId, channelId, messageId, emoji) =>
+    request(`/workspaces/${wsId}/channels/${channelId}/messages/${messageId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    }),
+  markChannelRead: (wsId, channelId) =>
+    request(`/workspaces/${wsId}/channels/${channelId}/read`, {
+      method: 'POST',
+    }),
+
+  // Presence (Teams-Style)
+  getWorkspacePresence: (wsId) => request(`/ws/workspaces/${wsId}/presence`),
+
 
   // Files
   listFiles: (wsId) => request(`/workspaces/${wsId}/files`),

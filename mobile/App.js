@@ -19,8 +19,8 @@ export default function App() {
   const [activeWs, setActiveWs] = useState(null);
 
   const [authMode, setAuthMode] = useState('login');
-  const [email, setEmail] = useState('demo@nexamind.app');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');

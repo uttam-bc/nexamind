@@ -9,15 +9,21 @@ from app.models import User
 from app.schemas.channel import (
     ChannelCreate,
     ChannelResponse,
+    ChannelUnreadSummary,
     MessageCreate,
     MessageResponse,
+    ReactionSummary,
+    ReactionToggleRequest,
 )
 from app.services.channel_service import (
     create_channel,
     get_channel,
+    get_channel_unreads,
     list_channels,
     list_messages,
+    mark_channel_read,
     post_message,
+    toggle_reaction,
 )
 from app.services.websocket_manager import ws_manager
 
@@ -32,6 +38,16 @@ async def get_workspace_channels(
 ) -> list[ChannelResponse]:
     channels = await list_channels(db, workspace_id, current_user.id)
     return [ChannelResponse.model_validate(c) for c in channels]
+
+
+@router.get("/unread", response_model=list[ChannelUnreadSummary])
+async def get_unread_channels(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ChannelUnreadSummary]:
+    unreads = await get_channel_unreads(db, workspace_id, current_user.id)
+    return [ChannelUnreadSummary.model_validate(u) for u in unreads]
 
 
 @router.post("", response_model=ChannelResponse, status_code=status.HTTP_201_CREATED)
@@ -65,11 +81,21 @@ async def get_workspace_channel(
 async def get_channel_messages(
     workspace_id: UUID,
     channel_id: UUID,
-    limit: int = 50,
+    parent_id: UUID | None = None,
+    root_only: bool = False,
+    limit: int = 100,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MessageResponse]:
-    messages = await list_messages(db, workspace_id, channel_id, current_user.id, limit=limit)
+    messages = await list_messages(
+        db,
+        workspace_id,
+        channel_id,
+        current_user.id,
+        parent_id=parent_id,
+        root_only=root_only,
+        limit=limit,
+    )
     return [MessageResponse.model_validate(m) for m in messages]
 
 
@@ -92,4 +118,41 @@ async def post_channel_message(
         },
     )
     return msg_response
+
+
+@router.post("/{channel_id}/messages/{message_id}/reactions", response_model=list[ReactionSummary])
+async def react_to_message(
+    workspace_id: UUID,
+    channel_id: UUID,
+    message_id: UUID,
+    data: ReactionToggleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ReactionSummary]:
+    reactions = await toggle_reaction(
+        db, workspace_id, channel_id, message_id, current_user.id, data.emoji
+    )
+    res = [ReactionSummary.model_validate(r) for r in reactions]
+    await ws_manager.broadcast_to_channel(
+        channel_id,
+        {
+            "event": "reaction_updated",
+            "channel_id": str(channel_id),
+            "message_id": str(message_id),
+            "data": [r.model_dump(mode="json") for r in res],
+        },
+    )
+    return res
+
+
+@router.post("/{channel_id}/read", status_code=status.HTTP_200_OK)
+async def mark_channel_as_read(
+    workspace_id: UUID,
+    channel_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await mark_channel_read(db, workspace_id, channel_id, current_user.id)
+    return {"status": "ok"}
+
 

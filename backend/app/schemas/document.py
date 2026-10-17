@@ -16,6 +16,10 @@ class DocumentBlock(BaseModel):
     items: list[str] | None = None
     level: int | None = Field(default=None, ge=1, le=6)
     language: str | None = None
+    checked: bool | None = None
+    callout_icon: str | None = None
+    caption: str | None = None
+    url: str | None = None
 
 
 class DocumentContent(BaseModel):
@@ -40,16 +44,20 @@ class DocumentContent(BaseModel):
 class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     content: DocumentContent | None = None
+    parent_id: UUID | None = None
+    icon: str | None = Field(default="📄", max_length=32)
 
 
 class DocumentUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     content: DocumentContent | None = None
+    parent_id: UUID | None = None
+    icon: str | None = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
     def validate_at_least_one_field(self) -> Self:
-        if self.title is None and self.content is None:
-            raise ValueError("At least one of title or content must be provided")
+        if self.title is None and self.content is None and self.parent_id is None and self.icon is None:
+            raise ValueError("At least one field must be provided to update")
         return self
 
 
@@ -58,6 +66,8 @@ class DocumentResponse(BaseModel):
 
     id: UUID
     workspace_id: UUID
+    parent_id: UUID | None = None
+    icon: str | None = "📄"
     title: str
     content: dict
     created_by: UUID | None
@@ -70,7 +80,32 @@ class DocumentListItem(BaseModel):
 
     id: UUID
     workspace_id: UUID
+    parent_id: UUID | None = None
+    icon: str | None = "📄"
     title: str
     created_by: UUID | None
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentSearchResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    title: str
+    icon: str | None = "📄"
+    snippet: str
+    match_type: str
+    updated_at: datetime
+
+
+class DocumentTreeNode(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    parent_id: UUID | None = None
+    title: str
+    icon: str | None = "📄"
+    children: list["DocumentTreeNode"] = Field(default_factory=list)
+

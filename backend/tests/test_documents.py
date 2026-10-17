@@ -210,3 +210,78 @@ async def test_team_member_can_access_shared_documents(client: AsyncClient) -> N
     )
     assert response.status_code == 200
     assert response.json()["title"] == "Team Notes"
+
+
+@pytest.mark.asyncio
+async def test_document_search_and_hierarchy(client: AsyncClient, auth_context: dict) -> None:
+    workspace_id = auth_context["workspace_id"]
+    token = auth_context["token"]
+
+    # 1. Create parent document
+    parent_res = await client.post(
+        f"/workspaces/{workspace_id}/documents",
+        headers=auth_headers(token),
+        json={
+            "title": "Engineering Wiki",
+            "icon": "📚",
+            "content": {
+                "blocks": [
+                    {"id": "b1", "type": "paragraph", "text": "Welcome to our architecture handbook."}
+                ]
+            },
+        },
+    )
+    assert parent_res.status_code == 201
+    parent_doc = parent_res.json()
+    assert parent_doc["icon"] == "📚"
+    parent_id = parent_doc["id"]
+
+    # 2. Create child document under parent
+    child_res = await client.post(
+        f"/workspaces/{workspace_id}/documents",
+        headers=auth_headers(token),
+        json={
+            "title": "Microservices Design",
+            "icon": "⚙️",
+            "parent_id": parent_id,
+            "content": {
+                "blocks": [
+                    {"id": "b2", "type": "paragraph", "text": "Details on FastAPI async event brokers."}
+                ]
+            },
+        },
+    )
+    assert child_res.status_code == 201
+    child_doc = child_res.json()
+    assert child_doc["parent_id"] == parent_id
+    assert child_doc["icon"] == "⚙️"
+
+    # 3. Test full-text search by title
+    search_title_res = await client.get(
+        f"/workspaces/{workspace_id}/documents/search?q=Engineering",
+        headers=auth_headers(token),
+    )
+    assert search_title_res.status_code == 200
+    title_results = search_title_res.json()
+    assert any(r["title"] == "Engineering Wiki" for r in title_results)
+
+    # 4. Test search by content block
+    search_content_res = await client.get(
+        f"/workspaces/{workspace_id}/documents/search?q=FastAPI",
+        headers=auth_headers(token),
+    )
+    assert search_content_res.status_code == 200
+    content_results = search_content_res.json()
+    assert any("FastAPI" in r["snippet"] for r in content_results)
+
+    # 5. Test tree hierarchy endpoint
+    tree_res = await client.get(
+        f"/workspaces/{workspace_id}/documents/tree",
+        headers=auth_headers(token),
+    )
+    assert tree_res.status_code == 200
+    tree = tree_res.json()
+    wiki_node = next((n for n in tree if n["id"] == parent_id), None)
+    assert wiki_node is not None
+    assert any(c["id"] == child_doc["id"] for c in wiki_node["children"])
+

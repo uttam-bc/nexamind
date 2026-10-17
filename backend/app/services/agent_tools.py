@@ -633,13 +633,14 @@ async def post_channel_message_tool(
         user,
         MessageCreate(content=content),
     )
-    await db.commit()
+    msg_id = msg["id"] if isinstance(msg, dict) else msg.id
     return {
-        "id": str(msg.id),
+        "id": str(msg_id),
         "channel_id": str(c_uuid),
         "type": "message",
         "message": f"Message posted to channel #{str(c_uuid)[:6]}.",
     }
+
 
 
 # -------------------------------------------------------------

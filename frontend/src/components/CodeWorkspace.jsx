@@ -68,7 +68,7 @@ def create_access_token(user_id: str) -> str:
       name: 'README.md',
       language: 'markdown',
       content: `# NexaMind Core Services
-Microservices architecture connecting real-time WebSockets, WebRTC video calling, and Supabase PostgreSQL.
+Microservices architecture connecting real-time WebSockets, WebRTC video calling, and PostgreSQL/SQLite database engine.
 `,
     },
   ]);
