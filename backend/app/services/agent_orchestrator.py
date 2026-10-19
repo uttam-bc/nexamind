@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import date as d_date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -123,6 +123,7 @@ async def execute_tool(
         return await update_task_status_tool(
             db,
             workspace_id,
+            user.id,
             task_id=tool_args.get("task_id", ""),
             status=tool_args.get("status", "done"),
         )
@@ -143,7 +144,6 @@ async def execute_tool(
             user,
             repo_id=tool_args.get("repo_id", ""),
             message=tool_args.get("message", "Commit by NexaMind agent"),
-            branch=tool_args.get("branch", "main"),
         )
     elif tool_name == "create_issue":
         return await create_issue_tool(
@@ -402,6 +402,9 @@ async def run_agent(
     memory_context_str = "\n".join(memory_context_lines) if memory_context_lines else "No specific past memory matched."
 
     # 5. Autonomous Tool Execution Pattern Matching
+    meeting_context_str = ""
+    finance_context_str = ""
+
     # A. Workspace Switch
     is_ws_switch = any(p in prompt_lower for p in ["switch to", "switch workspace", "go to workspace", "go to group", "go to solo", "open group", "open solo", "switch account"])
     if is_ws_switch:
@@ -410,66 +413,156 @@ async def run_agent(
         sw_res = await execute_tool("switch_workspace", {"target": target_q}, db, workspace_id, user)
         tool_executions.append({"tool": "switch_workspace", "args": {"target": target_q}, "result": sw_res})
 
-    # B. Document / File Creation
-    is_doc_create = (
-        any(w in prompt_lower for w in ["doc", "document", "spec", "file", "notes", "markdown"])
-        and any(p in prompt_lower for p in ["create", "write", "new", "draft", "author", "make", "generate", "build"])
-        and not any(e in prompt_lower for e in ["edit", "update", "modify", "append", "add to"])
-        and not is_ws_switch
+    # B. Cross-Workspace or Direct Document Access
+    is_doc_get = (
+        any(p in prompt_lower for p in ["access the file", "get the file", "read the file", "show file", "view file", "open file", "access document", "read document", "get document"])
+        or ("file" in prompt_lower and ("from group" in prompt_lower or "in group" in prompt_lower))
     )
-    if is_doc_create:
-        named_match = re.search(r"(?:named|titled|called)\s+['\"]?([^'\"\n]+?)['\"]?(?:\s+with|\s+containing|$)", user_prompt, re.IGNORECASE)
-        if named_match:
-            doc_title = named_match.group(1).strip()
-        else:
-            doc_title = "Sprint Specification"
-
-        content_match = re.search(r"(?:with\s+(?:text|content|body)|containing|saying|text\s+is)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
-        doc_content = content_match.group(1).strip() if content_match else f"# {doc_title}\n\nDrafted by NexaMind Autonomous Copilot."
-        doc_res = await execute_tool("create_document", {"title": doc_title, "content_text": doc_content}, db, workspace_id, user)
-        tool_executions.append({"tool": "create_document", "args": {"title": doc_title}, "result": doc_res})
+    if is_doc_get and not is_ws_switch:
+        doc_q_match = re.search(r"(?:access the file|get the file|read the file|show file|view file|open file|access document|read document|get document|file)\s+['\"]?([a-zA-Z0-9_\-\.]+?)['\"]?(?:\s+from|\s+in|$)", user_prompt, re.IGNORECASE)
+        doc_query = doc_q_match.group(1).strip().strip("'\"") if doc_q_match else ""
+        group_match = re.search(r"(?:from group|in group|group workspace|group)\s+['\"]?([^'\"\n]+?)['\"]?$", user_prompt, re.IGNORECASE)
+        target_group = group_match.group(1).strip().strip("'\"") if group_match else None
+        get_res = await execute_tool("get_document", {"doc_query": doc_query, "target_group": target_group}, db, workspace_id, user)
+        tool_executions.append({"tool": "get_document", "args": {"doc_query": doc_query, "target_group": target_group}, "result": get_res})
 
     # C. Document Editing / Appending
     is_doc_edit = (
         any(w in prompt_lower for w in ["doc", "document", "file", "notes"])
         and any(p in prompt_lower for p in ["edit", "update", "append", "modify", "add to"])
+        and not is_ws_switch
     )
     if is_doc_edit:
-        doc_target_match = re.search(r"(?:doc|document|file)\s+['\"]?([^'\"\n]+?)['\"]?(?:\s+with|\s+to|$)", user_prompt, re.IGNORECASE)
-        doc_target = doc_target_match.group(1).strip() if doc_target_match else "notes.txt"
-        edit_text_match = re.search(r"(?:with|add|text)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
-        edit_text = edit_text_match.group(1).strip() if edit_text_match else "Updated by NexaMind AI Copilot."
+        doc_target_match = re.search(
+            r"(?:edit|update|append|modify|add to)\s+(?:doc|document|file)?\s*['\"]?([a-zA-Z0-9_\-\.]+?)['\"]?(?:\s+and\s+(?:add|append)|\s+with|\s+to|$)",
+            user_prompt,
+            re.IGNORECASE,
+        )
+        doc_target = doc_target_match.group(1).strip().strip("'\"") if doc_target_match else "notes.txt"
+        edit_text_match = re.search(r"(?:and add|and append|with|add|text)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
+        edit_text = edit_text_match.group(1).strip().strip("'\"") if edit_text_match else "Updated by NexaMind AI Copilot."
         edit_res = await execute_tool("edit_document", {"doc_query": doc_target, "new_content_text": edit_text, "mode": "append"}, db, workspace_id, user)
         tool_executions.append({"tool": "edit_document", "args": {"doc_query": doc_target}, "result": edit_res})
 
-    # D. Task Creation (with Status support: To Do, In Progress, Done!)
+    # D. Document / File Creation
+    is_doc_create = (
+        any(w in prompt_lower for w in ["doc", "document", "spec", "file", "notes", "markdown"])
+        and any(p in prompt_lower for p in ["create", "write", "new", "draft", "author", "make", "generate", "build"])
+        and not is_doc_edit
+        and not is_doc_get
+        and not is_ws_switch
+    )
+    if is_doc_create:
+        named_match = re.search(r"(?:named|titled|called)\s+['\"]?([^'\"\n]+?)['\"]?(?:\s+with|\s+containing|$)", user_prompt, re.IGNORECASE)
+        if named_match:
+            doc_title = named_match.group(1).strip().strip("'\"")
+        else:
+            q_match = re.search(r"['\"]([^'\"\n]+)['\"]", user_prompt)
+            doc_title = q_match.group(1).strip().strip("'\"") if q_match else "Sprint Specification"
+
+        content_match = re.search(r"(?:with\s+(?:text|content|body|specs)|containing|saying|text\s+is)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
+        doc_content = content_match.group(1).strip().strip("'\"") if content_match else f"# {doc_title}\n\nDrafted by NexaMind Autonomous Copilot."
+        doc_res = await execute_tool("create_document", {"title": doc_title, "content_text": doc_content}, db, workspace_id, user)
+        tool_executions.append({"tool": "create_document", "args": {"title": doc_title}, "result": doc_res})
+
+    # E. Tasks & Kanban (with Meeting to Action Items and Status support)
     if ("task" in prompt_lower or "todo" in prompt_lower or "kanban" in prompt_lower) and any(p in prompt_lower for p in ["create", "new", "add", "make", "assign"]):
-        task_match = re.search(r"(?:task|titled|called)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
-        task_title = task_match.group(1).strip() if task_match else "Review Sprint Deliverables"
+        if any(m in prompt_lower for m in ["meeting", "action item", "session", "yesterday"]):
+            search_res = await execute_tool("search_sessions", {"query": ""}, db, workspace_id, user)
+            tool_executions.append({"tool": "search_sessions", "args": {"query": ""}, "result": search_res})
+            sessions = search_res.get("sessions", [])
+            if sessions:
+                session_title = sessions[0].get("title", "Meeting")
+                action_items = sessions[0].get("action_items", [])
+                meeting_context_str = f"Found meeting **'{session_title}'** with {len(action_items)} action items."
+                for item in action_items:
+                    t_res = await execute_tool("create_task", {"title": item, "priority": "high"}, db, workspace_id, user)
+                    tool_executions.append({"tool": "create_task", "args": {"title": item}, "result": t_res})
+        else:
+            quote_match = re.search(r"(?:task|titled|called)\s+['\"]([^'\"]+)['\"]", user_prompt, re.IGNORECASE)
+            if quote_match:
+                task_title = quote_match.group(1).strip()
+            else:
+                task_match = re.search(r"(?:task|titled|called)\s+['\"]?([^'\"\n,]+)['\"]?", user_prompt, re.IGNORECASE)
+                task_title = task_match.group(1).strip() if task_match else "Review Sprint Deliverables"
 
-        status = "in_progress" if "in progress" in prompt_lower or "doing" in prompt_lower else "done" if "done" in prompt_lower or "completed" in prompt_lower else "todo"
-        priority = "urgent" if "urgent" in prompt_lower else "high" if "high" in prompt_lower else "medium"
+            status = "in_progress" if "in progress" in prompt_lower or "doing" in prompt_lower else "done" if "done" in prompt_lower or "completed" in prompt_lower else "todo"
+            priority = "urgent" if "urgent" in prompt_lower else "high" if "high" in prompt_lower else "medium"
 
-        task_res = await execute_tool("create_task", {"title": task_title, "status": status, "priority": priority}, db, workspace_id, user)
-        tool_executions.append({"tool": "create_task", "args": {"title": task_title, "status": status, "priority": priority}, "result": task_res})
+            task_res = await execute_tool("create_task", {"title": task_title, "status": status, "priority": priority}, db, workspace_id, user)
+            tool_executions.append({"tool": "create_task", "args": {"title": task_title, "status": status, "priority": priority}, "result": task_res})
 
-    # E. Channel / Message Creation
-    if "channel" in prompt_lower and any(p in prompt_lower for p in ["create", "new", "add", "make"]):
+    # F. Code Repository Creation
+    if ("repo" in prompt_lower or "repository" in prompt_lower) and any(p in prompt_lower for p in ["create", "new", "add", "make"]):
+        repo_match = re.search(r"(?:repo|repository)\s+(?:named\s+)?['\"]?([a-zA-Z0-9_\-]+)['\"]?", user_prompt, re.IGNORECASE)
+        repo_name = repo_match.group(1).strip().strip("'\"") if repo_match else "core-gateway"
+        r_res = await execute_tool("create_repo", {"name": repo_name, "description": "Automated code repository"}, db, workspace_id, user)
+        tool_executions.append({"tool": "create_repo", "args": {"name": repo_name}, "result": r_res})
+
+    # G. Channel Creation & Messaging
+    if "channel" in prompt_lower and any(p in prompt_lower for p in ["create", "new", "add", "make"]) and not any(p in prompt_lower for p in ["send message", "post message", "chat to channel"]):
         chan_match = re.search(r"(?:channel)\s+(?:named\s+)?['\"]?#?([a-zA-Z0-9_\-]+)['\"]?", user_prompt, re.IGNORECASE)
-        chan_name = chan_match.group(1).strip() if chan_match else "team-announcements"
+        chan_name = chan_match.group(1).strip().strip("'\"") if chan_match else "team-announcements"
         c_res = await execute_tool("create_channel", {"name": chan_name}, db, workspace_id, user)
         tool_executions.append({"tool": "create_channel", "args": {"name": chan_name}, "result": c_res})
-    elif any(p in prompt_lower for p in ["send message", "post message", "chat to channel"]):
-        post_match = re.search(r"(?:message|saying)\s+['\"]?([^'\"\n]+)['\"]?\s+(?:to|in)\s+#?([a-zA-Z0-9_\-]+)", user_prompt, re.IGNORECASE)
-        msg_text = post_match.group(1).strip() if post_match else "Team notification from NexaMind Agent"
+
+    if any(p in prompt_lower for p in ["send message", "post message", "chat to channel"]):
+        post_match = re.search(r"(?:message|saying)\s+['\"]?([^'\"\n]+)['\"]?\s+(?:to|in)\s+(?:channel\s+)?#?([a-zA-Z0-9_\-]+)", user_prompt, re.IGNORECASE)
+        msg_text = post_match.group(1).strip().strip("'\"") if post_match else "Team notification from NexaMind Agent"
         ch_target = post_match.group(2).strip() if post_match else "general"
-        chan_lookup = await db.execute(select(Channel).where(Channel.workspace_id == workspace_id, Channel.name == ch_target))
+        chan_lookup = await db.execute(select(Channel).where(Channel.workspace_id == workspace_id, Channel.name.ilike(ch_target)))
         chan_obj = chan_lookup.scalar_one_or_none()
+        if not chan_obj:
+            chan_any = await db.execute(select(Channel).where(Channel.workspace_id == workspace_id).limit(1))
+            chan_obj = chan_any.scalar_one_or_none()
+        if not chan_obj:
+            c_res = await create_channel_tool(db, workspace_id, user, name=ch_target)
+            chan_id = c_res.get("id")
+            if chan_id:
+                chan_obj = await db.get(Channel, UUID(chan_id))
         if chan_obj:
             p_res = await execute_tool("post_channel_message", {"channel_id": str(chan_obj.id), "content": msg_text}, db, workspace_id, user)
             tool_executions.append({"tool": "post_channel_message", "args": {"channel": ch_target, "content": msg_text}, "result": p_res})
 
-    # F. Direct Search Request
+    # H. Calendar & Event Scheduling
+    if any(p in prompt_lower for p in ["schedule meeting", "schedule a meeting", "schedule event", "calendar", "set reminder", "book meeting"]):
+        quotes_match = re.search(r"['\"]([^'\"]+)['\"]", user_prompt)
+        if quotes_match:
+            event_title = quotes_match.group(1).strip()
+        else:
+            event_match = re.search(r"(?:for|named|titled|meeting|about)\s+([a-zA-Z0-9_\-\s]+)", user_prompt, re.IGNORECASE)
+            event_title = event_match.group(1).strip() if event_match else "Team Sync"
+        target_date = (d_date.today() + timedelta(days=1)).isoformat()
+        cal_res = await execute_tool("create_calendar_event", {"title": event_title, "event_date": target_date, "event_time": "03:00 PM"}, db, workspace_id, user)
+        tool_executions.append({"tool": "create_calendar_event", "args": {"title": event_title, "event_date": target_date}, "result": cal_res})
+
+    # I. Finance Logging & Runway Search
+    if any(p in prompt_lower for p in ["expense", "income", "transaction"]) and any(p in prompt_lower for p in ["log", "add", "record", "create"]):
+        amount_match = re.search(r"\$?([0-9]+(?:\.[0-9]{1,2})?)", user_prompt)
+        amount = float(amount_match.group(1)) if amount_match else 500.0
+        tx_type = "income" if "income" in prompt_lower else "expense"
+        cat_match = re.search(r"(?:for|under|category)\s+([a-zA-Z0-9\s]+?)(?:\.|$)", user_prompt, re.IGNORECASE)
+        cat = cat_match.group(1).strip() if cat_match else "Cloud Infrastructure"
+        tx_res = await execute_tool("create_transaction", {"type": tx_type, "amount": amount, "category": cat}, db, workspace_id, user)
+        tool_executions.append({"tool": "create_transaction", "args": {"type": tx_type, "amount": amount, "category": cat}, "result": tx_res})
+    elif any(p in prompt_lower for p in ["runway", "burn rate", "balance", "how much money", "financial health", "cash"]):
+        fin_res = await execute_tool("search_finance", {}, db, workspace_id, user)
+        tool_executions.append({"tool": "search_finance", "args": {}, "result": fin_res})
+        metrics = fin_res.get("metrics", {})
+        cash = metrics.get("cash_balance", 0.0)
+        burn = metrics.get("net_burn_rate", 0.0)
+        runway = metrics.get("runway_months")
+        runway_str = f"{runway} months" if runway is not None else "Profitable"
+        finance_context_str = f"**Cash Balance:** ${cash:,.2f} | **Burn Rate:** ${burn:,.2f}/mo | **Runway:** {runway_str}"
+
+    # J. Report Generation
+    if any(p in prompt_lower for p in ["synthesize report", "generate report", "create report", "make report"]):
+        rep_match = re.search(r"(?:report|named|titled)\s+[\"']?([^\"'\n]+)[\"']?", user_prompt, re.IGNORECASE)
+        rep_title = rep_match.group(1).strip().strip("'\"") if rep_match else "Sprint Strategy Synthesis"
+        rep_res = await execute_tool("generate_report", {"title": rep_title, "report_type": "sprint_summary"}, db, workspace_id, user)
+        tool_executions.append({"tool": "generate_report", "args": {"title": rep_title}, "result": rep_res})
+
+    # K. Direct Search Request
     if any(p in prompt_lower for p in ["search documents for", "find documents about", "lookup in docs"]):
         search_q_match = re.search(r"(?:search documents for|find documents about|lookup in docs)\s+(.+)", user_prompt, re.IGNORECASE)
         search_term = search_q_match.group(1).strip() if search_q_match else user_prompt
@@ -495,7 +588,9 @@ async def run_agent(
         f"{docs_context_str}\n\n"
         f"LONG-TERM WORKSPACE MEMORY (Extracted facts, decisions, summaries, and action items):\n"
         f"{memory_context_str}\n\n"
-        f"TOOLS EXECUTED FOR THIS TURN:\n"
+        + (f"MEETING CONTEXT:\n{meeting_context_str}\n\n" if meeting_context_str else "")
+        + (f"FINANCE CONTEXT:\n{finance_context_str}\n\n" if finance_context_str else "")
+        + f"TOOLS EXECUTED FOR THIS TURN:\n"
         f"{chr(10).join(executed_summary) if executed_summary else 'No modification tools were needed; providing direct intelligence.'}\n\n"
         f"CRITICAL INSTRUCTIONS:\n"
         f"1. You MUST read and answer using the Workspace Documents and Long-Term Memory provided above.\n"
@@ -520,6 +615,12 @@ async def run_agent(
     if not final_response and groq_key:
         final_response = await call_groq(user_prompt, system_instruction, past_messages, groq_key)
 
+    # Attach meeting and finance contextual summaries if present
+    if meeting_context_str and meeting_context_str not in (final_response or ""):
+        final_response = f"{meeting_context_str}\n\n{final_response}" if final_response else meeting_context_str
+    if finance_context_str and "Cash Balance" not in (final_response or ""):
+        final_response = f"{finance_context_str}\n\n{final_response}" if final_response else finance_context_str
+
     # C. Fallback: Direct Grounded Synthesis from Documents and Memory
     if not final_response:
         if tool_executions:
@@ -527,12 +628,15 @@ async def run_agent(
                 f"✅ **{t['tool']}**: {t['result'].get('message', 'Completed successfully')}"
                 for t in tool_executions
             )
-            final_response = (
-                f"I have executed the requested actions in your workspace:\n\n"
-                f"{actions_list}\n\n"
-                f"**Workspace Documents Summary:**\n"
-                f"{docs_context_str[:400]}..."
-            )
+            reply_sections = ["I have executed the requested actions in your workspace:"]
+            if meeting_context_str:
+                reply_sections.append(meeting_context_str)
+            if finance_context_str:
+                reply_sections.append(finance_context_str)
+            reply_sections.append(actions_list)
+            if docs_context_str and docs_context_str != "No documents created in this workspace yet.":
+                reply_sections.append(f"**Workspace Documents Summary:**\n{docs_context_str[:400]}...")
+            final_response = "\n\n".join(reply_sections)
         else:
             # High-quality direct document answer if Gemini is offline
             doc_summaries = []
@@ -542,14 +646,19 @@ async def run_agent(
 
             docs_formatted = "\n\n".join(doc_summaries) if doc_summaries else "No documents found in this workspace yet."
 
-            final_response = (
-                f"### 📚 Workspace Documents & Memory Overview\n\n"
-                f"I scanned your workspace and found **{len(all_workspace_docs)} documents**:\n\n"
-                f"{docs_formatted}\n\n"
+            reply_parts = [
+                f"### 📚 Workspace Documents & Memory Overview\n\nI scanned your workspace and found **{len(all_workspace_docs)} documents**:\n\n{docs_formatted}",
+            ]
+            if meeting_context_str:
+                reply_parts.append(meeting_context_str)
+            if finance_context_str:
+                reply_parts.append(finance_context_str)
+            reply_parts.append(
                 f"**Relevant AI Long-Term Memory:**\n"
                 f"{memory_context_str[:350]}...\n\n"
                 f"You can ask me to read any document in detail, draft new specifications, or create tasks on your Kanban board."
             )
+            final_response = "\n\n".join(reply_parts)
 
     # 7. Persist to Database (Session & Message)
     user_msg = AiMessage(
