@@ -3,472 +3,776 @@ import {
   Send,
   Mic,
   MicOff,
-  Star,
-  Copy,
-  Trash2,
-  FolderKanban,
-  Play,
-  Pause,
+  Search,
+  UserPlus,
   MessageSquare,
-  CheckCheck,
   Check,
+  CheckCheck,
+  Copy,
+  Smile,
+  Video,
+  Clock,
+  Sparkles,
+  Users,
+  Shield,
+  Circle,
+  Phone,
+  MoreVertical,
+  X,
+  User,
 } from 'lucide-react';
 import { api } from '../api';
-import { useToast } from '../context/ToastContext';
-import { PageHeader, Badge, EmptyState } from './ui';
+import FeatureHeader from './FeatureHeader';
 
 export default function SoloChat({
   workspaceId,
   user,
   onNavigateTab,
   onRefreshAll,
+  onBack,
 }) {
-  const { success: toastSuccess, error: toastError } = useToast();
-
+  const [channels, setChannels] = useState([]);
+  const [activeChannel, setActiveChannel] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTag, setSelectedTag] = useState('all');
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
-  const [voiceDuration, setVoiceDuration] = useState(0);
-  const [playingAudioId, setPlayingAudioId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
 
+  // User search modal state for starting 1-on-1 chats
+  const [showUserSearchModal, setShowUserSearchModal] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [startChatError, setStartChatError] = useState('');
+
+  // Voice recording / speech recognition
+  const [isRecording, setIsRecording] = useState(false);
+  const speechRecognitionRef = useRef(null);
+
   const messagesEndRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const voiceTimerRef = useRef(null);
+  const pollingRef = useRef(null);
 
-  const storageKey = `nexamind_solo_chat_${workspaceId}_${user?.id || 'default'}`;
-
+  // 1. Load DM channels for this workspace
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        setMessages(JSON.parse(saved));
-      } else {
-        const initial = [
-          {
-            id: 'm-1',
-            sender: 'You',
-            text: 'Welcome to your Personal Solo Chat & Quick Notes! Send yourself instant ideas, links, voice memos, and tasks like WhatsApp.',
-            time: '10:00 AM',
-            timestamp: Date.now() - 3600000,
-            tags: ['#idea'],
-            type: 'text',
-            status: 'read',
-            starred: true,
-          },
-          {
-            id: 'm-2',
-            sender: 'You',
-            text: '💡 Next sprint idea: Add WebRTC multi-peer mesh with AI voice transcription.',
-            time: '10:15 AM',
-            timestamp: Date.now() - 1800000,
-            tags: ['#idea', '#todo'],
-            type: 'text',
-            status: 'read',
-            starred: false,
-          },
-        ];
-        setMessages(initial);
-        localStorage.setItem(storageKey, JSON.stringify(initial));
-      }
-    } catch (e) {
-      console.warn('Error loading solo chat:', e);
-    }
-  }, [workspaceId, user?.id]);
+    if (!workspaceId) return;
+    loadDmChannels();
+  }, [workspaceId]);
 
-  const saveMessages = (newMessages) => {
-    setMessages(newMessages);
+  const loadDmChannels = async (autoSelectFirst = true) => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify(newMessages));
-    } catch (e) {
-      console.warn('Error saving solo chat:', e);
+      setLoading(true);
+      const allChannels = await api.listChannels(workspaceId);
+      // Strictly 1-on-1 direct messages only - NO group channels allowed in Solo Chat!
+      const dmList = (allChannels || []).filter(
+        (c) => c.is_private && (c.name.startsWith('dm-') || c.name.includes('-'))
+      );
+      setChannels(dmList);
+
+      if (autoSelectFirst && dmList.length > 0) {
+        if (!activeChannel || !dmList.some((c) => c.id === activeChannel.id)) {
+          selectChannel(dmList[0]);
+        }
+      }
+    } catch (err) {
+      console.warn('Error loading DM channels:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
+  // 2. Select a DM channel and load its messages
+  const selectChannel = async (channel) => {
+    if (!channel) return;
+    setActiveChannel(channel);
+    try {
+      const msgs = await api.listMessages(workspaceId, channel.id);
+      setMessages(msgs || []);
+    } catch (err) {
+      console.warn('Error loading channel messages:', err);
+    }
+  };
+
+  // 3. Poll messages in active channel every 3 seconds for real-time live chat
+  useEffect(() => {
+    if (!workspaceId || !activeChannel) return;
+
+    const poll = async () => {
+      try {
+        const msgs = await api.listMessages(workspaceId, activeChannel.id);
+        if (msgs) {
+          setMessages(msgs);
+        }
+      } catch (err) {
+        // silent polling error
+      }
+    };
+
+    pollingRef.current = setInterval(poll, 3000);
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [workspaceId, activeChannel]);
+
+  // Scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = (e) => {
-    e?.preventDefault();
-    if (!inputText.trim()) return;
+  // 4. Send Message
+  const handleSendMessage = async (e) => {
+    if (e) e.preventDefault();
+    const content = inputText.trim();
+    if (!content || !activeChannel || sending) return;
 
-    const hashtags = inputText.match(/#[a-zA-Z0-9_]+/g) || [];
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    const newMsg = {
-      id: `msg-${Date.now()}`,
-      sender: 'You',
-      text: inputText.trim(),
-      time: timeStr,
-      timestamp: Date.now(),
-      tags: hashtags,
-      type: 'text',
-      status: 'read',
-      starred: false,
-    };
-
-    saveMessages([...messages, newMsg]);
     setInputText('');
-  };
+    setSending(true);
 
-  const startVoiceRecording = async () => {
+    // Optimistic UI update
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      content,
+      sender_id: user?.id,
+      sender_name: user?.name || 'You',
+      sender_username: user?.username || 'you',
+      created_at: new Date().toISOString(),
+      reactions: [],
+      pending: true,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const now = new Date();
-        const newVoiceMsg = {
-          id: `voice-${Date.now()}`,
-          sender: 'You',
-          text: `🎙️ Voice Note (${voiceDuration}s)`,
-          audioUrl,
-          duration: voiceDuration,
-          time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          timestamp: Date.now(),
-          tags: ['#voice'],
-          type: 'voice',
-          status: 'read',
-          starred: false,
-        };
-        saveMessages([...messages, newVoiceMsg]);
-        setIsRecordingVoice(false);
-        setVoiceDuration(0);
-        stream.getTracks().forEach((t) => t.stop());
-        toastSuccess('Voice note recorded!');
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setIsRecordingVoice(true);
-      setVoiceDuration(0);
-      voiceTimerRef.current = setInterval(() => {
-        setVoiceDuration((prev) => prev + 1);
-      }, 1000);
-    } catch (err) {
-      toastError(`Microphone error: ${err.message}`);
-    }
-  };
-
-  const stopVoiceRecording = () => {
-    if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-  };
-
-  const toggleStar = (id) => {
-    const updated = messages.map((m) => (m.id === id ? { ...m, starred: !m.starred } : m));
-    saveMessages(updated);
-  };
-
-  const deleteMessage = (id) => {
-    const updated = messages.filter((m) => m.id !== id);
-    saveMessages(updated);
-    toastSuccess('Note deleted.');
-  };
-
-  const copyMessage = (m) => {
-    navigator.clipboard.writeText(m.text);
-    setCopiedId(m.id);
-    setTimeout(() => setCopiedId(null), 2000);
-    toastSuccess('Note text copied to clipboard!');
-  };
-
-  const convertToTask = async (m) => {
-    try {
-      await api.createTask(workspaceId, {
-        title: m.text.slice(0, 80),
-        description: `Created from Solo Chat note at ${m.time}`,
-        priority: m.tags.includes('#urgent') ? 'urgent' : 'medium',
-        status: 'todo',
-      });
-      toastSuccess('Task created on your Kanban board!');
+      const sent = await api.postMessage(workspaceId, activeChannel.id, content);
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
       if (onRefreshAll) onRefreshAll();
     } catch (err) {
-      toastError(`Could not create task: ${err.message}`);
+      alert(`Could not send message: ${err.message}`);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+    } finally {
+      setSending(false);
     }
   };
 
-  const filteredMessages = messages.filter((m) => {
-    const matchesSearch =
-      !searchQuery || m.text.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesTag =
-      selectedTag === 'all'
-        ? true
-        : selectedTag === 'starred'
-        ? m.starred
-        : m.tags?.includes(selectedTag);
-    return matchesSearch && matchesTag;
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  // 5. Search users to start new direct 1-on-1 chat
+  const handleSearchUsers = async (query) => {
+    setUserSearchQuery(query);
+    setStartChatError('');
+    if (!query.trim() || query.trim().length < 2) {
+      setUserSearchResults([]);
+      return;
+    }
+    setIsSearchingUsers(true);
+    try {
+      const clean = query.startsWith('@') ? query.slice(1) : query;
+      const res = await api.searchUsers(clean);
+      // Filter out yourself if you only want to message other users
+      setUserSearchResults(res || []);
+    } catch (err) {
+      console.warn('User search error:', err);
+    } finally {
+      setIsSearchingUsers(false);
+    }
+  };
+
+  const handleStartChatWithUser = async (targetUser) => {
+    if (!targetUser?.username) return;
+    try {
+      setStartChatError('');
+      const channel = await api.createOrOpenDm(workspaceId, targetUser.username);
+      setShowUserSearchModal(false);
+      setUserSearchQuery('');
+      setUserSearchResults([]);
+      // Refresh DM list and select new channel
+      await loadDmChannels(false);
+      selectChannel(channel);
+    } catch (err) {
+      setStartChatError(err.message || 'Could not start conversation with user');
+    }
+  };
+
+  // 6. Voice Input (Speech Recognition)
+  const toggleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Voice dictation is supported in Chrome, Edge, and modern browsers.');
+      return;
+    }
+
+    if (!isRecording) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => setIsRecording(true);
+        recognition.onresult = (event) => {
+          const transcript = event.results[0][0].transcript;
+          setInputText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        };
+        recognition.onerror = () => setIsRecording(false);
+        recognition.onend = () => setIsRecording(false);
+
+        recognition.start();
+        speechRecognitionRef.current = recognition;
+      } catch (err) {
+        setIsRecording(false);
+      }
+    } else {
+      speechRecognitionRef.current?.stop();
+      setIsRecording(false);
+    }
+  };
+
+  // 7. Toggle Reaction
+  const handleToggleReaction = async (messageId, emoji) => {
+    if (!activeChannel) return;
+    try {
+      await api.toggleReaction(workspaceId, activeChannel.id, messageId, emoji);
+      // refresh messages
+      const updated = await api.listMessages(workspaceId, activeChannel.id);
+      setMessages(updated);
+    } catch (err) {
+      console.warn('Reaction error:', err);
+    }
+  };
+
+  // Derive other user's display details from channel
+  const getParticipantDetails = (channel) => {
+    if (!channel) return { name: 'Direct Chat', username: 'user', initial: 'U', isSelf: false };
+    const myUsername = (user?.username || '').toLowerCase();
+
+    // Channel name format: dm-u1-u2 or dm-u1-notes
+    if (channel.name.endsWith('-notes')) {
+      return {
+        name: `${user?.name || 'You'} (Personal Notes)`,
+        username: myUsername,
+        initial: user?.name?.[0]?.toUpperCase() || 'Y',
+        isSelf: true,
+      };
+    }
+
+    if (channel.name.startsWith('dm-')) {
+      const parts = channel.name.replace('dm-', '').split('-');
+      if (parts.length >= 2) {
+        const otherHandle = parts[0].toLowerCase() === myUsername ? parts[1] : parts[0];
+        return {
+          name: `@${otherHandle}`,
+          username: otherHandle,
+          initial: otherHandle[0]?.toUpperCase() || 'U',
+          isSelf: false,
+        };
+      }
+    }
+
+    // Fallback: description parsing
+    if (channel.description && channel.description.includes('@')) {
+      const matches = channel.description.match(/@([a-zA-Z0-9_]+)/g);
+      if (matches && matches.length > 0) {
+        const otherMatch = matches.find((m) => m.slice(1).toLowerCase() !== myUsername) || matches[0];
+        const cleanHandle = otherMatch.slice(1);
+        return {
+          name: `@${cleanHandle}`,
+          username: cleanHandle,
+          initial: cleanHandle[0]?.toUpperCase() || 'U',
+          isSelf: false,
+        };
+      }
+    }
+
+    return {
+      name: channel.name.replace('dm-', '@'),
+      username: channel.name.replace('dm-', ''),
+      initial: 'U',
+      isSelf: false,
+    };
+  };
+
+  const filteredChannels = channels.filter((c) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const details = getParticipantDetails(c);
+    return (
+      details.name.toLowerCase().includes(q) ||
+      details.username.toLowerCase().includes(q) ||
+      c.name.toLowerCase().includes(q)
+    );
   });
 
-  const availableTags = ['#idea', '#todo', '#link', '#urgent', '#voice', '#snippet'];
+  const activeParticipant = activeChannel ? getParticipantDetails(activeChannel) : null;
 
   return (
-    <div className="h-full flex flex-col glass-panel rounded-3xl border border-slate-800/80 overflow-hidden bg-slate-950/60 shadow-2xl relative">
-      {/* Top Header Bar */}
-      <div className="p-4 bg-slate-900/60 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white font-black text-sm shadow-md shadow-emerald-600/30">
-            <span>{user?.name?.[0]?.toUpperCase() || 'Y'}</span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-extrabold text-sm text-slate-100">You (Personal Notes & Chat)</h3>
-              <Badge variant="emerald">Solo Mode</Badge>
-            </div>
-            <p className="text-[11px] text-slate-500">Message yourself • Instant thoughts, links & voice memos</p>
-          </div>
-        </div>
-
-        {/* Search Bar & Tag Filter */}
-        <div className="flex items-center gap-3">
-          <input
-            type="text"
-            placeholder="Search chat notes..."
-            className="input-base py-1.5 px-3 text-xs w-44"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-850 text-[11px]">
-            <button
-              onClick={() => setSelectedTag('all')}
-              className={`px-3 py-1 rounded-lg font-semibold transition ${
-                selectedTag === 'all' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              All ({messages.length})
-            </button>
-            <button
-              onClick={() => setSelectedTag('starred')}
-              className={`px-2 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition ${
-                selectedTag === 'starred' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Tag Pills */}
-      <div className="px-6 py-2 bg-slate-900/40 border-b border-slate-800/80 flex items-center gap-2 overflow-x-auto text-[11px] no-scrollbar">
-        <span className="text-[10px] font-bold text-slate-500 uppercase flex-shrink-0">Filter Tags:</span>
-        {availableTags.map((t) => (
+    <div className="h-full flex flex-col select-none">
+      {/* 0. Feature Header with Back Button (Item 1) */}
+      <FeatureHeader
+        title="Direct Messages"
+        icon={MessageSquare}
+        badge="1-on-1 User Chat"
+        onBack={onBack}
+        actions={
           <button
-            key={t}
-            onClick={() => setSelectedTag(selectedTag === t ? 'all' : t)}
-            className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono transition border ${
-              selectedTag === t
-                ? 'bg-emerald-650 text-white border-emerald-500'
-                : 'bg-slate-950 text-slate-450 border-slate-800 hover:border-slate-700'
-            }`}
+            onClick={() => setShowUserSearchModal(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-xs active:scale-95"
           >
-            {t}
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>+ Message User</span>
           </button>
-        ))}
-      </div>
+        }
+      />
 
-      {/* Chat Messages Canvas */}
-      <div
-        className="flex-1 overflow-y-auto p-6 space-y-4 relative"
-        style={{
-          backgroundImage:
-            'radial-gradient(circle at 10px 10px, rgba(255,255,255,0.015) 1.5px, transparent 0)',
-          backgroundSize: '24px 24px',
-        }}
-      >
-        {filteredMessages.map((m) => {
-          return (
-            <div key={m.id} className="flex justify-end group">
-              <div className="max-w-md bg-emerald-950/40 border border-emerald-900/40 text-slate-100 p-3.5 rounded-2xl rounded-tr-none shadow-lg relative space-y-1.5">
-                {/* Message Header Action Icons */}
-                <div className="flex items-center justify-between gap-4 text-[10px] text-emerald-400/80 pb-1 border-b border-emerald-900/25">
-                  <span className="font-bold uppercase tracking-wider">{m.sender}</span>
-                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      onClick={() => toggleStar(m.id)}
-                      className="p-1 hover:text-amber-400 transition"
-                      title={m.starred ? 'Unstar' : 'Star message'}
-                    >
-                      <Star
-                        className={`w-3.5 h-3.5 ${m.starred ? 'fill-amber-400 text-amber-400' : 'text-slate-450'}`}
-                      />
-                    </button>
-                    <button
-                      onClick={() => copyMessage(m)}
-                      className="p-1 hover:text-white transition"
-                      title="Copy text"
-                    >
-                      {copiedId === m.id ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5 text-slate-450" />}
-                    </button>
-                    <button
-                      onClick={() => convertToTask(m)}
-                      className="p-1 hover:text-indigo-300 transition"
-                      title="Convert to Kanban Task"
-                    >
-                      <FolderKanban className="w-3.5 h-3.5 text-slate-455" />
-                    </button>
-                    <button
-                      onClick={() => deleteMessage(m.id)}
-                      className="p-1 hover:text-rose-450 transition"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-slate-450" />
-                    </button>
+      {/* Main Chat Workspace Frame */}
+      <div className="flex-1 flex gap-5 overflow-hidden min-h-0 pt-2">
+        {/* 1. Left Sidebar: Direct Conversations List */}
+        <div className="w-80 bg-white rounded-2xl border border-slate-200 p-3.5 flex flex-col shadow-xs flex-shrink-0">
+          {/* Top Bar: Search & New Chat */}
+          <div className="space-y-2.5 mb-3">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Conversations ({channels.length})</span>
+              </span>
+              <button
+                onClick={() => setShowUserSearchModal(true)}
+                className="text-xs text-indigo-600 hover:text-indigo-700 font-bold hover:underline"
+              >
+                + New Chat
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search direct chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
+              />
+            </div>
+          </div>
+
+          {/* Conversation Thread Items */}
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            {loading && channels.length === 0 ? (
+              <div className="text-center py-10 text-xs text-slate-400">Loading chats...</div>
+            ) : filteredChannels.length === 0 ? (
+              <div className="text-center py-12 px-4 space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-indigo-600">
+                  <UserPlus className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800">No Direct Chats Yet</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    In Solo mode, you can message any user directly by their @username.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowUserSearchModal(true)}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                >
+                  Find a User to Chat
+                </button>
+              </div>
+            ) : (
+              filteredChannels.map((chan) => {
+                const isSelected = activeChannel?.id === chan.id;
+                const details = getParticipantDetails(chan);
+
+                return (
+                  <button
+                    key={chan.id}
+                    onClick={() => selectChannel(chan)}
+                    className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 border ${
+                      isSelected
+                        ? 'bg-indigo-50 border-indigo-200 text-indigo-900 font-bold shadow-xs'
+                        : 'bg-white border-transparent hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    {/* User Avatar */}
+                    <div className="relative shrink-0">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs shadow-xs">
+                        {details.initial}
+                      </div>
+                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-900 truncate">
+                          {details.name}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {chan.created_at ? new Date(chan.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[11px] text-indigo-600 font-mono font-medium">
+                          @{details.username}
+                        </span>
+                        <span className="text-[10px] text-slate-400 truncate">
+                          • 1-on-1 Direct Message
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* 2. Right Main Panel: Active 1-on-1 User Conversation */}
+        <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col h-full overflow-hidden min-h-0">
+          {activeChannel && activeParticipant ? (
+            <>
+              {/* Chat Header */}
+              <div className="p-3.5 sm:p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
+                      {activeParticipant.initial}
+                    </div>
+                    <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-extrabold text-sm text-slate-900">
+                        {activeParticipant.name}
+                      </h3>
+                      <span className="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                        @{activeParticipant.username}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Private Direct Message • Only visible to you and @{activeParticipant.username}
+                    </p>
                   </div>
                 </div>
 
-                {/* Body Content */}
-                {m.type === 'voice' && m.audioUrl ? (
-                  <div className="flex items-center gap-3 bg-emerald-900/30 p-2.5 rounded-xl border border-emerald-800/30 my-1">
-                    <button
-                      onClick={() => {
-                        const audio = document.getElementById(`audio-${m.id}`);
-                        if (audio) {
-                          if (playingAudioId === m.id) {
-                            audio.pause();
-                            setPlayingAudioId(null);
-                          } else {
-                            audio.play();
-                            setPlayingAudioId(m.id);
-                          }
-                        }
-                      }}
-                      className="w-8 h-8 rounded-full bg-emerald-500 hover:bg-emerald-450 flex items-center justify-center text-slate-950 font-bold shadow"
-                    >
-                      {playingAudioId === m.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-slate-950" />}
-                    </button>
-                    <audio
-                      id={`audio-${m.id}`}
-                      src={m.audioUrl}
-                      onEnded={() => setPlayingAudioId(null)}
-                      className="hidden"
-                    />
-                    <div className="flex-1">
-                      <div className="text-xs font-semibold text-slate-200">Voice Memo</div>
-                      <div className="text-[10px] text-emerald-350 font-mono">{m.duration}s recording</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (onNavigateTab) onNavigateTab('meetings');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-xs font-bold text-slate-700 transition"
+                    title="Start Video Meeting with user"
+                  >
+                    <Video className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="hidden sm:inline">Start Call</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Message Stream */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/20">
+                {messages.length === 0 ? (
+                  <div className="text-center py-16 space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-indigo-600">
+                      <MessageSquare className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800">
+                        No messages yet with {activeParticipant.name}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed">
+                        Say hello! Send an idea, question, or note to begin your conversation.
+                      </p>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-200 font-sans">
-                    {m.text}
-                  </p>
-                )}
+                  messages.map((msg) => {
+                    const isOutgoing = msg.sender_id === user?.id || msg.sender_username === user?.username;
 
-                {/* Tags and Timestamp */}
-                <div className="flex items-center justify-between text-[10px] pt-1">
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {m.tags?.map((t) => (
-                      <span
-                        key={t}
-                        className="bg-emerald-900/60 text-emerald-300 px-1.5 py-0.5 rounded font-mono text-[9px]"
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-3 max-w-2xl group ${
+                          isOutgoing ? 'ml-auto flex-row-reverse' : 'mr-auto'
+                        }`}
                       >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
+                        {/* Avatar for incoming */}
+                        {!isOutgoing && (
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs shrink-0 shadow-xs">
+                            {msg.sender_name?.[0]?.toUpperCase() || 'U'}
+                          </div>
+                        )}
 
-                  <div className="flex items-center gap-1 text-emerald-400/70 font-mono">
-                    <span>{m.time}</span>
-                    <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
-                  </div>
-                </div>
+                        <div className={`space-y-1 ${isOutgoing ? 'items-end' : 'items-start'}`}>
+                          {/* Sender name for incoming messages */}
+                          {!isOutgoing && (
+                            <div className="flex items-center gap-1.5 px-1 text-[11px] text-slate-500 font-medium">
+                              <span className="font-bold text-slate-800">{msg.sender_name}</span>
+                              {msg.sender_username && (
+                                <span className="font-mono text-indigo-600">
+                                  @{msg.sender_username}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Message Bubble */}
+                          <div
+                            className={`p-3.5 px-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                              isOutgoing
+                                ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm font-medium'
+                                : 'bg-white border border-slate-200 text-slate-900 rounded-tl-none shadow-xs font-normal'
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
+
+                          {/* Time & Reactions */}
+                          <div
+                            className={`flex items-center gap-2 px-1 text-[10px] text-slate-400 font-mono ${
+                              isOutgoing ? 'justify-end' : 'justify-start'
+                            }`}
+                          >
+                            <span>
+                              {msg.created_at
+                                ? new Date(msg.created_at).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })
+                                : ''}
+                            </span>
+                            {isOutgoing && (
+                              <CheckCheck className="w-3.5 h-3.5 text-indigo-500 inline" />
+                            )}
+
+                            {/* Quick Emoji Reaction Pill */}
+                            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition ml-2">
+                              {['👍', '❤️', '🔥', '🚀'].map((em) => (
+                                <button
+                                  key={em}
+                                  type="button"
+                                  onClick={() => handleToggleReaction(msg.id, em)}
+                                  className="hover:scale-125 transition text-xs"
+                                >
+                                  {em}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Display Reactions */}
+                          {msg.reactions && msg.reactions.length > 0 && (
+                            <div className="flex items-center gap-1 pt-0.5">
+                              {msg.reactions.map((r, rIdx) => (
+                                <button
+                                  key={rIdx}
+                                  onClick={() => handleToggleReaction(msg.id, r.emoji)}
+                                  className={`px-2 py-0.5 rounded-full border text-[11px] flex items-center gap-1 transition ${
+                                    r.has_reacted
+                                      ? 'bg-indigo-50 border-indigo-300 text-indigo-800 font-bold'
+                                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <span>{r.emoji}</span>
+                                  <span className="font-mono">{r.count}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
               </div>
-            </div>
-          );
-        })}
 
-        {filteredMessages.length === 0 && (
-          <EmptyState
-            icon={MessageSquare}
-            title="No Personal Notes Found"
-            description="Send a note or record a voice memo below to store key thoughts."
-          />
-        )}
-        <div ref={messagesEndRef} />
+              {/* Message Input Bar */}
+              <form
+                onSubmit={handleSendMessage}
+                className="p-3 sm:p-4 border-t border-slate-200 bg-white flex items-center gap-2"
+              >
+                <button
+                  type="button"
+                  onClick={toggleVoiceInput}
+                  className={`p-2.5 rounded-xl border transition ${
+                    isRecording
+                      ? 'bg-rose-50 border-rose-300 text-rose-600 animate-pulse'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title={isRecording ? 'Listening... click to stop' : 'Voice Dictation'}
+                >
+                  {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={`Message @${activeParticipant.username}... (Press Enter to send)`}
+                  disabled={sending}
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 shadow-xs"
+                />
+
+                <button
+                  type="submit"
+                  disabled={!inputText.trim() || sending}
+                  className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white rounded-xl transition shadow-sm active:scale-95"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 max-w-md mx-auto">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
+                <MessageSquare className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-lg text-slate-900">1-on-1 User Direct Messages</h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  In Solo mode, conversations are strictly 1-on-1 with other users. Select an existing conversation from the list or start a new chat.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowUserSearchModal(true)}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-2xl text-xs font-bold shadow-md shadow-indigo-600/30 transition active:scale-95"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Message a User by @Username</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Voice Recording Banner Overlay */}
-      {isRecordingVoice && (
-        <div className="px-6 py-3.5 bg-rose-950/80 border-t border-rose-900/50 flex items-center justify-between animate-pulse">
-          <div className="flex items-center gap-3 text-rose-455 text-xs font-bold animate-pulse">
-            <span className="w-3 h-3 rounded-full bg-rose-500"></span>
-            <span>Recording Voice Memo... ({voiceDuration}s)</span>
+      {/* 3. User Search Modal to Start New 1-on-1 Chat */}
+      {showUserSearchModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-extrabold text-lg text-slate-900">
+                  New 1-on-1 Direct Message
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowUserSearchModal(false);
+                  setUserSearchQuery('');
+                  setUserSearchResults([]);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Find any colleague or team member by their unique @username or name to start a private conversation.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block">
+                Search @Username or Name
+              </label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="e.g. @alex, john, sarah..."
+                  value={userSearchQuery}
+                  onChange={(e) => handleSearchUsers(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
+                />
+                {isSearchingUsers && (
+                  <span className="absolute right-3 top-2.5 text-[10px] text-slate-400 font-mono animate-pulse">
+                    searching...
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {startChatError && (
+              <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-medium">
+                {startChatError}
+              </div>
+            )}
+
+            {/* User Search Results */}
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {userSearchResults.length > 0 ? (
+                userSearchResults.map((u) => {
+                  const isCurrent = u.id === user?.id;
+                  return (
+                    <div
+                      key={u.id}
+                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-indigo-50/60 hover:border-indigo-200 flex items-center justify-between transition text-xs"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs">
+                          {u.name?.[0]?.toUpperCase() || 'U'}
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <span>{u.name}</span>
+                            {isCurrent && (
+                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1 rounded">
+                                you
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-indigo-600 font-mono">
+                            @{u.username}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleStartChatWithUser(u)}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs active:scale-95"
+                      >
+                        Message
+                      </button>
+                    </div>
+                  );
+                })
+              ) : userSearchQuery.trim().length >= 2 && !isSearchingUsers ? (
+                <div className="text-center py-6 text-xs text-slate-400">
+                  No users found matching "{userSearchQuery}".
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-slate-400">
+                  Type at least 2 characters to search users.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUserSearchModal(false);
+                  setUserSearchQuery('');
+                  setUserSearchResults([]);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
-          <button
-            onClick={stopVoiceRecording}
-            className="btn-primary bg-rose-650 hover:bg-rose-550 text-white px-4 py-1.5 text-xs"
-          >
-            Done / Send Memo
-          </button>
         </div>
       )}
-
-      {/* Input Form Bar */}
-      <form onSubmit={handleSendMessage} className="p-4 bg-slate-900/60 border-t border-slate-800/80 flex items-center gap-2 px-6">
-        <div className="flex items-center gap-1.5 text-slate-400">
-          <button
-            type="button"
-            onClick={() => setInputText((prev) => prev + ' #idea ')}
-            className="px-2 py-1 text-[10px] bg-slate-950 hover:bg-slate-850 rounded-lg border border-slate-800/80 text-slate-350 font-mono transition"
-          >
-            #idea
-          </button>
-          <button
-            type="button"
-            onClick={() => setInputText((prev) => prev + ' #todo ')}
-            className="px-2 py-1 text-[10px] bg-slate-950 hover:bg-slate-855 rounded-lg border border-slate-800/80 text-slate-350 font-mono transition"
-          >
-            #todo
-          </button>
-          <button
-            type="button"
-            onClick={() => setInputText((prev) => prev + ' #urgent ')}
-            className="px-2 py-1 text-[10px] bg-slate-950 hover:bg-slate-850 rounded-lg border border-slate-800/80 text-slate-350 font-mono transition"
-          >
-            #urgent
-          </button>
-        </div>
-
-        <input
-          type="text"
-          placeholder="Type a personal note, idea, link, or task (supports #tags)..."
-          className="input-base flex-1"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-        />
-
-        <button
-          type="button"
-          onClick={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
-          className={`p-2.5 rounded-xl transition ${
-            isRecordingVoice ? 'bg-rose-650 text-white' : 'btn-secondary p-2.5'
-          }`}
-          title="Record Voice Memo"
-        >
-          {isRecordingVoice ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-emerald-450" />}
-        </button>
-
-        <button
-          type="submit"
-          disabled={!inputText.trim()}
-          className="btn-primary py-2.5 px-4"
-          title="Send Note"
-        >
-          <Send className="w-4 h-4" />
-        </button>
-      </form>
     </div>
   );
 }

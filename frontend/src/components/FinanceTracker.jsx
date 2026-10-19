@@ -14,12 +14,14 @@ import {
   Filter,
 } from 'lucide-react';
 import { api } from '../api';
+import FeatureHeader from './FeatureHeader';
 
 export default function FinanceTracker({
   workspaceId,
   financeSummary,
   transactions,
   onRefreshFinance,
+  onBack,
 }) {
   const [showLogModal, setShowLogModal] = useState(false);
   const [txType, setTxType] = useState('expense');
@@ -89,36 +91,31 @@ export default function FinanceTracker({
   const runwayMonths = financeSummary?.runway_months ?? 12;
 
   return (
-    <div className="h-full flex flex-col space-y-6 max-w-7xl mx-auto pb-6 font-sans text-[#191C1E]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-[#191C1E] tracking-tight">
-            Financial Ledger & Runway Forecast
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Monitor cash balance, burn rate, runway calculations, and expense distributions.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={exportCSV}
-            className="flex items-center gap-1.5 bg-white hover:bg-[#F2F4F6] text-slate-700 px-3.5 py-2 rounded-xl text-xs font-semibold border border-[#E2E8F0] shadow-sm transition"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
-          </button>
-
-          <button
-            onClick={() => setShowLogModal(true)}
-            className="flex items-center gap-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>+ Log Transaction</span>
-          </button>
-        </div>
-      </div>
+    <div className="h-full flex flex-col space-y-5 max-w-7xl mx-auto pb-6 font-sans text-slate-900 select-none">
+      <FeatureHeader
+        title="Financial Ledger & Runway"
+        icon={DollarSign}
+        badge="Workspace Finance"
+        onBack={onBack}
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCSV}
+              className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-200 shadow-xs transition"
+            >
+              <Download className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Export CSV</span>
+            </button>
+            <button
+              onClick={() => setShowLogModal(true)}
+              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs transition active:scale-95"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Log Transaction</span>
+            </button>
+          </div>
+        }
+      />
 
       {/* 4 Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

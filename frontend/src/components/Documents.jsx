@@ -28,12 +28,12 @@ import {
   Smile,
   Minus,
   Table,
-  FolderTree,
-  CornerDownRight,
-  AlertCircle,
   Lightbulb,
+  ArrowLeft,
+  Wand2,
 } from 'lucide-react';
 import { api } from '../api';
+import FeatureHeader from './FeatureHeader';
 
 const EMOJI_PICKER_OPTIONS = [
   '📄', '📝', '💡', '🚀', '🛠️', '📌', '🎯', '📊',
@@ -64,8 +64,8 @@ Briefly describe the product vision, primary problem solved, and expected busine
 
 ## 4. Key Milestones
 - [x] Initial reverse engineering of Notion and Teams
-- [ ] Implement nested hierarchical document tree
-- [ ] Connect Teams threaded discussion rail
+- [ ] Implement direct-write live canvas
+- [ ] Connect agentic AI memory sync
 - [ ] Deploy v2.0 release candidate
 
 ---
@@ -95,7 +95,7 @@ Explain the architectural rationale and key design trade-offs.
 \`\`\`
 [ Client App ] ─── (REST / WS) ───> [ FastAPI Gateway ] ───> [ PostgreSQL / SQLite ]
                                            │
-                                           └───> [ Groq / Gemini AI Engine ]
+                                           └───> [ Gemini 2.0 Agentic Memory ]
 \`\`\`
 
 ## 3. Data Schema & Entities
@@ -104,7 +104,7 @@ Explain the architectural rationale and key design trade-offs.
 - **Channels & Threads:** Slack/Teams messaging with root messages, replies, and reactions.
 
 ## 4. Verification Checklist
-- [x] Database migration 006 applied cleanly
+- [x] Database migration applied cleanly
 - [ ] End-to-end WebSocket sync verified
 - [ ] Real-time presence heartbeats tested
 `,
@@ -118,24 +118,22 @@ Explain the architectural rationale and key design trade-offs.
 **Date:** ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}  
 **Attendees:** Team Leads, Core Engineers, Product Lead  
 
-> 💡 **Core Theme:** Unify Notion block documents with Microsoft Teams chat rails.
+> 💡 **Sprint Objective:** Complete direct-write documents and agentic memory consolidation.
 
----
-
-## 🎯 Sprint Goals
-- Deliver end-to-end document nesting with breadcrumb navigation.
-- Provide interactive markdown task checkboxes with instant live sync.
-- Wire thread panel and emoji reactions in channels.
+## 🎯 Discussion Agenda
+1. Review sprint goals and milestones
+2. Architecture walkthrough: 4-stage AI memory pipeline
+3. Frontend user experience polish
 
 ## 📋 Action Items
-- [ ] Review document tree performance (@frontend)
+- [ ] Review direct-write document canvas (@frontend)
 - [ ] Test reaction toggling under load (@backend)
 - [ ] Finalize deployment readiness check (@devops)
 `,
   },
 ];
 
-export default function Documents({ workspaceId, documents = [], onRefreshDocuments }) {
+export default function Documents({ workspaceId, documents = [], onRefreshDocuments, onBack }) {
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [docTitle, setDocTitle] = useState('');
   const [docContent, setDocContent] = useState('');
@@ -157,8 +155,9 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   const [newDocTitle, setNewDocTitle] = useState('');
   const [newDocIcon, setNewDocIcon] = useState('📄');
 
-  // Editor states
-  const [editorMode, setEditorMode] = useState('split'); // 'edit' | 'preview' | 'split'
+  // Direct Notion Editor Mode
+  // Default is 'direct' (write directly in preview session)
+  const [viewMode, setViewMode] = useState('direct'); // 'direct' | 'split' | 'code'
   const [isZenMode, setIsZenMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
@@ -166,7 +165,8 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   const [copiedCodeIdx, setCopiedCodeIdx] = useState(null);
 
   const fileInputRef = useRef(null);
-  const textareaRef = useRef(null);
+  const directTextareaRef = useRef(null);
+  const rawTextareaRef = useRef(null);
 
   // Load document tree whenever workspaceId or documents change
   useEffect(() => {
@@ -181,7 +181,6 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       if (!selectedDoc || !documents.some((d) => d.id === selectedDoc.id)) {
         handleSelectDoc(documents[0]);
       } else {
-        // Update current doc's metadata in case title or icon changed
         const current = documents.find((d) => d.id === selectedDoc.id);
         if (current && (current.title !== docTitle || (current.icon || '📄') !== docIcon)) {
           setDocTitle(current.title || 'Untitled Document');
@@ -198,11 +197,22 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     }
   }, [documents]);
 
+  const handleSelectDoc = (doc) => {
+    if (!doc) return;
+    setSelectedDoc(doc);
+    setDocTitle(doc.title || 'Untitled Document');
+    setDocIcon(doc.icon || '📄');
+    setDocParentId(doc.parent_id || null);
+
+    const raw = parseDocContent(doc.content);
+    setDocContent(raw);
+    setLastSaved(new Date());
+  };
+
   const loadDocumentTree = async () => {
     try {
       const tree = await api.getDocumentTree(workspaceId);
       setDocTree(tree || []);
-      // Expand root nodes by default
       if (tree && tree.length > 0) {
         setExpandedNodes((prev) => {
           const next = { ...prev };
@@ -248,15 +258,13 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
           return parsed.blocks
             .map((b) => {
               if (b.type === 'heading') return `## ${b.text}`;
-              if (b.type === 'todo_item') return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
-              if (b.type === 'quote') return `> ${b.text}`;
-              if (b.type === 'callout') return `> 💡 **Note:** ${b.text}`;
-              if (b.type === 'code_block') return `\`\`\`\n${b.text}\n\`\`\``;
+              if (b.type === 'todo') return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
+              if (b.type === 'bullet') return `- ${b.text}`;
+              if (b.type === 'callout') return `> 💡 ${b.text}`;
               return b.text || '';
             })
-            .join('\n\n');
+            .join('\n');
         }
-        return content;
       } catch {
         return content;
       }
@@ -264,37 +272,18 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     if (typeof content === 'object') {
       if (content.text) return content.text;
       if (content.blocks && Array.isArray(content.blocks)) {
-        return content.blocks
-          .map((b) => {
-            if (b.type === 'heading') return `## ${b.text}`;
-            if (b.type === 'todo_item') return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
-            if (b.type === 'quote') return `> ${b.text}`;
-            if (b.type === 'callout') return `> 💡 **Note:** ${b.text}`;
-            if (b.type === 'code_block') return `\`\`\`\n${b.text}\n\`\`\``;
-            return b.text || '';
-          })
-          .join('\n\n');
+        return content.blocks.map((b) => b.text || '').join('\n');
       }
     }
     return '';
   };
 
-  const handleSelectDoc = (doc) => {
-    setSelectedDoc(doc);
-    setDocTitle(doc.title || 'Untitled Document');
-    setDocContent(parseDocContent(doc.content));
-    setDocIcon(doc.icon || '📄');
-    setDocParentId(doc.parent_id || null);
-    setLastSaved(new Date());
-    setShowEmojiPicker(false);
-  };
-
-  // Debounced auto-save to backend
+  // Auto-save debounce effect
   useEffect(() => {
     if (!selectedDoc) return;
     const timer = setTimeout(() => {
       handleSilentSave();
-    }, 2500);
+    }, 1200);
     return () => clearTimeout(timer);
   }, [docContent, docTitle, docIcon]);
 
@@ -356,7 +345,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       const created = await api.createDocument(
         workspaceId,
         title.trim() || 'Untitled Document',
-        { text: initialContent || `# ${title}\n\nStart writing your document here...` },
+        { text: initialContent || `# ${title}\n\nStart writing directly here...` },
         parentId,
         icon
       );
@@ -372,7 +361,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     }
   };
 
-  // Interactive to-do checkbox toggle inside live preview
+  // Interactive to-do checkbox toggle inside direct preview
   const handleToggleCheckbox = (lineIndex) => {
     const lines = docContent.split('\n');
     if (lineIndex < 0 || lineIndex >= lines.length) return;
@@ -386,7 +375,6 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     const updated = lines.join('\n');
     setDocContent(updated);
 
-    // Save immediately on checkbox toggle
     if (selectedDoc) {
       api.updateDocument(workspaceId, selectedDoc.id, {
         title: docTitle,
@@ -397,18 +385,22 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   };
 
   const insertFormatting = (prefix, suffix = '') => {
-    if (!textareaRef.current) return;
-    const start = textareaRef.current.selectionStart;
-    const end = textareaRef.current.selectionEnd;
+    const targetRef = viewMode === 'code' ? rawTextareaRef : directTextareaRef;
+    if (!targetRef.current) {
+      setDocContent((prev) => `${prev}\n${prefix}New block${suffix}`);
+      return;
+    }
+    const start = targetRef.current.selectionStart;
+    const end = targetRef.current.selectionEnd;
     const selected = docContent.substring(start, end);
     const replacement = `${prefix}${selected || 'text'}${suffix}`;
     const updated = docContent.substring(0, start) + replacement + docContent.substring(end);
     setDocContent(updated);
 
     setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(
+      if (targetRef.current) {
+        targetRef.current.focus();
+        targetRef.current.setSelectionRange(
           start + prefix.length,
           start + prefix.length + (selected.length || 4)
         );
@@ -420,31 +412,31 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     setShowSlashMenu(false);
     switch (type) {
       case 'h1':
-        insertFormatting('# ', '');
+        insertFormatting('\n# ', '\n');
         break;
       case 'h2':
-        insertFormatting('## ', '');
+        insertFormatting('\n## ', '\n');
         break;
       case 'h3':
-        insertFormatting('### ', '');
+        insertFormatting('\n### ', '\n');
         break;
       case 'todo':
-        insertFormatting('- [ ] ', '');
+        insertFormatting('\n- [ ] ', '\n');
         break;
       case 'bullet':
-        insertFormatting('- ', '');
+        insertFormatting('\n- ', '\n');
         break;
       case 'numbered':
-        insertFormatting('1. ', '');
+        insertFormatting('\n1. ', '\n');
         break;
       case 'callout':
-        insertFormatting('> 💡 **Note:** ', '');
+        insertFormatting('\n> 💡 **Note:** ', '\n');
         break;
       case 'quote':
-        insertFormatting('> ', '');
+        insertFormatting('\n> ', '\n');
         break;
       case 'code':
-        insertFormatting('```javascript\n', '\n```');
+        insertFormatting('\n```javascript\n// write code here\n', '\n```\n');
         break;
       case 'divider':
         insertFormatting('\n---\n', '');
@@ -509,7 +501,6 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     URL.revokeObjectURL(url);
   };
 
-  // Find document lineage for breadcrumb trail
   const getBreadcrumbs = () => {
     if (!selectedDoc) return [];
     const crumbs = [];
@@ -532,7 +523,6 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   const charCount = docContent.length;
   const readTime = Math.max(1, Math.ceil(wordCount / 200));
 
-  // Render tree node recursively
   const renderTreeNode = (node, depth = 0) => {
     const isSelected = selectedDoc?.id === node.id;
     const hasChildren = node.children && node.children.length > 0;
@@ -576,7 +566,6 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             <span className="truncate">{node.title || 'Untitled'}</span>
           </div>
 
-          {/* Quick Add Subpage button on hover */}
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
             <button
               type="button"
@@ -605,11 +594,11 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   };
 
   // Render markdown blocks with interactive checkboxes, styled headers, and callouts
-  const renderFormattedPreview = (markdownText) => {
+  const renderFormattedBlocks = (markdownText) => {
     if (!markdownText) {
       return (
-        <div className="text-slate-400 italic py-16 text-center">
-          Document is empty. Write in the editor or insert blocks with the slash command menu.
+        <div className="text-slate-400 italic py-12 text-center">
+          Document is empty. Click into the canvas below or use the formatting bar above to begin writing.
         </div>
       );
     }
@@ -621,7 +610,6 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     const renderedElements = [];
 
     lines.forEach((line, idx) => {
-      // Code block start / end
       if (line.trim().startsWith('```')) {
         if (!inCodeBlock) {
           inCodeBlock = true;
@@ -675,19 +663,19 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       // Headings
       if (line.startsWith('# ')) {
         renderedElements.push(
-          <h1 key={idx} className="text-2xl font-black text-[#191C1E] mt-6 mb-2 tracking-tight">
+          <h1 key={idx} className="text-2xl font-black text-slate-900 mt-6 mb-2 tracking-tight">
             {line.replace('# ', '')}
           </h1>
         );
       } else if (line.startsWith('## ')) {
         renderedElements.push(
-          <h2 key={idx} className="text-xl font-bold text-[#191C1E] mt-5 mb-2 tracking-tight border-b border-[#E2E8F0] pb-1.5">
+          <h2 key={idx} className="text-xl font-bold text-slate-900 mt-5 mb-2 tracking-tight border-b border-slate-200 pb-1.5">
             {line.replace('## ', '')}
           </h2>
         );
       } else if (line.startsWith('### ')) {
         renderedElements.push(
-          <h3 key={idx} className="text-base font-bold text-[#191C1E] mt-4 mb-1">
+          <h3 key={idx} className="text-base font-bold text-slate-900 mt-4 mb-1">
             {line.replace('### ', '')}
           </h3>
         );
@@ -700,17 +688,17 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
           <div
             key={idx}
             onClick={() => handleToggleCheckbox(idx)}
-            className="flex items-start gap-2.5 py-1 px-1.5 rounded-lg hover:bg-slate-100/60 transition cursor-pointer group"
+            className="flex items-start gap-2.5 py-1 px-2 rounded-xl hover:bg-indigo-50/70 transition cursor-pointer group"
           >
             <input
               type="checkbox"
               checked={isChecked}
               onChange={() => handleToggleCheckbox(idx)}
-              className="mt-1 rounded border-slate-300 text-[#4F46E5] focus:ring-0 cursor-pointer w-4 h-4"
+              className="mt-1 rounded border-slate-300 text-indigo-600 focus:ring-0 cursor-pointer w-4 h-4"
             />
             <span
               className={`text-sm leading-relaxed ${
-                isChecked ? 'line-through text-slate-400' : 'text-slate-800'
+                isChecked ? 'line-through text-slate-400' : 'text-slate-800 font-medium'
               }`}
             >
               {text}
@@ -718,7 +706,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
           </div>
         );
       }
-      // Notion Callout block (> 💡 or > ℹ️ or > ⚠️)
+      // Notion Callout block
       else if (line.trim().startsWith('> 💡') || line.trim().startsWith('> Note:')) {
         renderedElements.push(
           <div
@@ -735,7 +723,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
         renderedElements.push(
           <blockquote
             key={idx}
-            className="my-2 pl-4 border-l-4 border-[#4F46E5] text-slate-600 italic text-sm py-1"
+            className="my-2 pl-4 border-l-4 border-indigo-500 text-slate-600 italic text-sm py-1"
           >
             {line.replace('> ', '')}
           </blockquote>
@@ -744,7 +732,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       // Bullet list
       else if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
         renderedElements.push(
-          <li key={idx} className="ml-5 list-disc text-slate-700 text-sm py-0.5 leading-relaxed">
+          <li key={idx} className="ml-5 list-disc text-slate-800 text-sm py-0.5 leading-relaxed">
             {line.replace(/^[-*]\s*/, '')}
           </li>
         );
@@ -752,20 +740,20 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       // Numbered list
       else if (/^\d+\.\s/.test(line.trim())) {
         renderedElements.push(
-          <li key={idx} className="ml-5 list-decimal text-slate-700 text-sm py-0.5 leading-relaxed">
+          <li key={idx} className="ml-5 list-decimal text-slate-800 text-sm py-0.5 leading-relaxed">
             {line.replace(/^\d+\.\s*/, '')}
           </li>
         );
       }
       // Horizontal Rule
       else if (line.trim() === '---' || line.trim() === '***') {
-        renderedElements.push(<hr key={idx} className="my-5 border-t border-[#E2E8F0]" />);
+        renderedElements.push(<hr key={idx} className="my-5 border-t border-slate-200" />);
       }
-      // Empty line / spacer
+      // Spacer
       else if (!line.trim()) {
         renderedElements.push(<div key={idx} className="h-2" />);
       }
-      // Regular paragraph
+      // Paragraph
       else {
         renderedElements.push(
           <p key={idx} className="text-slate-800 text-sm leading-relaxed">
@@ -779,11 +767,34 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   };
 
   return (
-    <div
-      className={`h-full flex gap-6 select-none ${
-        isZenMode ? 'fixed inset-0 z-50 bg-slate-950 p-6' : ''
-      }`}
-    >
+    <div className={`h-full flex flex-col select-none ${isZenMode ? 'fixed inset-0 z-50 bg-white p-6' : ''}`}>
+      {/* 0. Feature Header with Back Button (Item 1) */}
+      {!isZenMode && (
+        <FeatureHeader
+          title="Notion Documents"
+          icon={BookOpen}
+          badge="Direct-Write Canvas"
+          onBack={onBack}
+          actions={
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-medium hidden sm:inline">
+                {selectedDoc ? `${wordCount} words` : 'Ready'}
+              </span>
+              {selectedDoc && (
+                <button
+                  onClick={handleSaveDoc}
+                  disabled={isSaving}
+                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                </button>
+              )}
+            </div>
+          }
+        />
+      )}
+
       {/* Hidden File Input for direct document uploads */}
       <input
         ref={fileInputRef}
@@ -793,160 +804,151 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
         onChange={handleFileUpload}
       />
 
-      {/* 1. Left Sidebar: Notion Document Tree & Quick Action Rail */}
-      {!isZenMode && (
-        <div className="w-80 p-4 rounded-2xl border border-[#E2E8F0] flex flex-col h-full bg-white shadow-sm flex-shrink-0">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-[#4F46E5]" />
-              <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-700">
-                Pages & Knowledge
-              </h3>
+      {/* Main Workspace Body */}
+      <div className="flex-1 flex gap-6 overflow-hidden min-h-0 pt-2">
+        {/* 1. Left Sidebar: Notion Document Tree & Quick Action Rail */}
+        {!isZenMode && (
+          <div className="w-72 lg:w-80 p-4 rounded-2xl border border-slate-200 flex flex-col h-full bg-white shadow-sm flex-shrink-0">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-indigo-600" />
+                <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-700">
+                  Pages & Hierarchy
+                </h3>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload document file (.txt, .md, .docx)"
+                  className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    setCreateParentId(null);
+                    setNewDocTitle('');
+                    setNewDocIcon('📄');
+                    setShowCreateModal(true);
+                  }}
+                  className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm active:scale-95"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Page</span>
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                title="Upload document file (.txt, .md, .docx)"
-                className="p-1.5 bg-[#F2F4F6] hover:bg-[#ECEEF0] text-slate-700 rounded-xl border border-[#E2E8F0] transition"
-              >
-                <Upload className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => {
-                  setCreateParentId(null);
-                  setNewDocTitle('');
-                  setNewDocIcon('📄');
-                  setShowCreateModal(true);
-                }}
-                className="flex items-center gap-1 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition shadow-sm active:scale-95"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>New Page</span>
-              </button>
-            </div>
-          </div>
 
-          {/* Real-time Document Search Input */}
-          <div className="relative mb-3">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search pages or text..."
-              className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] placeholder-slate-400 transition"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {isSearching && (
-              <span className="absolute right-3 top-2.5 text-[10px] text-slate-400 font-mono animate-pulse">
-                ...
+            {/* Real-time Document Search Input */}
+            <div className="relative mb-3">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search pages or content..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {isSearching && (
+                <span className="absolute right-3 top-2.5 text-[10px] text-slate-400 font-mono animate-pulse">
+                  ...
+                </span>
+              )}
+            </div>
+
+            {/* Starter Templates Quick Banner */}
+            <button
+              onClick={() => setShowTemplatesModal(true)}
+              className="w-full mb-3 flex items-center justify-between p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200 hover:border-indigo-300 text-xs text-indigo-700 transition group shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-12 transition" />
+                <span className="font-bold">Notion Templates</span>
+              </div>
+              <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-mono font-bold">
+                3 Specs
               </span>
-            )}
-          </div>
+            </button>
 
-          {/* Starter Templates Quick Banner */}
-          <button
-            onClick={() => setShowTemplatesModal(true)}
-            className="w-full mb-3 flex items-center justify-between p-2.5 rounded-2xl bg-indigo-50 border border-indigo-200 hover:border-indigo-300 text-xs text-[#4F46E5] transition group shadow-sm"
-          >
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-[#4F46E5] group-hover:rotate-12 transition" />
-              <span className="font-bold">Notion Templates</span>
-            </div>
-            <span className="text-[10px] bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded-full font-mono font-bold">
-              3 Specs
-            </span>
-          </button>
-
-          {/* Page List: Search Results or Nested Tree */}
-          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-            {searchResults !== null ? (
-              // Search Results View
-              <div className="space-y-1">
-                <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 flex items-center justify-between">
-                  <span>Search Results ({searchResults.length})</span>
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="text-[#4F46E5] hover:underline"
-                  >
-                    Clear
-                  </button>
+            {/* Page List: Search Results or Nested Tree */}
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+              {searchResults !== null ? (
+                <div className="space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 flex items-center justify-between">
+                    <span>Search Results ({searchResults.length})</span>
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="text-indigo-600 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {searchResults.length === 0 ? (
+                    <div className="text-center text-slate-400 py-8 text-xs">
+                      No matching pages found.
+                    </div>
+                  ) : (
+                    searchResults.map((res) => (
+                      <button
+                        key={res.id}
+                        onClick={() => {
+                          const target = (documents || []).find((d) => d.id === res.id);
+                          if (target) handleSelectDoc(target);
+                          setSearchQuery('');
+                        }}
+                        className="w-full text-left p-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-500 transition text-xs space-y-1"
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                          <span>{res.icon || '📄'}</span>
+                          <span className="truncate">{res.title}</span>
+                        </div>
+                        {res.match_snippet && (
+                          <p className="text-[11px] text-slate-500 font-mono line-clamp-2 bg-white/70 p-1.5 rounded border border-slate-200">
+                            {res.match_snippet}
+                          </p>
+                        )}
+                      </button>
+                    ))
+                  )}
                 </div>
-                {searchResults.length === 0 ? (
-                  <div className="text-center text-slate-400 py-8 text-xs">
-                    No matching pages found.
-                  </div>
-                ) : (
-                  searchResults.map((res) => (
-                    <button
-                      key={res.id}
-                      onClick={() => {
-                        const target = (documents || []).find((d) => d.id === res.id);
-                        if (target) handleSelectDoc(target);
-                        setSearchQuery('');
-                      }}
-                      className="w-full text-left p-2.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] hover:bg-indigo-50 hover:border-[#4F46E5] transition text-xs space-y-1"
-                    >
-                      <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                        <span>{res.icon || '📄'}</span>
-                        <span className="truncate">{res.title}</span>
-                      </div>
-                      {res.match_snippet && (
-                        <p className="text-[11px] text-slate-500 font-mono line-clamp-2 bg-white/70 p-1.5 rounded border border-slate-200">
-                          {res.match_snippet}
-                        </p>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : (
-              // Notion Nested Hierarchy Tree View
-              <div className="space-y-0.5">
-                {docTree.length === 0 ? (
-                  <div className="text-center text-slate-400 py-12 text-xs space-y-2">
-                    <FileText className="w-8 h-8 mx-auto text-slate-300 opacity-80" />
-                    <p>No pages yet.</p>
-                    <button
-                      onClick={() => {
-                        setCreateParentId(null);
-                        setShowCreateModal(true);
-                      }}
-                      className="text-[#4F46E5] hover:underline font-bold"
-                    >
-                      Create your first page
-                    </button>
-                  </div>
-                ) : (
-                  docTree.map((node) => renderTreeNode(node, 0))
-                )}
-              </div>
-            )}
+              ) : (
+                <div className="space-y-0.5">
+                  {docTree.length === 0 ? (
+                    <div className="text-center text-slate-400 py-12 text-xs space-y-2">
+                      <FileText className="w-8 h-8 mx-auto text-slate-300 opacity-80" />
+                      <p>No pages yet.</p>
+                      <button
+                        onClick={() => {
+                          setCreateParentId(null);
+                          setShowCreateModal(true);
+                        }}
+                        className="text-indigo-600 hover:underline font-bold"
+                      >
+                        Create your first page
+                      </button>
+                    </div>
+                  ) : (
+                    docTree.map((node) => renderTreeNode(node))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* 2. Main Document Canvas & Notion Block Editor */}
-      <div className="flex-1 p-6 rounded-2xl border border-[#E2E8F0] flex flex-col h-full bg-white shadow-sm overflow-hidden text-[#191C1E]">
+        {/* 2. Center Notion Canvas: Direct-Write Interactive Preview (Item 13) */}
         {selectedDoc ? (
-          <div className="flex flex-col h-full space-y-4">
-            {/* Top Bar: Breadcrumb Trail & Quick Actions */}
-            <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3 gap-4">
-              {/* Breadcrumb Hierarchy Path */}
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 overflow-x-auto py-1">
+          <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden min-h-0">
+            {/* Top Toolbar: Breadcrumb + Action Controls */}
+            <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => {
-                    const rootNode = docTree[0];
-                    if (rootNode) {
-                      const rootDoc = (documents || []).find((d) => d.id === rootNode.id);
-                      if (rootDoc) handleSelectDoc(rootDoc);
-                    }
-                  }}
-                  className="hover:text-[#4F46E5] transition flex items-center gap-1"
+                  onClick={() => setSelectedDoc(null)}
+                  className="hover:text-indigo-600 font-medium transition"
                 >
-                  <FolderTree className="w-3.5 h-3.5" />
-                  <span>Workspace</span>
+                  Workspace
                 </button>
 
                 {breadcrumbs.map((crumb) => (
@@ -955,7 +957,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                     <button
                       type="button"
                       onClick={() => handleSelectDoc(crumb)}
-                      className="hover:text-[#4F46E5] font-medium transition truncate max-w-[120px]"
+                      className="hover:text-indigo-600 font-medium transition truncate max-w-[120px]"
                     >
                       {crumb.icon || '📄'} {crumb.title}
                     </button>
@@ -963,67 +965,67 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 ))}
 
                 <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />
-                <span className="font-bold text-slate-800 truncate max-w-[180px]">
+                <span className="font-bold text-slate-900 truncate max-w-[180px]">
                   {docIcon} {docTitle || 'Untitled'}
                 </span>
               </div>
 
-              {/* Action Buttons */}
+              {/* View Mode & Export Tools */}
               <div className="flex items-center gap-2">
-                {/* View Mode Toggle */}
-                <div className="bg-[#F2F4F6] p-1 rounded-xl border border-[#E2E8F0] flex items-center gap-1 text-xs">
+                {/* Mode Selector */}
+                <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1 text-xs">
                   <button
-                    onClick={() => setEditorMode('edit')}
-                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
-                      editorMode === 'edit'
-                        ? 'bg-[#4F46E5] text-white shadow-sm'
+                    onClick={() => setViewMode('direct')}
+                    className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                      viewMode === 'direct'
+                        ? 'bg-indigo-600 text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
-                    title="Write Markdown"
+                    title="Direct-Write Canvas (Write directly in formatted page)"
                   >
-                    <Edit3 className="w-3 h-3" />
-                    <span>Write</span>
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>Direct Write</span>
                   </button>
                   <button
-                    onClick={() => setEditorMode('split')}
+                    onClick={() => setViewMode('split')}
                     className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
-                      editorMode === 'split'
-                        ? 'bg-[#4F46E5] text-white shadow-sm'
+                      viewMode === 'split'
+                        ? 'bg-indigo-600 text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
-                    title="Split View"
+                    title="Split Canvas"
                   >
                     <Columns className="w-3 h-3" />
                     <span>Split</span>
                   </button>
                   <button
-                    onClick={() => setEditorMode('preview')}
+                    onClick={() => setViewMode('code')}
                     className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition ${
-                      editorMode === 'preview'
-                        ? 'bg-[#4F46E5] text-white shadow-sm'
+                      viewMode === 'code'
+                        ? 'bg-indigo-600 text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
-                    title="Interactive Preview"
+                    title="Raw Markdown"
                   >
-                    <Eye className="w-3 h-3" />
-                    <span>Preview</span>
+                    <Code className="w-3 h-3" />
+                    <span>Raw MD</span>
                   </button>
                 </div>
 
                 {/* Export Dropdown */}
-                <div className="flex items-center gap-1 bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl p-1">
+                <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
                   <button
                     onClick={() => handleExport('md')}
                     title="Download Markdown (.md)"
-                    className="px-2.5 py-1 text-slate-700 hover:text-[#191C1E] text-xs font-semibold hover:bg-white rounded-lg transition flex items-center gap-1"
+                    className="px-2.5 py-1 text-slate-700 hover:text-slate-900 text-xs font-semibold hover:bg-white rounded-lg transition flex items-center gap-1"
                   >
-                    <Download className="w-3 h-3 text-[#4F46E5]" />
+                    <Download className="w-3 h-3 text-indigo-600" />
                     <span>MD</span>
                   </button>
                   <button
                     onClick={() => handleExport('html')}
                     title="Download HTML"
-                    className="px-2 py-1 text-slate-700 hover:text-[#191C1E] text-xs font-semibold hover:bg-white rounded-lg transition"
+                    className="px-2 py-1 text-slate-700 hover:text-slate-900 text-xs font-semibold hover:bg-white rounded-lg transition"
                   >
                     HTML
                   </button>
@@ -1032,20 +1034,10 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 {/* Zen Mode */}
                 <button
                   onClick={() => setIsZenMode(!isZenMode)}
-                  className="p-2 text-slate-600 hover:text-slate-900 hover:bg-[#F2F4F6] rounded-xl border border-[#E2E8F0] transition"
+                  className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl border border-slate-200 transition"
                   title={isZenMode ? 'Exit Zen Mode' : 'Distraction-free Zen Mode'}
                 >
-                  {isZenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-[#4F46E5]" />}
-                </button>
-
-                {/* Save Button */}
-                <button
-                  onClick={handleSaveDoc}
-                  disabled={isSaving}
-                  className="flex items-center gap-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                  {isZenMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-indigo-600" />}
                 </button>
 
                 {/* Delete Doc */}
@@ -1058,7 +1050,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                       setSelectedDoc(null);
                     }
                   }}
-                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-[#E2E8F0] transition"
+                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-slate-200 transition"
                   title="Delete Document"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -1067,21 +1059,21 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
 
             {/* Document Header: Interactive Emoji Icon Picker + Large Title */}
-            <div className="flex items-center gap-3 relative">
+            <div className="p-6 pb-2 border-b border-slate-100 flex items-center gap-4 relative">
               {/* Emoji Picker Button */}
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                   title="Change page icon"
-                  className="w-12 h-12 rounded-2xl bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-[#4F46E5] flex items-center justify-center text-2xl transition shadow-sm"
+                  className="w-14 h-14 rounded-2xl bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-400 flex items-center justify-center text-3xl transition shadow-sm"
                 >
                   {docIcon}
                 </button>
 
                 {/* Emoji Selection Popover */}
                 {showEmojiPicker && (
-                  <div className="absolute left-0 top-14 bg-white border border-[#E2E8F0] p-3 rounded-2xl shadow-2xl z-30 grid grid-cols-6 gap-2 w-64 animate-in fade-in zoom-in-95">
+                  <div className="absolute left-0 top-16 bg-white border border-slate-200 p-3 rounded-2xl shadow-2xl z-30 grid grid-cols-6 gap-2 w-64 animate-in fade-in zoom-in-95">
                     {EMOJI_PICKER_OPTIONS.map((em) => (
                       <button
                         key={em}
@@ -1099,7 +1091,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               {/* Title Input */}
               <input
                 type="text"
-                className="text-2xl md:text-3xl font-extrabold bg-transparent text-[#191C1E] focus:outline-none flex-1 placeholder-slate-300 tracking-tight"
+                className="text-2xl sm:text-3xl font-extrabold bg-transparent text-slate-900 focus:outline-none flex-1 placeholder-slate-300 tracking-tight"
                 value={docTitle}
                 onChange={(e) => setDocTitle(e.target.value)}
                 placeholder="Untitled Page..."
@@ -1107,145 +1099,133 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
 
             {/* Notion Slash Command Ribbon & Block Inserters */}
-            {editorMode !== 'preview' && (
-              <div className="relative flex items-center gap-1.5 bg-[#F8FAFC] p-1.5 rounded-2xl border border-[#E2E8F0] overflow-x-auto text-xs">
-                {/* Slash Menu Trigger */}
-                <button
-                  type="button"
-                  onClick={() => setShowSlashMenu(!showSlashMenu)}
-                  className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-[#4F46E5] font-bold rounded-lg border border-indigo-200 transition flex items-center gap-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Insert Block</span>
-                </button>
+            <div className="relative flex items-center gap-1.5 bg-slate-50 px-4 py-2 border-b border-slate-200 overflow-x-auto text-xs">
+              <button
+                type="button"
+                onClick={() => setShowSlashMenu(!showSlashMenu)}
+                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg border border-indigo-200 transition flex items-center gap-1.5 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Insert Block</span>
+              </button>
 
-                <div className="w-[1px] h-4 bg-[#E2E8F0] mx-1" />
+              <div className="w-[1px] h-4 bg-slate-200 mx-1" />
 
-                <button
-                  onClick={() => insertFormatting('# ', '')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-bold transition flex items-center gap-1"
-                  title="Heading 1"
-                >
-                  <Heading className="w-3 h-3" /> H1
-                </button>
-                <button
-                  onClick={() => insertFormatting('## ', '')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-bold transition flex items-center gap-1"
-                  title="Heading 2"
-                >
-                  <Heading className="w-3 h-3" /> H2
-                </button>
-                <button
-                  onClick={() => insertFormatting('**', '**')}
-                  className="px-2.5 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-black transition"
-                  title="Bold"
-                >
-                  B
-                </button>
-                <button
-                  onClick={() => insertFormatting('*', '*')}
-                  className="px-2.5 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 italic font-serif transition"
-                  title="Italic"
-                >
-                  I
-                </button>
-                <button
-                  onClick={() => insertFormatting('- [ ] ', '')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
-                  title="Task Checkbox"
-                >
-                  <CheckSquare className="w-3 h-3 text-[#4F46E5]" /> Task
-                </button>
-                <button
-                  onClick={() => insertFormatting('> 💡 **Note:** ', '')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
-                  title="Notion Callout Box"
-                >
-                  <Lightbulb className="w-3 h-3 text-amber-500" /> Callout
-                </button>
-                <button
-                  onClick={() => insertFormatting('- ', '')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
-                  title="Bullet List"
-                >
-                  <List className="w-3 h-3" /> List
-                </button>
-                <button
-                  onClick={() => insertFormatting('```ts\n', '\n```')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 font-mono transition flex items-center gap-1"
-                  title="Code Block"
-                >
-                  <Code className="w-3 h-3" /> Code
-                </button>
-                <button
-                  onClick={() => insertFormatting('> ', '')}
-                  className="px-2 py-1 hover:bg-[#ECEEF0] rounded-lg text-slate-700 transition flex items-center gap-1"
-                  title="Quote"
-                >
-                  <Quote className="w-3 h-3" /> Quote
-                </button>
+              <button
+                onClick={() => insertSlashBlock('h1')}
+                className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-bold transition flex items-center gap-1"
+                title="Heading 1"
+              >
+                <Heading className="w-3.5 h-3.5" /> H1
+              </button>
+              <button
+                onClick={() => insertSlashBlock('h2')}
+                className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-bold transition flex items-center gap-1"
+                title="Heading 2"
+              >
+                <Heading className="w-3 h-3" /> H2
+              </button>
+              <button
+                onClick={() => insertSlashBlock('todo')}
+                className="px-2.5 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
+                title="Interactive To-Do Checklist"
+              >
+                <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
+                <span>To-Do</span>
+              </button>
+              <button
+                onClick={() => insertSlashBlock('bullet')}
+                className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
+                title="Bullet List"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Bullet</span>
+              </button>
+              <button
+                onClick={() => insertSlashBlock('callout')}
+                className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
+                title="Notion Callout Card"
+              >
+                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                <span>Callout</span>
+              </button>
+              <button
+                onClick={() => insertSlashBlock('code')}
+                className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
+                title="Code Block"
+              >
+                <Code className="w-3.5 h-3.5 text-slate-600" />
+                <span>Code</span>
+              </button>
+              <button
+                onClick={() => insertSlashBlock('divider')}
+                className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
+                title="Divider Line"
+              >
+                <Minus className="w-3.5 h-3.5" />
+                <span>Divider</span>
+              </button>
 
-                {/* Floating Slash Menu Popover */}
-                {showSlashMenu && (
-                  <div className="absolute left-2 top-11 bg-white border border-[#E2E8F0] p-2 rounded-2xl shadow-2xl z-30 w-56 space-y-1 animate-in fade-in zoom-in-95 text-xs">
-                    <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Notion Blocks
-                    </div>
-                    <button
-                      onClick={() => insertSlashBlock('h1')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Heading className="w-3.5 h-3.5 text-[#4F46E5]" /> Heading 1
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('h2')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Heading className="w-3.5 h-3.5 text-[#4F46E5]" /> Heading 2
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('todo')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> To-do List
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('callout')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> Callout Card
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('code')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Code className="w-3.5 h-3.5 text-slate-600" /> Code Snippet
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('quote')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Quote className="w-3.5 h-3.5 text-indigo-400" /> Quote Block
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('table')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Table className="w-3.5 h-3.5 text-slate-600" /> Markdown Table
-                    </button>
-                    <button
-                      onClick={() => insertSlashBlock('divider')}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
-                    >
-                      <Minus className="w-3.5 h-3.5 text-slate-400" /> Divider Line
-                    </button>
+              {/* Slash Command Dropdown Popover */}
+              {showSlashMenu && (
+                <div className="absolute left-4 top-10 bg-white border border-slate-200 p-2 rounded-2xl shadow-2xl z-40 w-56 space-y-1 animate-in fade-in zoom-in-95">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+                    Basic Blocks
                   </div>
-                )}
-              </div>
-            )}
+                  <button
+                    onClick={() => insertSlashBlock('h1')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Heading className="w-3.5 h-3.5 text-indigo-600" /> Heading 1
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('h2')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Heading className="w-3.5 h-3.5 text-indigo-600" /> Heading 2
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('todo')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> To-do List
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('callout')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> Callout Card
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('code')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Code className="w-3.5 h-3.5 text-slate-600" /> Code Snippet
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('quote')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Quote className="w-3.5 h-3.5 text-indigo-400" /> Quote Block
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('table')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Table className="w-3.5 h-3.5 text-slate-600" /> Markdown Table
+                  </button>
+                  <button
+                    onClick={() => insertSlashBlock('divider')}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg flex items-center gap-2 text-slate-700 font-medium"
+                  >
+                    <Minus className="w-3.5 h-3.5 text-slate-400" /> Divider Line
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Document Statistics Footer */}
-            <div className="flex items-center justify-between text-[11px] text-slate-500 px-2 font-mono">
+            <div className="flex items-center justify-between text-[11px] text-slate-500 px-6 py-2 border-b border-slate-100 font-mono bg-slate-50/40">
               <div className="flex items-center gap-3">
                 <span>{wordCount} words</span>
                 <span>•</span>
@@ -1255,44 +1235,108 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 text-[#10B981] font-bold">
+                <span className="flex items-center gap-1 text-emerald-600 font-bold">
                   <CheckCircle2 className="w-3 h-3" />
-                  <span>Auto-saved to NexaMind</span>
+                  <span>Direct Write Active</span>
                 </span>
-                {lastSaved && <span>at {lastSaved.toLocaleTimeString()}</span>}
+                {lastSaved && <span>• Saved {lastSaved.toLocaleTimeString()}</span>}
               </div>
             </div>
 
-            {/* Editor Workspace Canvas */}
-            <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
-              {/* Write Textarea */}
-              {(editorMode === 'edit' || editorMode === 'split') && (
-                <div className="flex-1 h-full flex flex-col">
-                  <textarea
-                    ref={textareaRef}
-                    value={docContent}
-                    onChange={(e) => setDocContent(e.target.value)}
-                    placeholder="Type '/' for commands or start writing your document..."
-                    className="w-full flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-6 text-sm text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-sans leading-relaxed resize-none shadow-inner"
-                  />
+            {/* 3. Document Workspace Canvas: Direct-Write in Preview (Item 13) */}
+            <div className="flex-1 overflow-hidden p-4 sm:p-6 flex gap-4 min-h-0 bg-slate-50/30">
+              {/* PRIMARY MODE: Direct Notion Canvas */}
+              {viewMode === 'direct' && (
+                <div className="flex-1 h-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                  {/* Top Live Preview Header with Checklist Toggles */}
+                  <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between text-xs text-slate-600">
+                    <span className="font-semibold flex items-center gap-1.5 text-slate-800">
+                      <Wand2 className="w-3.5 h-3.5 text-indigo-600" />
+                      Write and preview simultaneously — type directly into the canvas below
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      Markdown shortcuts rendered live
+                    </span>
+                  </div>
+
+                  {/* Dual Integrated Canvas: Top Formatted Interactive Blocks, Bottom Direct-Write Surface */}
+                  <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                    {/* Live Rendered Formatted Preview with interactive checkboxes */}
+                    <div className="p-4 bg-slate-50/60 rounded-2xl border border-slate-200/80">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
+                        <span>Live Formatted Preview (Click checkboxes to toggle)</span>
+                        <span className="text-emerald-600 font-medium">Interactive</span>
+                      </div>
+                      {renderFormattedBlocks(docContent)}
+                    </div>
+
+                    {/* Direct-Write Surface */}
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                        <span>Direct-Write Canvas (Edits reflect instantly in live blocks above)</span>
+                        <span className="text-indigo-600 font-medium">Type here</span>
+                      </div>
+                      <textarea
+                        ref={directTextareaRef}
+                        value={docContent}
+                        onChange={(e) => setDocContent(e.target.value)}
+                        placeholder="Write your document directly here... Use # for headings, - [ ] for checklists, > for callouts..."
+                        rows={12}
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 font-sans leading-relaxed resize-y shadow-xs"
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* Formatted Interactive Preview */}
-              {(editorMode === 'preview' || editorMode === 'split') && (
-                <div className="flex-1 h-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-6 overflow-y-auto font-sans leading-relaxed text-sm text-[#191C1E] shadow-inner">
-                  {renderFormattedPreview(docContent)}
+              {/* SPLIT VIEW MODE: Direct write on left, live formatted canvas on right */}
+              {viewMode === 'split' && (
+                <>
+                  <div className="flex-1 h-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="p-3 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-700">
+                      Direct-Write Canvas
+                    </div>
+                    <textarea
+                      ref={directTextareaRef}
+                      value={docContent}
+                      onChange={(e) => setDocContent(e.target.value)}
+                      placeholder="Write markdown directly..."
+                      className="w-full flex-1 p-5 text-sm text-slate-900 focus:outline-none font-sans leading-relaxed resize-none"
+                    />
+                  </div>
+                  <div className="flex-1 h-full bg-white rounded-2xl border border-slate-200 shadow-xs p-6 overflow-y-auto">
+                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
+                      Interactive Live Render
+                    </div>
+                    {renderFormattedBlocks(docContent)}
+                  </div>
+                </>
+              )}
+
+              {/* RAW CODE MODE */}
+              {viewMode === 'code' && (
+                <div className="flex-1 h-full bg-slate-900 rounded-2xl border border-slate-800 p-6 overflow-hidden flex flex-col shadow-inner">
+                  <div className="text-xs font-mono text-slate-400 mb-3 flex items-center justify-between">
+                    <span>Raw Markdown Content</span>
+                    <span>UTF-8</span>
+                  </div>
+                  <textarea
+                    ref={rawTextareaRef}
+                    value={docContent}
+                    onChange={(e) => setDocContent(e.target.value)}
+                    className="w-full flex-1 bg-transparent text-slate-100 font-mono text-xs focus:outline-none leading-relaxed resize-none"
+                  />
                 </div>
               )}
             </div>
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5] shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
               <BookOpen className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-bold text-lg text-[#191C1E]">No Page Selected</h3>
+              <h3 className="font-bold text-lg text-slate-900">No Page Selected</h3>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 Create a new nested page, select a template spec, or upload markdown documents.
               </p>
@@ -1304,7 +1348,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                   setNewDocTitle('');
                   setShowCreateModal(true);
                 }}
-                className="flex items-center gap-1.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-md shadow-indigo-600/30 transition active:scale-95"
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-md shadow-indigo-600/30 transition active:scale-95"
               >
                 <Plus className="w-4 h-4" />
                 <span>Create New Page</span>
@@ -1321,133 +1365,135 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
         )}
       </div>
 
-      {/* Create Page Modal (Supports Root or Subpage Parent ID) */}
+      {/* New Page Creation Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-6 rounded-3xl border border-[#E2E8F0] max-w-md w-full space-y-4 shadow-2xl text-[#191C1E]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-[#4F46E5]" />
-                <h3 className="text-base font-extrabold text-[#191C1E]">
-                  {createParentId ? 'Create Nested Subpage' : 'Create New Page'}
-                </h3>
-              </div>
+              <h3 className="font-extrabold text-lg text-slate-900">
+                {createParentId ? 'Create Nested Sub-page' : 'Create New Notion Page'}
+              </h3>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="text-slate-400 hover:text-slate-700"
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
               >
                 ✕
               </button>
             </div>
 
-            {createParentId && (
-              <div className="text-xs text-slate-500 bg-indigo-50 border border-indigo-100 p-2.5 rounded-xl flex items-center gap-1.5">
-                <CornerDownRight className="w-3.5 h-3.5 text-[#4F46E5]" />
-                <span>
-                  Adding under parent:{' '}
-                  <strong>
-                    {(documents || []).find((d) => d.id === createParentId)?.title || 'Parent Page'}
-                  </strong>
-                </span>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Page Icon
+                </label>
+                <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                  {EMOJI_PICKER_OPTIONS.slice(0, 10).map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      onClick={() => setNewDocIcon(em)}
+                      className={`text-xl p-2 rounded-xl border transition ${
+                        newDocIcon === em
+                          ? 'border-indigo-600 bg-indigo-50 scale-110'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleCreateNewDoc(newDocTitle, '', createParentId, newDocIcon);
-              }}
-              className="space-y-4"
-            >
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const random =
-                      EMOJI_PICKER_OPTIONS[
-                        Math.floor(Math.random() * EMOJI_PICKER_OPTIONS.length)
-                      ];
-                    setNewDocIcon(random);
-                  }}
-                  title="Click to randomize icon"
-                  className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 flex items-center justify-center text-xl shrink-0"
-                >
-                  {newDocIcon}
-                </button>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  Page Title
+                </label>
                 <input
                   type="text"
-                  required
-                  autoFocus
-                  placeholder="e.g. Sprint Backlog & RFC"
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                  placeholder="e.g. Technical Architecture RFC"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600"
                   value={newDocTitle}
                   onChange={(e) => setNewDocTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleCreateNewDoc(newDocTitle, '', createParentId, newDocIcon);
+                    }
+                  }}
+                  autoFocus
                 />
               </div>
+            </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition active:scale-95"
-                >
-                  Create Page
-                </button>
-              </div>
-            </form>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCreateNewDoc(newDocTitle, '', createParentId, newDocIcon)}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/30 transition active:scale-95"
+              >
+                Create Page
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Starter Templates Modal */}
       {showTemplatesModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-6 rounded-3xl border border-[#E2E8F0] max-w-2xl w-full space-y-4 shadow-2xl text-[#191C1E]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-xl shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-[#4F46E5]" />
-                <h3 className="text-base font-extrabold text-[#191C1E]">Notion Document Templates</h3>
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-extrabold text-lg text-slate-900">
+                  Select a Notion Template
+                </h3>
               </div>
               <button
                 onClick={() => setShowTemplatesModal(false)}
-                className="text-slate-400 hover:text-slate-700 text-xs font-bold"
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
               >
-                Close
+                ✕
               </button>
             </div>
 
-            <p className="text-xs text-slate-500">
-              Initialize a production-ready engineering specification or sprint note with 1-click:
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {DOCUMENT_TEMPLATES.map((tmpl, idx) => (
+            <div className="space-y-3">
+              {DOCUMENT_TEMPLATES.map((tmpl) => (
                 <div
-                  key={idx}
+                  key={tmpl.title}
                   onClick={() => handleCreateNewDoc(tmpl.title, tmpl.content, null, tmpl.icon)}
-                  className="p-4 rounded-2xl bg-[#F8FAFC] hover:bg-indigo-50 border border-[#E2E8F0] hover:border-[#4F46E5] cursor-pointer transition flex flex-col justify-between space-y-2 group shadow-sm"
+                  className="p-4 rounded-2xl border border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/50 cursor-pointer transition flex items-start gap-3.5 group shadow-xs"
                 >
-                  <div className="space-y-1.5">
-                    <div className="text-2xl">{tmpl.icon}</div>
-                    <h4 className="font-bold text-xs text-slate-800 group-hover:text-[#4F46E5] transition">
+                  <span className="text-2xl p-2 rounded-xl bg-slate-100 group-hover:bg-white transition shrink-0">
+                    {tmpl.icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-sm text-slate-900 group-hover:text-indigo-600 transition">
                       {tmpl.title}
                     </h4>
-                    <p className="text-[11px] text-slate-500 line-clamp-3 leading-relaxed">
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
                       {tmpl.description}
                     </p>
                   </div>
-                  <div className="pt-2 text-[10px] font-bold text-[#4F46E5] flex items-center justify-between">
-                    <span>Use Template</span>
-                    <span>→</span>
-                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-600 self-center shrink-0" />
                 </div>
               ))}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowTemplatesModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

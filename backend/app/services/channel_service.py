@@ -58,6 +58,64 @@ async def create_channel(
     return channel
 
 
+async def create_or_get_dm_channel(
+    db: AsyncSession,
+    workspace_id: UUID,
+    current_user: User,
+    target_username: str,
+) -> Channel:
+    await _require_workspace_access(db, workspace_id, current_user.id)
+    from app.services.auth_service import get_user_by_username
+    target_user = await get_user_by_username(db, target_username)
+    if not target_user:
+        raise AuthError(f"User @{target_username} not found", status_code=404)
+    if target_user.id == current_user.id:
+        u1 = current_user.username or str(current_user.id)[:8]
+        dm_name = f"dm-{u1}-notes"
+        q = select(Channel).where(Channel.workspace_id == workspace_id, Channel.name == dm_name)
+        existing = (await db.execute(q)).scalar_one_or_none()
+        if existing:
+            return existing
+        dm_channel = Channel(
+            workspace_id=workspace_id,
+            name=dm_name,
+            description=f"Personal Notes & Saved Messages for @{current_user.username or current_user.name}",
+            is_private=True,
+            created_by=current_user.id,
+        )
+        db.add(dm_channel)
+        await db.flush()
+        await db.refresh(dm_channel)
+        return dm_channel
+
+    # Ensure target user has membership in workspace
+    target_mem = await get_workspace_membership(db, workspace_id, target_user.id)
+    if not target_mem:
+        from app.models import WorkspaceMember, WorkspaceRole
+        db.add(WorkspaceMember(workspace_id=workspace_id, user_id=target_user.id, role=WorkspaceRole.MEMBER))
+        await db.flush()
+
+    u1, u2 = sorted([current_user.username or str(current_user.id)[:8], target_user.username or str(target_user.id)[:8]])
+    dm_name = f"dm-{u1}-{u2}"
+
+    q = select(Channel).where(Channel.workspace_id == workspace_id, Channel.name == dm_name)
+    existing = (await db.execute(q)).scalar_one_or_none()
+    if existing:
+        return existing
+
+    dm_channel = Channel(
+        workspace_id=workspace_id,
+        name=dm_name,
+        description=f"Direct message between @{current_user.username or current_user.name} and @{target_user.username or target_user.name}",
+        is_private=True,
+        created_by=current_user.id,
+    )
+    db.add(dm_channel)
+    await db.flush()
+    await db.refresh(dm_channel)
+    return dm_channel
+
+
 async def get_channel(
     db: AsyncSession,
     workspace_id: UUID,
@@ -301,6 +359,7 @@ async def get_channel_unreads(
 
 def format_message_dict(msg: Message, current_user_id: UUID) -> dict:
     sender_name = msg.sender.name if msg.sender else None
+    sender_username = msg.sender.username if msg.sender else None
     reply_count = len(msg.replies) if msg.replies else 0
     reactions = build_reaction_summaries(msg.reactions or [], current_user_id)
 
@@ -310,6 +369,7 @@ def format_message_dict(msg: Message, current_user_id: UUID) -> dict:
         "channel_id": msg.channel_id,
         "sender_id": msg.sender_id,
         "sender_name": sender_name,
+        "sender_username": sender_username,
         "parent_id": msg.parent_id,
         "content": msg.content,
         "created_at": msg.created_at,

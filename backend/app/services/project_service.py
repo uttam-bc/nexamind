@@ -4,13 +4,15 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CodeRepo, Commit, Issue, Task, User
+from app.models import CodeRepo, Commit, Issue, RepoFile, Task, User
 from app.models.project import IssueStatus, TaskStatus
 from app.schemas.project import (
     CodeRepoCreate,
     CommitCreate,
     IssueCreate,
     IssueUpdate,
+    RepoFileCreate,
+    RepoFileUpdate,
     TaskCreate,
     TaskUpdate,
 )
@@ -264,6 +266,73 @@ async def update_issue(
     await db.flush()
     await db.refresh(issue)
     return issue
+
+
+# --- Code Repository Files ---
+
+async def list_repo_files(
+    db: AsyncSession,
+    workspace_id: UUID,
+    repo_id: UUID,
+    user_id: UUID,
+) -> list[RepoFile]:
+    await get_repo(db, workspace_id, repo_id, user_id)
+    result = await db.execute(
+        select(RepoFile)
+        .where(RepoFile.repo_id == repo_id)
+        .order_by(RepoFile.name.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def save_repo_file(
+    db: AsyncSession,
+    workspace_id: UUID,
+    repo_id: UUID,
+    user: User,
+    data: RepoFileCreate,
+) -> RepoFile:
+    await get_repo(db, workspace_id, repo_id, user.id)
+    clean_name = data.name.strip()
+    result = await db.execute(
+        select(RepoFile).where(RepoFile.repo_id == repo_id, RepoFile.name == clean_name)
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.content = data.content
+        if data.language:
+            existing.language = data.language
+        await db.flush()
+        await db.refresh(existing)
+        return existing
+
+    file_record = RepoFile(
+        repo_id=repo_id,
+        name=clean_name,
+        content=data.content,
+        language=data.language or ("python" if clean_name.endswith(".py") else "javascript"),
+    )
+    db.add(file_record)
+    await db.flush()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def delete_repo_file(
+    db: AsyncSession,
+    workspace_id: UUID,
+    repo_id: UUID,
+    file_id: UUID,
+    user_id: UUID,
+) -> None:
+    await get_repo(db, workspace_id, repo_id, user_id)
+    result = await db.execute(
+        select(RepoFile).where(RepoFile.repo_id == repo_id, RepoFile.id == file_id)
+    )
+    file_record = result.scalar_one_or_none()
+    if file_record:
+        await db.delete(file_record)
+        await db.flush()
 
 
 async def _require_workspace_access(

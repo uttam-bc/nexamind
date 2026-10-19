@@ -17,19 +17,31 @@ import {
   X,
   Tag,
   Calendar,
+  Zap,
+  RotateCcw,
+  GripVertical,
+  ArrowRight,
 } from 'lucide-react';
 import { api } from '../api';
 
-export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
+import FeatureHeader from './FeatureHeader';
+
+export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [sectionFilter, setSectionFilter] = useState('all'); // 'all' | 'todo' | 'in_progress' | 'done'
+
+  // Drag and drop state
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState(null);
 
   // New task form state
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDescription, setTaskDescription] = useState('');
   const [taskPriority, setTaskPriority] = useState('medium');
+  const [taskStatus, setTaskStatus] = useState('todo'); // 'todo' | 'in_progress' | 'done'
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Edit task state for selected task modal
@@ -103,12 +115,13 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
         title: taskTitle.trim(),
         description: taskDescription.trim() || undefined,
         priority: taskPriority,
-        status: 'todo',
+        status: taskStatus || 'todo',
       });
       setShowAddModal(false);
       setTaskTitle('');
       setTaskDescription('');
       setTaskPriority('medium');
+      setTaskStatus('todo');
       await onRefreshTasks();
     } catch (err) {
       alert(`Create task error: ${err.message}`);
@@ -120,6 +133,10 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
   const handleMoveStatus = async (taskId, newStatus) => {
     try {
       await api.updateTask(workspaceId, taskId, { status: newStatus });
+      if (selectedTask && selectedTask.id === taskId) {
+        setSelectedTask((prev) => (prev ? { ...prev, status: newStatus } : null));
+        setEditStatus(newStatus);
+      }
       await onRefreshTasks();
     } catch (err) {
       alert(`Move task error: ${err.message}`);
@@ -160,10 +177,10 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
 
   const getPriorityBadge = (priority) => {
     const map = {
-      urgent: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
-      high: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-      medium: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
-      low: 'bg-slate-500/15 text-slate-400 border-slate-500/30',
+      urgent: 'bg-rose-500/15 text-rose-500 border-rose-500/30',
+      high: 'bg-amber-500/15 text-amber-600 border-amber-500/30',
+      medium: 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30',
+      low: 'bg-slate-500/15 text-slate-500 border-slate-500/30',
     };
     return (
       <span
@@ -176,6 +193,23 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
     );
   };
 
+  const getSubtaskStats = (task) => {
+    if (!task.description || !task.description.includes('[SUBTASKS]:')) {
+      return { total: 0, completed: 0, cleanDesc: task.description || '' };
+    }
+    try {
+      const parts = task.description.split('[SUBTASKS]:');
+      const list = JSON.parse(parts[1]) || [];
+      return {
+        total: list.length,
+        completed: list.filter((s) => s.completed).length,
+        cleanDesc: parts[0].trim(),
+      };
+    } catch {
+      return { total: 0, completed: 0, cleanDesc: task.description || '' };
+    }
+  };
+
   // Filter tasks
   const filteredTasks = (tasks || []).filter((task) => {
     const matchesQuery =
@@ -186,148 +220,377 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
   });
 
   return (
-    <div className="h-full flex flex-col space-y-6 text-[#191C1E] font-sans">
-      {/* Top Header & Search/Filter Controls */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-[#191C1E] tracking-tight">
-            Sprint Projects & Kanban Board
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage sprint tasks, track checklists, and coordinate deliverables across columns.
-          </p>
-        </div>
+    <div className="h-full flex flex-col space-y-3.5 text-[#191C1E] font-sans">
+      <FeatureHeader
+        title="Sprint Projects & Kanban Board"
+        subtitle="Manage sprint tasks, track checklists, and coordinate deliverables across To Do, In Progress, and Done."
+        icon={FolderKanban}
+        onBack={onBack}
+        actions={
+          <div className="flex items-center gap-3">
+            <div className="relative w-48 sm:w-56">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search tasks..."
+                className="w-full bg-white border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] shadow-sm"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
 
-        <div className="flex items-center gap-3">
-          {/* Search Box */}
-          <div className="relative w-56">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              className="w-full bg-white border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] shadow-sm"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+            <select
+              className="bg-white border border-[#E2E8F0] rounded-xl px-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] shadow-sm font-sans"
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+            >
+              <option value="all">All Priorities</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+
+            <button
+              onClick={() => {
+                setTaskStatus(sectionFilter !== 'all' ? sectionFilter : 'todo');
+                setShowAddModal(true);
+              }}
+              className="flex items-center gap-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Task</span>
+            </button>
           </div>
+        }
+      />
 
-          {/* Priority Filter */}
-          <select
-            className="bg-white border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] shadow-sm font-sans"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
+      {/* ---------------- TASK BAR SECTION SWITCHER / FILTER ---------------- */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-[#E2E8F0] shadow-2xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider px-2">
+            Section:
+          </span>
+          <button
+            onClick={() => setSectionFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              sectionFilter === 'all'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
           >
-            <option value="all">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
+            <span>All Columns</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                sectionFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+              }`}
+            >
+              {filteredTasks.length}
+            </span>
+          </button>
 
           <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition"
+            onClick={() => setSectionFilter('todo')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              sectionFilter === 'todo'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-indigo-50 hover:text-indigo-700'
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Task</span>
+            <span>📋 To Do</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                sectionFilter === 'todo' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700 font-bold'
+              }`}
+            >
+              {filteredTasks.filter((t) => t.status === 'todo').length}
+            </span>
           </button>
+
+          <button
+            onClick={() => setSectionFilter('in_progress')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              sectionFilter === 'in_progress'
+                ? 'bg-amber-500 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-amber-50 hover:text-amber-800'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>In Progress</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                sectionFilter === 'in_progress' ? 'bg-white/20 text-white' : 'bg-amber-50 text-amber-700 font-bold'
+              }`}
+            >
+              {filteredTasks.filter((t) => t.status === 'in_progress').length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setSectionFilter('done')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              sectionFilter === 'done'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-emerald-50 hover:text-emerald-800'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Done</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                sectionFilter === 'done' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700 font-bold'
+              }`}
+            >
+              {filteredTasks.filter((t) => t.status === 'done').length}
+            </span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-slate-500 hidden sm:flex items-center gap-1.5 pr-2">
+          <span>In <strong>To Do</strong>, shift directly to:</span>
+          <span className="font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+            ⚡ In Progress
+          </span>
+          <span>or</span>
+          <span className="font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+            ✓ Done
+          </span>
         </div>
       </div>
 
-      {/* 3 Columns Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 min-h-0">
-        {columns.map((col) => {
-          const colTasks = filteredTasks.filter((t) => t.status === col.id);
-          return (
-            <div
-              key={col.id}
-              className="p-4 rounded-2xl border border-[#E2E8F0] flex flex-col h-full bg-[#F8FAFC] shadow-sm"
-            >
-              {/* Column Header */}
-              <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#E2E8F0]">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs uppercase tracking-wider text-slate-700">
-                    {col.label}
-                  </span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-[#ECEEF0] text-slate-600 font-mono font-bold">
-                    {colTasks.length}
-                  </span>
+      {/* ---------------- 3 COLUMNS GRID & DRAG-DROP TARGETS ---------------- */}
+      <div
+        className={`grid gap-6 flex-1 min-h-0 ${
+          sectionFilter === 'all'
+            ? 'grid-cols-1 md:grid-cols-3'
+            : 'grid-cols-1 max-w-2xl mx-auto w-full'
+        }`}
+      >
+        {columns
+          .filter((col) => sectionFilter === 'all' || sectionFilter === col.id)
+          .map((col) => {
+            const colTasks = filteredTasks.filter((t) => t.status === col.id);
+            const isDragOver = dragOverColumnId === col.id;
+            return (
+              <div
+                key={col.id}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverColumnId !== col.id) setDragOverColumnId(col.id);
+                }}
+                onDragLeave={() => {
+                  if (dragOverColumnId === col.id) setDragOverColumnId(null);
+                }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  const taskId = e.dataTransfer.getData('text/plain') || draggedTaskId;
+                  setDraggedTaskId(null);
+                  setDragOverColumnId(null);
+                  if (taskId) {
+                    await handleMoveStatus(taskId, col.id);
+                  }
+                }}
+                className={`p-4 rounded-2xl border flex flex-col h-full shadow-sm transition-all duration-150 ${
+                  isDragOver
+                    ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-200 shadow-md'
+                    : 'border-[#E2E8F0] bg-[#F8FAFC]'
+                }`}
+              >
+                {/* Column Header */}
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#E2E8F0]">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs uppercase tracking-wider text-slate-700">
+                      {col.label}
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-[#ECEEF0] text-slate-600 font-mono font-bold">
+                      {colTasks.length}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setTaskStatus(col.id);
+                      setShowAddModal(true);
+                    }}
+                    className="p-1 hover:bg-slate-200 text-slate-500 rounded-lg text-xs flex items-center gap-1 font-bold transition"
+                    title={`Add task directly to ${col.label}`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="text-[10px] hidden sm:inline">Add to {col.label}</span>
+                  </button>
                 </div>
-              </div>
 
-              {/* Task Cards List */}
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                {colTasks.map((task) => {
-                  const cleanDesc = task.description?.split('[SUBTASKS]:')[0]?.trim();
-                  return (
-                    <div
-                      key={task.id}
-                      onClick={() => handleOpenTaskDetail(task)}
-                      className="bg-white border border-[#E2E8F0] hover:border-[#4F46E5] p-4 rounded-xl shadow-sm hover-lift transition space-y-2.5 group cursor-pointer"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-bold text-xs text-[#191C1E] leading-snug group-hover:text-[#4F46E5] transition">
-                          {task.title}
-                        </h4>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteTask(task.id);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 transition"
-                          title="Delete task"
+                {/* Task Cards List */}
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                  {colTasks.map((task) => {
+                    const { total: subtaskTotal, completed: subtaskCompleted, cleanDesc } = getSubtaskStats(task);
+                    return (
+                      <div
+                        key={task.id}
+                        draggable={true}
+                        onDragStart={(e) => {
+                          setDraggedTaskId(task.id);
+                          e.dataTransfer.setData('text/plain', task.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => {
+                          setDraggedTaskId(null);
+                          setDragOverColumnId(null);
+                        }}
+                        onClick={() => handleOpenTaskDetail(task)}
+                        className="bg-white border border-[#E2E8F0] hover:border-[#4F46E5] p-3.5 rounded-xl shadow-xs hover-lift transition space-y-2.5 group cursor-pointer"
+                      >
+                        {/* Title & Delete button */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-1.5 flex-1 min-w-0">
+                            <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 cursor-grab shrink-0 mt-0.5" />
+                            <h4 className="font-bold text-xs text-[#191C1E] leading-snug group-hover:text-[#4F46E5] transition break-words">
+                              {task.title}
+                            </h4>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteTask(task.id);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 transition shrink-0"
+                            title="Delete task"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {cleanDesc && (
+                          <p className="text-xs text-slate-600 leading-relaxed line-clamp-2 pl-5">
+                            {cleanDesc}
+                          </p>
+                        )}
+
+                        {subtaskTotal > 0 && (
+                          <div className="flex items-center gap-2 pl-5 text-[11px] text-slate-500 font-medium">
+                            <CheckSquare className="w-3 h-3 text-slate-400" />
+                            <span>{subtaskCompleted}/{subtaskTotal} subtasks</span>
+                            <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-emerald-500 rounded-full"
+                                style={{ width: `${(subtaskCompleted / subtaskTotal) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Status Shifter & Priority Bar */}
+                        <div
+                          className="pt-2.5 border-t border-[#E2E8F0] space-y-2 text-xs"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                          <div className="flex items-center justify-between">
+                            {getPriorityBadge(task.priority)}
 
-                      {cleanDesc && (
-                        <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
-                          {cleanDesc}
-                        </p>
-                      )}
+                            {/* Direct Quick Dropdown */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                Section:
+                              </span>
+                              <select
+                                value={task.status || 'todo'}
+                                onChange={(e) => handleMoveStatus(task.id, e.target.value)}
+                                className="text-[11px] font-bold bg-[#F8FAFC] hover:bg-slate-100 border border-[#CBD5E1] rounded-lg px-2 py-0.5 text-slate-700 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                title="Shift section"
+                              >
+                                <option value="todo">📋 To Do</option>
+                                <option value="in_progress">⚡ In Progress</option>
+                                <option value="done">✅ Done</option>
+                              </select>
+                            </div>
+                          </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-[#E2E8F0] text-xs">
-                        {getPriorityBadge(task.priority)}
+                          {/* Direct 1-Click Action Shift Buttons */}
+                          <div className="flex items-center gap-1.5 pt-0.5">
+                            {task.status === 'todo' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStatus(task.id, 'in_progress')}
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition shadow-2xs active:scale-95"
+                                  title="Shift task to In Progress section"
+                                >
+                                  <Zap className="w-3 h-3 text-amber-600 fill-amber-500" />
+                                  <span>In Progress</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStatus(task.id, 'done')}
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-2xs active:scale-95"
+                                  title="Shift task directly to Done section"
+                                >
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Done</span>
+                                </button>
+                              </>
+                            )}
 
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          {col.id !== 'todo' && (
-                            <button
-                              onClick={() =>
-                                handleMoveStatus(task.id, col.id === 'done' ? 'in_progress' : 'todo')
-                              }
-                              className="p-1 text-slate-400 hover:text-[#191C1E] hover:bg-[#F2F4F6] rounded transition"
-                              title="Move back"
-                            >
-                              <ChevronLeft className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          {col.id !== 'done' && (
-                            <button
-                              onClick={() =>
-                                handleMoveStatus(task.id, col.id === 'todo' ? 'in_progress' : 'done')
-                              }
-                              className="p-1 text-slate-400 hover:text-[#191C1E] hover:bg-[#F2F4F6] rounded transition"
-                              title="Advance forward"
-                            >
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                            {task.status === 'in_progress' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStatus(task.id, 'todo')}
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition shadow-2xs active:scale-95"
+                                  title="Shift task back to To Do section"
+                                >
+                                  <RotateCcw className="w-3 h-3 text-indigo-600" />
+                                  <span>To Do</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStatus(task.id, 'done')}
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-2xs active:scale-95"
+                                  title="Shift task to Done section"
+                                >
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Done</span>
+                                </button>
+                              </>
+                            )}
+
+                            {task.status === 'done' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStatus(task.id, 'todo')}
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition shadow-2xs active:scale-95"
+                                  title="Reopen into To Do section"
+                                >
+                                  <RotateCcw className="w-3 h-3 text-slate-500" />
+                                  <span>To Do</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStatus(task.id, 'in_progress')}
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition shadow-2xs active:scale-95"
+                                  title="Move back to In Progress section"
+                                >
+                                  <Zap className="w-3 h-3 text-amber-600 fill-amber-500" />
+                                  <span>In Progress</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
 
-                {colTasks.length === 0 && (
-                  <div className="text-center text-slate-400 py-12 text-xs italic">
-                    No tasks in {col.label}
-                  </div>
-                )}
+                  {colTasks.length === 0 && (
+                    <div className="text-center text-slate-400 py-12 text-xs italic">
+                      No tasks in {col.label}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
       </div>
 
       {/* ---------------- TASK DETAIL MODAL & DRAWER ---------------- */}
@@ -364,35 +627,70 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                    Column Status
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                    Task Section / Status
                   </label>
-                  <select
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                  >
-                    <option value="todo">To Do</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="done">Done</option>
-                  </select>
+                  <span className="text-[10px] text-slate-400 font-medium">Click to shift section</span>
                 </div>
 
+                {/* 3-Button Segmented Status Shifter */}
+                <div className="grid grid-cols-3 gap-2 p-1 bg-[#F1F5F9] rounded-xl border border-[#E2E8F0]">
+                  <button
+                    type="button"
+                    onClick={() => setEditStatus('todo')}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      editStatus === 'todo'
+                        ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    }`}
+                  >
+                    <span>📋</span>
+                    <span>To Do</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditStatus('in_progress')}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      editStatus === 'in_progress'
+                        ? 'bg-white text-amber-800 shadow-sm border border-amber-300'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    }`}
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
+                    <span>In Progress</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditStatus('done')}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      editStatus === 'done'
+                        ? 'bg-white text-emerald-800 shadow-sm border border-emerald-300'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Done</span>
+                  </button>
+                </div>
+
+                {/* Priority Selection */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                    Priority
+                    Priority Level
                   </label>
                   <select
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-medium"
                     value={editPriority}
                     onChange={(e) => setEditPriority(e.target.value)}
                   >
                     <option value="low">Low Priority</option>
                     <option value="medium">Medium Priority</option>
                     <option value="high">High Priority</option>
-                    <option value="urgent">Urgent</option>
+                    <option value="urgent">Urgent Priority</option>
                   </select>
                 </div>
               </div>
@@ -546,20 +844,37 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks }) {
                 />
               </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Priority
-                </label>
-                <select
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
-                  value={taskPriority}
-                  onChange={(e) => setTaskPriority(e.target.value)}
-                >
-                  <option value="low">Low Priority</option>
-                  <option value="medium">Medium Priority</option>
-                  <option value="high">High Priority</option>
-                  <option value="urgent">Urgent</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Add to Column / Status
+                  </label>
+                  <select
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-bold"
+                    value={taskStatus}
+                    onChange={(e) => setTaskStatus(e.target.value)}
+                  >
+                    <option value="todo">📋 To Do</option>
+                    <option value="in_progress">⚡ In Progress</option>
+                    <option value="done">✅ Done</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Priority
+                  </label>
+                  <select
+                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                    value={taskPriority}
+                    onChange={(e) => setTaskPriority(e.target.value)}
+                  >
+                    <option value="low">Low Priority</option>
+                    <option value="medium">Medium Priority</option>
+                    <option value="high">High Priority</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

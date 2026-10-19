@@ -6,12 +6,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     name: str = Field(min_length=1, max_length=255)
+    username: str | None = Field(default=None, min_length=2, max_length=50)
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: str  # Can be email or @username!
     password: str
 
 
@@ -21,6 +22,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
     name: str
+    username: str | None = None
     created_at: datetime
 
 

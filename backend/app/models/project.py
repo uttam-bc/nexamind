@@ -127,6 +127,7 @@ class CodeRepo(Base):
     workspace: Mapped["Workspace"] = relationship(back_populates="code_repos")
     commits: Mapped[list["Commit"]] = relationship(back_populates="repo", cascade="all, delete-orphan")
     issues: Mapped[list["Issue"]] = relationship(back_populates="repo", cascade="all, delete-orphan")
+    files: Mapped[list["RepoFile"]] = relationship(back_populates="repo", cascade="all, delete-orphan")
 
 
 class Commit(Base):
@@ -206,3 +207,37 @@ class Issue(Base):
 
     repo: Mapped["CodeRepo"] = relationship(back_populates="issues")
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+
+
+class RepoFile(Base):
+    __tablename__ = "repo_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    repo_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("code_repos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    language: Mapped[str] = mapped_column(String(50), default="javascript", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        onupdate=datetime.now,
+        nullable=False,
+    )
+
+    repo: Mapped["CodeRepo"] = relationship(back_populates="files")

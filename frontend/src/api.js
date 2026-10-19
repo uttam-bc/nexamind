@@ -76,10 +76,10 @@ async function request(path, options = {}) {
 
 export const api = {
   // Auth
-  register: (name, email, password) =>
+  register: (name, email, password, username) =>
     request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, username: username || undefined }),
     }),
   login: (email, password) =>
     request('/auth/login', {
@@ -87,6 +87,7 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   getMe: () => request('/auth/me'),
+  searchUsers: (query = '') => request(`/auth/users/search?q=${encodeURIComponent(query)}`),
 
   // Workspaces
   listWorkspaces: () => request('/workspaces'),
@@ -176,6 +177,16 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+  listRepoFiles: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/files`),
+  saveRepoFile: (wsId, repoId, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/files`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteRepoFile: (wsId, repoId, fileId) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/files/${fileId}`, {
+      method: 'DELETE',
+    }),
 
   // Channels (Teams-Style)
   listChannels: (wsId) => request(`/workspaces/${wsId}/channels`),
@@ -184,6 +195,11 @@ export const api = {
     request(`/workspaces/${wsId}/channels`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  createOrOpenDm: (wsId, targetUsername) =>
+    request(`/workspaces/${wsId}/channels/dm`, {
+      method: 'POST',
+      body: JSON.stringify({ target_username: targetUsername }),
     }),
   listMessages: (wsId, channelId, parentId = null, rootOnly = false) => {
     let url = `/workspaces/${wsId}/channels/${channelId}/messages?`;
@@ -295,11 +311,34 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // AI Agent
-  chatWithAgent: (wsId, prompt) =>
-    request(`/workspaces/${wsId}/ai/chat`, {
+  // AI Agent & Long-Term Memory
+  chatWithAgent: (wsId, payload) => {
+    const body = typeof payload === 'string' ? { prompt: payload } : payload;
+    return request(`/workspaces/${wsId}/ai/chat`, {
       method: 'POST',
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(body),
+    });
+  },
+  listAiSessions: (wsId) => request(`/workspaces/${wsId}/ai/sessions`),
+  createAiSession: (wsId) =>
+    request(`/workspaces/${wsId}/ai/sessions`, {
+      method: 'POST',
+    }),
+  getAiSessionMessages: (wsId, sessionId) =>
+    request(`/workspaces/${wsId}/ai/sessions/${sessionId}`),
+  deleteAiSession: (wsId, sessionId) =>
+    request(`/workspaces/${wsId}/ai/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
+  getMemoryStats: (wsId) => request(`/workspaces/${wsId}/ai/memory/stats`),
+  reindexMemory: (wsId) =>
+    request(`/workspaces/${wsId}/ai/memory/reindex`, {
+      method: 'POST',
+    }),
+  testGeminiKey: (wsId, apiKey) =>
+    request(`/workspaces/${wsId}/ai/config/test-gemini`, {
+      method: 'POST',
+      body: JSON.stringify({ api_key: apiKey }),
     }),
 
   // Calendar & Reminders

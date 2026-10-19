@@ -33,6 +33,8 @@ import SoloChat from './components/SoloChat';
 import CalendarView from './components/CalendarView';
 import AiReminderToast from './components/AiReminderToast';
 import FinanceTracker from './components/FinanceTracker';
+import LandingPage from './pages/LandingPage';
+import CreateGroupModal from './components/CreateGroupModal';
 
 export default function App() {
   // Auth state
@@ -236,99 +238,20 @@ export default function App() {
     setCurrentWorkspace(null);
   };
 
-  // If not logged in, render clean Auth Screen
+  // If not logged in, render the pre-login Landing Page (Item 5)
   if (!token) {
     return (
-      <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-4 font-sans text-[#191C1E]">
-        <div className="w-full max-w-md bg-white border border-[#E2E8F0] rounded-2xl shadow-xl p-8 space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-[#4F46E5]">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <h1 className="text-2xl font-extrabold text-[#191C1E] tracking-tight">
-              NexaMind 2.0
-            </h1>
-            <p className="text-xs text-slate-500 font-mono">
-              Autonomous AI Workspace & Engineering Platform
-            </p>
-          </div>
-
-          <form onSubmit={handleAuthSubmit} className="space-y-4">
-            {authError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
-                {authError}
-              </div>
-            )}
-
-            {authMode === 'register' && (
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Full Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Alex Mitchell"
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] outline-none transition font-sans"
-                  value={authForm.name}
-                  onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
-                />
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700">Email Address</label>
-              <input
-                type="email"
-                required
-                placeholder="name@nexamind.app"
-                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] outline-none transition font-sans"
-                value={authForm.email}
-                onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700">Password</label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] outline-none transition font-sans"
-                value={authForm.password}
-                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white py-2.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2"
-            >
-              {authLoading
-                ? 'Authenticating...'
-                : authMode === 'login'
-                ? 'Sign In to Workspace'
-                : 'Create Account & Launch Solo Space'}
-            </button>
-          </form>
-
-          <div className="text-center pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode(authMode === 'login' ? 'register' : 'login');
-                setAuthError('');
-              }}
-              className="text-xs text-[#4F46E5] hover:underline font-semibold"
-            >
-              {authMode === 'login'
-                ? "Don't have an account? Register"
-                : 'Already have an account? Sign In'}
-            </button>
-          </div>
-        </div>
-      </div>
+      <LandingPage
+        onLoginSuccess={(newToken, userData) => {
+          setToken(newToken);
+          setUser(userData);
+          setAuthToken(newToken);
+        }}
+      />
     );
   }
+
+  const handleBackToDashboard = () => setActiveTab('dashboard');
 
   return (
     <div className="h-screen w-full flex flex-col bg-[#F8FAFC] text-[#191C1E] font-sans antialiased overflow-hidden">
@@ -454,6 +377,7 @@ export default function App() {
                 user={user}
                 onNavigateTab={setActiveTab}
                 onRefreshAll={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -463,6 +387,7 @@ export default function App() {
                 user={user}
                 sessions={sessions}
                 onRefreshSessions={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -476,6 +401,7 @@ export default function App() {
                     const target = workspaces.find((w) => w.id === wsId);
                     if (target) handleSelectWorkspace(target.id);
                   }}
+                  onBack={handleBackToDashboard}
                 />
               </div>
             )}
@@ -490,6 +416,7 @@ export default function App() {
                 sessions={sessions}
                 onRefreshSessions={() => loadWorkspaceData(currentWorkspace?.id)}
                 onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -498,6 +425,7 @@ export default function App() {
                 workspaceId={currentWorkspace?.id}
                 documents={documents}
                 onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -506,6 +434,7 @@ export default function App() {
                 workspaceId={currentWorkspace?.id}
                 tasks={tasks}
                 onRefreshTasks={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -514,6 +443,7 @@ export default function App() {
                 workspaceId={currentWorkspace?.id}
                 repos={repos}
                 onRefreshRepos={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -528,6 +458,7 @@ export default function App() {
                 onMarkRead={(chanId) =>
                   setUnreadCounts((prev) => ({ ...prev, [chanId]: 0 }))
                 }
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -537,6 +468,7 @@ export default function App() {
                 financeSummary={financeSummary}
                 transactions={transactions}
                 onRefreshFinance={() => loadWorkspaceData(currentWorkspace?.id)}
+                onBack={handleBackToDashboard}
               />
             )}
 
@@ -545,6 +477,7 @@ export default function App() {
                 workspace={currentWorkspace}
                 user={user}
                 onRefreshWorkspace={() => loadInitialData()}
+                onBack={handleBackToDashboard}
               />
             )}
           </div>
@@ -583,40 +516,15 @@ export default function App() {
         onNavigate={(tab) => setActiveTab(tab)}
       />
 
-      {/* Create Team Workspace Modal */}
-      {showCreateWsModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-sm w-full space-y-4 shadow-2xl">
-            <h3 className="text-base font-bold text-[#191C1E]">Create Team Workspace</h3>
-            <form onSubmit={handleCreateWorkspace} className="space-y-4">
-              <input
-                type="text"
-                required
-                autoFocus
-                placeholder="e.g. Core Engineering Team"
-                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
-                value={newWsName}
-                onChange={(e) => setNewWsName(e.target.value)}
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateWsModal(false)}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30"
-                >
-                  Create Space
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Create Group Workspace Modal with Instant Join Code Display (Item 8) */}
+      <CreateGroupModal
+        isOpen={showCreateWsModal}
+        onClose={() => setShowCreateWsModal(false)}
+        onGroupCreated={(createdGroup) => {
+          setWorkspaces((prev) => [...prev, createdGroup]);
+          handleSelectWorkspace(createdGroup.id);
+        }}
+      />
 
       {/* Join Team Workspace Modal */}
       {showJoinWsModal && (

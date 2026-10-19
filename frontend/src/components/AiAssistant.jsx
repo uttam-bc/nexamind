@@ -5,89 +5,200 @@ import {
   CheckCircle2,
   FolderKanban,
   FileText,
-  DollarSign,
-  Code2,
   MessageSquare,
   Mic,
   MicOff,
   RotateCcw,
   Calendar,
   Trash2,
-  ExternalLink,
   Bot,
   User,
-  ArrowRight,
   Terminal,
+  Brain,
+  Key,
+  Plus,
+  Clock,
+  ChevronRight,
+  Database,
+  RefreshCw,
+  AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 import { api } from '../api';
+import FeatureHeader from './FeatureHeader';
 
 export default function AiAssistant({
   workspaceId,
   onNavigateTab,
   onRefreshAll,
   onSwitchWorkspace,
+  onBack,
 }) {
   const defaultGreeting = {
     role: 'assistant',
     content:
-      'Hello! I am your **NexaMind Autonomous Copilot**.\n\n' +
-      'I have direct database and workspace authority. You can tell me in natural language to:\n' +
-      '- 📄 *Create or edit files & documents in NexaMind*\n' +
-      '- 📊 *Create, assign & update tasks on Kanban*\n' +
-      '- 📅 *Schedule meetings & calendar reminders*\n' +
-      '- 💬 *Broadcast messages & share docs to channels*\n' +
-      '- 🔄 *Switch between Solo & Group workspaces*\n\n' +
-      'What would you like to execute next?',
+      'Hello! I am your **NexaMind Autonomous Agentic AI**.\n\n' +
+      'I possess persistent memory and direct database authority across this workspace.\n\n' +
+      'Here is what I can execute for you:\n' +
+      '- 🧠 **Synthesize workspace memory** across your documents, chats, tasks, and meetings\n' +
+      '- 📄 **Create & edit Notion documents**\n' +
+      '- 📊 **Create, prioritize & update Kanban tasks** (To Do, In Progress, Done)\n' +
+      '- 📅 **Schedule calendar meetings**\n' +
+      '- 💬 **Post broadcasts to channels**\n' +
+      '- 🔄 **Switch between Solo & Group spaces**\n\n' +
+      'How can I assist your workflow today?',
     tool_calls: [],
     timestamp: new Date().toISOString(),
   };
 
+  // Chat & Session states
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([defaultGreeting]);
   const [inputPrompt, setInputPrompt] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [activePlanSteps, setActivePlanSteps] = useState([]);
 
+  // Memory & API Key drawers
+  const [memoryStats, setMemoryStats] = useState(null);
+  const [showMemoryDrawer, setShowMemoryDrawer] = useState(false);
+  const [isReindexing, setIsReindexing] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('nexamind_gemini_key') || '');
+  const [keyTestStatus, setKeyTestStatus] = useState(null); // { ok: bool, message: string }
+  const [isTestingKey, setIsTestingKey] = useState(false);
+
   const messagesEndRef = useRef(null);
   const speechRecognitionRef = useRef(null);
 
-  // Load chat history
+  // Load sessions list on workspace change
   useEffect(() => {
     if (!workspaceId) return;
-    const storageKey = `nexamind_ai_chat_${workspaceId}`;
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
-          return;
-        }
-      } catch (err) {
-        console.warn('Could not parse saved chat history:', err);
-      }
-    }
-    setMessages([defaultGreeting]);
+    loadSessions();
+    loadMemoryStats();
   }, [workspaceId]);
 
-  // Save chat history
-  useEffect(() => {
-    if (!workspaceId || messages.length === 0) return;
-    const storageKey = `nexamind_ai_chat_${workspaceId}`;
-    localStorage.setItem(storageKey, JSON.stringify(messages));
-  }, [messages, workspaceId]);
+  const loadSessions = async () => {
+    try {
+      const list = await api.listAiSessions(workspaceId);
+      setSessions(list || []);
+      if (list && list.length > 0 && !activeSessionId) {
+        // Switch to the most recent session
+        selectSession(list[0].id);
+      } else if (!list || list.length === 0) {
+        // No sessions yet, create one
+        handleCreateNewSession();
+      }
+    } catch (err) {
+      console.warn('Could not load sessions:', err);
+    }
+  };
+
+  const loadMemoryStats = async () => {
+    try {
+      const stats = await api.getMemoryStats(workspaceId);
+      setMemoryStats(stats);
+    } catch (err) {
+      console.warn('Could not load memory stats:', err);
+    }
+  };
+
+  const selectSession = async (sessionId) => {
+    setActiveSessionId(sessionId);
+    try {
+      const history = await api.getAiSessionMessages(sessionId);
+      if (history && history.length > 0) {
+        setMessages(
+          history.map((m) => ({
+            role: m.role,
+            content: m.content,
+            tool_calls: m.tool_calls || [],
+            timestamp: m.created_at,
+          }))
+        );
+      } else {
+        setMessages([defaultGreeting]);
+      }
+    } catch (err) {
+      console.warn('Could not load session messages:', err);
+      setMessages([defaultGreeting]);
+    }
+  };
+
+  const handleCreateNewSession = async () => {
+    try {
+      const newSession = await api.createAiSession(workspaceId, 'New AI Consultation');
+      setSessions((prev) => [newSession, ...prev]);
+      setActiveSessionId(newSession.id);
+      setMessages([defaultGreeting]);
+    } catch (err) {
+      console.warn('Error creating AI session:', err);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId, e) => {
+    e.stopPropagation();
+    if (!confirm('Delete this AI conversation thread?')) return;
+    try {
+      await api.deleteAiSession(sessionId);
+      const remaining = sessions.filter((s) => s.id !== sessionId);
+      setSessions(remaining);
+      if (activeSessionId === sessionId) {
+        if (remaining.length > 0) {
+          selectSession(remaining[0].id);
+        } else {
+          handleCreateNewSession();
+        }
+      }
+    } catch (err) {
+      alert(`Could not delete session: ${err.message}`);
+    }
+  };
+
+  const handleReindexMemory = async () => {
+    setIsReindexing(true);
+    try {
+      const res = await api.reindexMemory(workspaceId);
+      alert(`Memory consolidation complete! Ingested: ${res.ingested_count}, Extracted: ${res.extracted_count}, Active Memories: ${res.consolidated_count}`);
+      loadMemoryStats();
+    } catch (err) {
+      alert(`Re-index error: ${err.message}`);
+    } finally {
+      setIsReindexing(false);
+    }
+  };
+
+  const handleTestKey = async () => {
+    if (!geminiApiKey.trim()) {
+      setKeyTestStatus({ ok: false, message: 'Please enter a Gemini API Key first.' });
+      return;
+    }
+    setIsTestingKey(true);
+    setKeyTestStatus(null);
+    try {
+      const res = await api.testGeminiKey(geminiApiKey.trim());
+      if (res.valid) {
+        setKeyTestStatus({ ok: true, message: `Connected! Model: ${res.model || 'Gemini 2.0 Flash'}` });
+        localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
+      } else {
+        setKeyTestStatus({ ok: false, message: res.error || 'Invalid API Key' });
+      }
+    } catch (err) {
+      setKeyTestStatus({ ok: false, message: err.message });
+    } finally {
+      setIsTestingKey(false);
+    }
+  };
+
+  const handleSaveApiKey = () => {
+    localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
+    setShowApiKeyModal(false);
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activePlanSteps]);
-
-  const handleClearChat = () => {
-    if (confirm('Clear chat history for this workspace?')) {
-      const storageKey = `nexamind_ai_chat_${workspaceId}`;
-      localStorage.removeItem(storageKey);
-      setMessages([defaultGreeting]);
-    }
-  };
 
   // Voice Recognition
   const toggleVoiceInput = () => {
@@ -101,27 +212,25 @@ export default function AiAssistant({
       try {
         const recognition = new SpeechRecognition();
         recognition.continuous = false;
-        recognition.interimResults = true;
+        recognition.interimResults = false;
         recognition.lang = 'en-US';
 
+        recognition.onstart = () => setIsRecording(true);
         recognition.onresult = (event) => {
-          const text = Array.from(event.results)
-            .map((r) => r[0].transcript)
-            .join('');
-          setInputPrompt(text);
+          const transcript = event.results[0][0].transcript;
+          setInputPrompt((prev) => (prev ? `${prev} ${transcript}` : transcript));
         };
-
-        recognition.onend = () => setIsRecording(false);
         recognition.onerror = () => setIsRecording(false);
+        recognition.onend = () => setIsRecording(false);
 
         recognition.start();
         speechRecognitionRef.current = recognition;
-        setIsRecording(true);
       } catch (err) {
-        console.error('Speech recognition error:', err);
+        console.warn('Speech recognition error:', err);
+        setIsRecording(false);
       }
     } else {
-      if (speechRecognitionRef.current) speechRecognitionRef.current.stop();
+      speechRecognitionRef.current?.stop();
       setIsRecording(false);
     }
   };
@@ -136,7 +245,7 @@ export default function AiAssistant({
         ...prev,
         {
           role: 'assistant',
-          content: '⚠️ No active workspace selected. Please select your Solo or Group workspace from the sidebar.',
+          content: '⚠️ No active workspace selected. Please select your workspace first.',
           tool_calls: [],
           timestamp: new Date().toISOString(),
         },
@@ -148,11 +257,17 @@ export default function AiAssistant({
     const userMsg = { role: 'user', content: prompt, timestamp: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
     setIsProcessing(true);
-    setActivePlanSteps(['Analyzing intent & scoping tools...', 'Executing autonomous operations in NexaMind...']);
+    setActivePlanSteps([
+      'Loading conversation context & episodic memory...',
+      'Synthesizing workspace knowledge (docs, tasks, chats)...',
+      'Executing agentic actions via Gemini 2.0...',
+    ]);
 
     try {
-      const res = await api.chatWithAgent(workspaceId, prompt);
+      const activeKey = geminiApiKey.trim() || localStorage.getItem('nexamind_gemini_key') || undefined;
+      const res = await api.chatWithAgent(workspaceId, prompt, activeSessionId, activeKey);
       setActivePlanSteps([]);
+
       const assistantMsg = {
         role: 'assistant',
         content: res.response,
@@ -160,6 +275,10 @@ export default function AiAssistant({
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistantMsg]);
+
+      // If title was auto-updated, refresh session list
+      loadSessions();
+      loadMemoryStats();
 
       // Check if workspace switch tool was executed
       if (res.tool_calls && onSwitchWorkspace) {
@@ -176,7 +295,7 @@ export default function AiAssistant({
       setActivePlanSteps([]);
       const errorMsg = {
         role: 'assistant',
-        content: `⚠️ Action encountered an error: ${err.message}`,
+        content: `⚠️ Action encountered an issue: ${err.message}\n\n*Tip: Click the API Key button in the top bar to verify or update your Google Gemini API key.*`,
         tool_calls: [],
         timestamp: new Date().toISOString(),
       };
@@ -208,18 +327,18 @@ export default function AiAssistant({
     }
     if (name === 'create_task' || name === 'update_task_status' || res.type === 'task') {
       return {
-        label: 'Kanban Task Created',
+        label: 'Kanban Task Created / Updated',
         icon: FolderKanban,
-        color: 'text-[#4F46E5]',
+        color: 'text-indigo-600',
         tab: 'projects',
         tabLabel: 'Open Kanban Board',
       };
     }
     if (name === 'create_document' || name === 'edit_document' || name === 'get_document' || res.type === 'document') {
       return {
-        label: name === 'edit_document' ? 'Document / File Edited' : name === 'get_document' ? 'Document Retrieved' : 'Document / File Created',
+        label: name === 'edit_document' ? 'Document Edited' : name === 'get_document' ? 'Document Retrieved' : 'Document Created',
         icon: FileText,
-        color: 'text-[#8B5CF6]',
+        color: 'text-purple-600',
         tab: 'documents',
         tabLabel: 'Open in Documents',
       };
@@ -228,7 +347,7 @@ export default function AiAssistant({
       return {
         label: 'Channel Communication',
         icon: MessageSquare,
-        color: 'text-[#10B981]',
+        color: 'text-emerald-600',
         tab: 'channels',
         tabLabel: 'Open Channel',
       };
@@ -237,13 +356,13 @@ export default function AiAssistant({
       return {
         label: 'Calendar Event Scheduled',
         icon: Calendar,
-        color: 'text-[#4F46E5]',
+        color: 'text-blue-600',
         tab: 'calendar',
         tabLabel: 'Open Calendar',
       };
     }
     return {
-      label: 'Operation Executed',
+      label: 'Autonomous Operation Executed',
       icon: Terminal,
       color: 'text-slate-600',
       tab: 'dashboard',
@@ -251,201 +370,392 @@ export default function AiAssistant({
     };
   };
 
-  const promptSuggestions = [
-    'Create a file named release_specs.txt with text "API v2 architecture and caching."',
-    'Schedule meeting for "Architecture Review" tomorrow at 3 PM',
-    'Edit document release_specs.txt and add "Verified on staging."',
-    'What is our current cash balance and runway?',
-    'Send message "Sprint review starts in 10 mins" to channel general',
-  ];
-
   return (
-    <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm flex flex-col h-full max-w-4xl mx-auto overflow-hidden font-sans text-[#191C1E]">
-      {/* Copilot Header */}
-      <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-purple-50 text-[#8B5CF6] border border-purple-200 flex items-center justify-center">
-            <Sparkles className="w-4 h-4" />
+    <div className="h-full flex flex-col select-none">
+      {/* 1. Header with Back Button (Item 1) & Quick Tools */}
+      <FeatureHeader
+        title="Agentic AI Copilot"
+        icon={Bot}
+        badge="Gemini 2.0 Autonomous Engine"
+        onBack={onBack}
+        actions={
+          <div className="flex items-center gap-2">
+            {/* Memory Vault Button */}
+            <button
+              onClick={() => setShowMemoryDrawer(!showMemoryDrawer)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 shadow-xs transition"
+              title="View 4-Stage AI Memory Pipeline"
+            >
+              <Brain className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="hidden sm:inline">Memory Vault</span>
+              {memoryStats && (
+                <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full text-[10px]">
+                  {memoryStats.total_memories || 0}
+                </span>
+              )}
+            </button>
+
+            {/* Gemini API Key Button */}
+            <button
+              onClick={() => setShowApiKeyModal(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
+                geminiApiKey
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 animate-pulse'
+              }`}
+              title="Configure Google Gemini API Key"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>{geminiApiKey ? 'Gemini Key Configured' : 'Set Gemini Key'}</span>
+            </button>
           </div>
-          <div>
-            <h2 className="text-sm font-bold text-[#191C1E] flex items-center gap-2">
-              <span>Copilot Intelligence Engine</span>
-              <span className="text-[9px] font-mono font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                AUTONOMOUS
-              </span>
-            </h2>
-            <p className="text-[10px] font-mono text-slate-500">
-              Direct NexaMind Database Authority & Tool Execution
-            </p>
+        }
+      />
+
+      {/* 2. Main Body: Session Rail + Conversation Stream */}
+      <div className="flex-1 flex gap-5 overflow-hidden min-h-0 pt-2">
+        {/* Left Drawer: Past Conversation Sessions (Item 2) */}
+        <div className="w-64 lg:w-72 bg-white rounded-2xl border border-slate-200 p-3.5 flex flex-col shadow-xs flex-shrink-0">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+              <Clock className="w-3.5 h-3.5 text-indigo-600" />
+              <span>AI Sessions</span>
+            </div>
+            <button
+              onClick={handleCreateNewSession}
+              className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition flex items-center gap-1 text-xs font-bold"
+              title="Start New Conversation Session"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">New Chat</span>
+            </button>
+          </div>
+
+          {/* Session List */}
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            {sessions.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400">
+                No past sessions yet.
+              </div>
+            ) : (
+              sessions.map((sess) => {
+                const isActive = sess.id === activeSessionId;
+                return (
+                  <div
+                    key={sess.id}
+                    onClick={() => selectSession(sess.id)}
+                    className={`group w-full text-left p-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-between ${
+                      isActive
+                        ? 'bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold shadow-xs'
+                        : 'text-slate-700 hover:bg-slate-50 border border-transparent'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1 pr-2">
+                      <div className="truncate">{sess.title || 'Untitled Session'}</div>
+                      <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                        {sess.created_at ? new Date(sess.created_at).toLocaleDateString() : 'Active'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => handleDeleteSession(sess.id, e)}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                      title="Delete Thread"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
-        <button
-          onClick={handleClearChat}
-          title="Clear Chat History"
-          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
+        {/* Center: Conversation Stream */}
+        <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col h-full overflow-hidden min-h-0">
+          {/* Messages Stream */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+            {messages.map((msg, idx) => {
+              const isUser = msg.role === 'user';
+              return (
+                <div
+                  key={idx}
+                  className={`flex gap-3 max-w-3xl ${isUser ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
+                >
+                  {/* Avatar */}
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm shadow-xs ${
+                      isUser
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white'
+                    }`}
+                  >
+                    {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                  </div>
 
-      {/* Messages Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-white">
-        {messages.map((msg, idx) => {
-          const isUser = msg.role === 'user';
-
-          return (
-            <div
-              key={idx}
-              className={`flex gap-3 text-xs leading-relaxed ${
-                isUser ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              {!isUser && (
-                <div className="w-7 h-7 rounded-xl bg-purple-50 text-[#8B5CF6] border border-purple-200 flex items-center justify-center shrink-0 mt-0.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                </div>
-              )}
-
-              <div
-                className={`rounded-2xl p-4 max-w-[82%] space-y-2.5 shadow-sm ${
-                  isUser
-                    ? 'bg-[#4F46E5] text-white rounded-br-none'
-                    : 'bg-[#F2F4F6] text-[#191C1E] border border-[#E2E8F0] rounded-bl-none'
-                }`}
-              >
-                <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-
-                {/* Executed Tools Action Cards */}
-                {!isUser && msg.tool_calls && msg.tool_calls.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-[#E2E8F0]">
-                    <div className="text-[10px] font-mono uppercase font-bold text-slate-500 tracking-wider">
-                      Executed Platform Actions
+                  {/* Message Bubble */}
+                  <div className={`space-y-2 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                        isUser
+                          ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm font-medium'
+                          : 'bg-slate-50 border border-slate-200 text-slate-900 rounded-tl-none shadow-xs font-normal'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
                     </div>
 
-                    {msg.tool_calls.map((toolCall, tIdx) => {
-                      const meta = getToolActionMeta(toolCall);
-                      const Icon = meta.icon;
-
-                      return (
-                        <div
-                          key={tIdx}
-                          className="bg-white rounded-xl p-3 border border-[#E2E8F0] space-y-1.5 shadow-sm"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span
-                              className={`text-[11px] font-mono font-bold flex items-center gap-1.5 ${meta.color}`}
+                    {/* Tool Calls Pill / Cards */}
+                    {msg.tool_calls && msg.tool_calls.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        {msg.tool_calls.map((tc, tIdx) => {
+                          const meta = getToolActionMeta(tc);
+                          const Icon = meta.icon;
+                          return (
+                            <div
+                              key={tIdx}
+                              className="bg-white border border-slate-200 p-2.5 rounded-xl shadow-xs flex items-center justify-between gap-3 text-xs"
                             >
-                              <Icon className="w-3.5 h-3.5" />
-                              <span>{meta.label}</span>
-                            </span>
-                            <span className="text-[10px] font-mono text-[#10B981] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-bold">
-                              SUCCESS
-                            </span>
-                          </div>
+                              <div className="flex items-center gap-2">
+                                <Icon className={`w-4 h-4 ${meta.color}`} />
+                                <span className="font-bold text-slate-800">{meta.label}</span>
+                              </div>
+                              {onNavigateTab && (
+                                <button
+                                  onClick={() => onNavigateTab(meta.tab)}
+                                  className="text-indigo-600 hover:text-indigo-700 font-bold hover:underline flex items-center gap-1"
+                                >
+                                  <span>{meta.tabLabel}</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
-                          <div className="text-[11px] text-slate-700 font-mono">
-                            {toolCall.result?.message || toolCall.result?.title || 'Operation committed to database.'}
-                          </div>
-
-                          {meta.tab && (
-                            <button
-                              onClick={() => onNavigateTab && onNavigateTab(meta.tab)}
-                              className="text-[10px] font-mono font-bold text-[#4F46E5] hover:underline flex items-center gap-1 transition pt-0.5"
-                            >
-                              <span>{meta.tabLabel}</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
+                    <div className="text-[10px] text-slate-400 px-1 font-mono">
+                      {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+                    </div>
                   </div>
-                )}
+                </div>
+              );
+            })}
+
+            {/* In-Flight Agent Steps Animation */}
+            {isProcessing && (
+              <div className="flex gap-3 max-w-xl mr-auto">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center shrink-0 animate-pulse">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl rounded-tl-none space-y-2 text-xs text-slate-700 shadow-xs">
+                  <div className="flex items-center gap-2 font-bold text-indigo-700">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                    <span>NexaMind Agent Reasoning...</span>
+                  </div>
+                  {activePlanSteps.map((step, sIdx) => (
+                    <div key={sIdx} className="flex items-center gap-2 text-slate-600">
+                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+                      <span>{step}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Prompt Input Form */}
+          <form
+            onSubmit={handleSend}
+            className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50/50 flex items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              className={`p-2.5 rounded-xl border transition ${
+                isRecording
+                  ? 'bg-rose-50 border-rose-300 text-rose-600 animate-pulse'
+                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+              title={isRecording ? 'Listening... click to stop' : 'Voice Input'}
+            >
+              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+
+            <textarea
+              value={inputPrompt}
+              onChange={(e) => setInputPrompt(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              placeholder="Ask anything, query workspace memory, or tell the AI to create tasks/docs..."
+              disabled={isProcessing}
+              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 resize-none shadow-xs"
+            />
+
+            <button
+              type="submit"
+              disabled={!inputPrompt.trim() || isProcessing}
+              className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white rounded-xl transition shadow-sm active:scale-95"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+        </div>
+
+        {/* Right Drawer: Memory Vault Inspection (Items 4 & 6) */}
+        {showMemoryDrawer && (
+          <div className="w-80 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col shadow-lg flex-shrink-0 animate-in slide-in-from-right-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Brain className="w-4 h-4 text-indigo-600" />
+                <h3 className="font-extrabold text-sm text-slate-900">Workspace Memory</h3>
+              </div>
+              <button
+                onClick={() => setShowMemoryDrawer(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="py-3 space-y-3 flex-1 overflow-y-auto">
+              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 space-y-1.5 text-xs">
+                <div className="font-bold text-indigo-900">4-Stage Memory Pipeline:</div>
+                <div className="text-slate-600 text-[11px] font-mono leading-relaxed">
+                  Ingestion ➔ Extraction ➔ Consolidation ➔ Storage
+                </div>
               </div>
 
-              {isUser && (
-                <div className="w-7 h-7 rounded-xl bg-indigo-50 text-[#4F46E5] border border-indigo-200 flex items-center justify-center shrink-0 mt-0.5">
-                  <User className="w-3.5 h-3.5" />
+              {/* Memory Pipeline Breakdown */}
+              <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="font-extrabold text-indigo-600 text-lg">
+                    {memoryStats?.total_memories || 0}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-medium">Active Memories</div>
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="font-extrabold text-emerald-600 text-lg">
+                    {memoryStats?.sources ? Object.keys(memoryStats.sources).length : 4}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-medium">Connected Sources</div>
+                </div>
+              </div>
+
+              {/* Memory Categories */}
+              {memoryStats?.categories && (
+                <div className="space-y-1 pt-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Categories</div>
+                  {Object.entries(memoryStats.categories).map(([cat, count]) => (
+                    <div key={cat} className="flex justify-between text-xs py-1 px-2 rounded-lg bg-slate-50">
+                      <span className="capitalize font-medium text-slate-700">{cat}</span>
+                      <span className="font-mono font-bold text-indigo-600">{count}</span>
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
-          );
-        })}
 
-        {/* Processing State */}
-        {isProcessing && (
-          <div className="flex gap-3 text-xs justify-start">
-            <div className="w-7 h-7 rounded-xl bg-purple-50 text-[#8B5CF6] border border-purple-200 flex items-center justify-center shrink-0">
-              <Sparkles className="w-3.5 h-3.5 animate-spin" />
-            </div>
-            <div className="bg-[#F2F4F6] text-[#191C1E] border border-[#E2E8F0] rounded-2xl rounded-bl-none p-4 space-y-1.5 shadow-sm">
-              <div className="flex items-center gap-2 text-[#4F46E5] font-mono text-[11px] font-bold">
-                <span className="w-2 h-2 rounded-full bg-[#4F46E5] animate-pulse"></span>
-                <span>Executing autonomous agent flow...</span>
+              {/* Re-Index Trigger */}
+              <div className="pt-3">
+                <button
+                  onClick={handleReindexMemory}
+                  disabled={isReindexing}
+                  className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isReindexing ? 'animate-spin' : ''}`} />
+                  <span>{isReindexing ? 'Consolidating Memory...' : 'Re-Index All Memories'}</span>
+                </button>
               </div>
-              {activePlanSteps.map((step, sIdx) => (
-                <div key={sIdx} className="text-[10px] font-mono text-slate-500 pl-4">
-                  › {step}
-                </div>
-              ))}
             </div>
           </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Fast Prompt Suggestions */}
-      {messages.length <= 2 && (
-        <div className="px-4 py-2 border-t border-[#E2E8F0] bg-[#F8FAFC] flex gap-2 overflow-x-auto">
-          {promptSuggestions.map((sug, sIdx) => (
-            <button
-              key={sIdx}
-              onClick={() => setInputPrompt(sug)}
-              className="text-[11px] font-mono text-slate-600 hover:text-[#191C1E] bg-white hover:bg-[#F2F4F6] border border-[#E2E8F0] px-3 py-1.5 rounded-lg whitespace-nowrap transition flex-shrink-0 shadow-sm"
-            >
-              {sug.slice(0, 36)}...
-            </button>
-          ))}
+      {/* Gemini API Key Configuration Modal (Item 2) */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Key className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-extrabold text-lg text-slate-900">Google Gemini API Key</h3>
+              </div>
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Integrate your Google AI Studio API Key to power live agentic multi-turn conversations and memory consolidation.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block">
+                API Key (starts with AIzaSy...)
+              </label>
+              <input
+                type="password"
+                placeholder="Paste Gemini API Key here..."
+                value={geminiApiKey}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 font-mono"
+              />
+            </div>
+
+            {/* Test Connection Button & Status */}
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleTestKey}
+                disabled={isTestingKey}
+                className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isTestingKey ? 'animate-spin' : ''}`} />
+                <span>{isTestingKey ? 'Testing Connection...' : 'Test Key Connection'}</span>
+              </button>
+
+              {keyTestStatus && (
+                <div
+                  className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
+                    keyTestStatus.ok
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}
+                >
+                  {keyTestStatus.ok ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{keyTestStatus.message}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveApiKey}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/30 transition active:scale-95"
+              >
+                Save & Activate
+              </button>
+            </div>
+          </div>
         </div>
       )}
-
-      {/* Input Form Bar */}
-      <form
-        onSubmit={handleSend}
-        className="p-3 sm:p-4 border-t border-[#E2E8F0] bg-[#F8FAFC] flex items-center gap-2"
-      >
-        <button
-          type="button"
-          onClick={toggleVoiceInput}
-          title={isRecording ? 'Stop Recording' : 'Voice Input'}
-          className={`p-2.5 rounded-xl border transition ${
-            isRecording
-              ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
-              : 'bg-white border-[#E2E8F0] text-slate-500 hover:text-slate-900 hover:bg-[#ECEEF0]'
-          }`}
-        >
-          {isRecording ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-        </button>
-
-        <input
-          type="text"
-          value={inputPrompt}
-          onChange={(e) => setInputPrompt(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Command Copilot: create doc, schedule meeting, edit file, send message..."
-          className="flex-1 bg-white border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] placeholder-slate-400 focus:outline-none transition font-sans shadow-sm"
-        />
-
-        <button
-          type="submit"
-          disabled={!inputPrompt.trim() || isProcessing}
-          className="bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-50 text-white p-2.5 rounded-xl transition shadow-sm flex items-center justify-center shrink-0"
-        >
-          <Send className="w-4 h-4" />
-        </button>
-      </form>
     </div>
   );
 }

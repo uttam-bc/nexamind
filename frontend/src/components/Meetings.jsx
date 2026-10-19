@@ -36,6 +36,7 @@ import {
   ListChecks,
 } from 'lucide-react';
 import { api, getAuthToken } from '../api';
+import FeatureHeader from './FeatureHeader';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -53,6 +54,7 @@ export default function Meetings({
   sessions,
   onRefreshSessions,
   onRefreshDocuments,
+  onBack,
 }) {
   const currentUserName = user?.name || 'You';
   const currentUserId = String(user?.id || 'local-user');
@@ -786,11 +788,6 @@ export default function Meetings({
     if (onRefreshSessions) onRefreshSessions();
   };
 
-  const upcomingMeetings = [
-    { title: 'Architecture Review & API Specs', time: 'Today, 02:00 PM', duration: '45m', type: 'Sprint Milestone' },
-    { title: 'Sprint 42 Planning & Backlog Sync', time: 'Tomorrow, 10:30 AM', duration: '30m', type: 'Sprint Sync' },
-  ];
-
   return (
     <div className="h-full w-full font-sans antialiased text-[#191C1E]">
       {/* ------------------------------------------------------------- */}
@@ -799,25 +796,22 @@ export default function Meetings({
       {!activeRoom ? (
         <div className="space-y-6 max-w-6xl mx-auto py-2">
           {/* Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-[#191C1E]">
-                Meetings & Video Hub
-              </h1>
-              <p className="text-xs text-slate-500 mt-1">
-                Start instant video calls, join your team's ongoing meeting, or inspect recorded sessions, transcripts, and AI MoMs.
-              </p>
-            </div>
-
-            <button
-              onClick={() => handleStartInstantMeeting()}
-              style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center gap-2"
-            >
-              <Video className="w-4 h-4 text-white" />
-              <span>{ongoingWorkspaceMeeting ? 'Join Team Meeting' : '+ Start Team Meeting'}</span>
-            </button>
-          </div>
+          <FeatureHeader
+            title="Meetings & Video Hub"
+            subtitle="Start instant video calls, join your team's ongoing meeting, or inspect recorded sessions, transcripts, and AI MoMs."
+            icon={Video}
+            onBack={onBack}
+            actions={
+              <button
+                onClick={() => handleStartInstantMeeting()}
+                style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center gap-2"
+              >
+                <Video className="w-4 h-4 text-white" />
+                <span>{ongoingWorkspaceMeeting ? 'Join Team Meeting' : '+ Start Team Meeting'}</span>
+              </button>
+            }
+          />
 
           {/* Solo Workspace Mode Notice with Quick Switch Button */}
           {workspace?.type === 'personal' && teamWorkspace && (
@@ -988,44 +982,6 @@ export default function Meetings({
                   </p>
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Upcoming Scheduled Syncs */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-[#191C1E] flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[#4F46E5]" />
-                <span>Upcoming Workspace Meetings</span>
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {upcomingMeetings.map((m, idx) => (
-                <div
-                  key={idx}
-                  className="bg-white border border-[#E2E8F0] p-5 rounded-2xl shadow-sm hover:border-[#4F46E5] transition flex items-center justify-between"
-                >
-                  <div className="space-y-1.5">
-                    <span className="text-[10px] font-mono font-bold bg-indigo-50 text-[#4F46E5] px-2 py-0.5 rounded">
-                      {m.type}
-                    </span>
-                    <h4 className="font-bold text-sm text-[#191C1E]">{m.title}</h4>
-                    <p className="text-xs text-slate-500 flex items-center gap-2 font-mono">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{m.time} ({m.duration})</span>
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => handleStartInstantMeeting(m.title)}
-                    className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 shrink-0"
-                  >
-                    <Video className="w-3.5 h-3.5" />
-                    <span>Join</span>
-                  </button>
-                </div>
-              ))}
             </div>
           </div>
 

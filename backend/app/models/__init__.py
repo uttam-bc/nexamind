@@ -11,7 +11,7 @@ from app.models.channel import Channel, ChannelReadState, Message, MessageReacti
 from app.models.document import Document  # noqa: F401
 from app.models.file import FileRecord  # noqa: F401
 from app.models.finance import FinanceTransaction  # noqa: F401
-from app.models.project import CodeRepo, Commit, Issue, Task  # noqa: F401
+from app.models.project import CodeRepo, Commit, Issue, RepoFile, Task  # noqa: F401
 from app.models.report import ReportRecord, ReportType  # noqa: F401
 from app.models.session import SessionRecord, SessionSource, SessionStatus  # noqa: F401
 from app.models.calendar import (  # noqa: F401
@@ -20,6 +20,7 @@ from app.models.calendar import (  # noqa: F401
     CalendarEventPriority,
     CalendarEventSource,
 )
+from app.models.ai import AiSession, AiMessage, AiMemory, AiMemoryType, AiMemorySource  # noqa: F401
 
 
 
@@ -45,6 +46,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now,
@@ -64,6 +66,10 @@ class User(Base):
         foreign_keys="Workspace.owner_id",
     )
     memberships: Mapped[list["WorkspaceMember"]] = relationship(back_populates="user")
+    ai_sessions: Mapped[list["AiSession"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Workspace(Base):
@@ -138,6 +144,14 @@ class Workspace(Base):
         cascade="all, delete-orphan",
     )
     calendar_events: Mapped[list["CalendarEvent"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    ai_sessions: Mapped[list["AiSession"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    ai_memories: Mapped[list["AiMemory"]] = relationship(
         back_populates="workspace",
         cascade="all, delete-orphan",
     )

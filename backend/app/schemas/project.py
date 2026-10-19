@@ -99,3 +99,28 @@ class IssueResponse(BaseModel):
     created_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class RepoFileCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    content: str = ""
+    language: str | None = None
+
+
+class RepoFileUpdate(BaseModel):
+    content: str | None = None
+    name: str | None = None
+    language: str | None = None
+
+
+class RepoFileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    repo_id: UUID
+    name: str
+    content: str
+    language: str
+    created_at: datetime
+    updated_at: datetime
+

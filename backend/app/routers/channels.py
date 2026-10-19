@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -63,6 +64,22 @@ async def create_workspace_channel(
         workspace_id,
         {"event": "channel_created", "workspace_id": str(workspace_id), "data": channel_data},
     )
+    return ChannelResponse.model_validate(channel)
+
+
+class CreateDmRequest(BaseModel):
+    target_username: str = Field(..., min_length=2, max_length=50)
+
+
+@router.post("/dm", response_model=ChannelResponse, status_code=status.HTTP_201_CREATED)
+async def create_or_open_dm(
+    workspace_id: UUID,
+    data: CreateDmRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChannelResponse:
+    from app.services.channel_service import create_or_get_dm_channel
+    channel = await create_or_get_dm_channel(db, workspace_id, current_user, data.target_username)
     return ChannelResponse.model_validate(channel)
 
 

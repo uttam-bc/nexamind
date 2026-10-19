@@ -15,6 +15,9 @@ from app.schemas.project import (
     IssueCreate,
     IssueResponse,
     IssueUpdate,
+    RepoFileCreate,
+    RepoFileResponse,
+    RepoFileUpdate,
     TaskCreate,
     TaskResponse,
     TaskUpdate,
@@ -24,13 +27,16 @@ from app.services.project_service import (
     create_issue,
     create_repo,
     create_task,
+    delete_repo_file,
     delete_task,
     get_repo,
     get_task,
     list_commits,
     list_issues,
+    list_repo_files,
     list_repos,
     list_tasks,
+    save_repo_file,
     update_issue,
     update_task,
 )
@@ -208,3 +214,41 @@ async def update_repo_issue(
 ) -> IssueResponse:
     issue = await update_issue(db, workspace_id, repo_id, issue_id, current_user.id, data)
     return IssueResponse.model_validate(issue)
+
+
+# --- Code Repository Files ---
+
+@router.get("/repos/{repo_id}/files", response_model=list[RepoFileResponse])
+async def get_repo_files(
+    workspace_id: UUID,
+    repo_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[RepoFileResponse]:
+    files = await list_repo_files(db, workspace_id, repo_id, current_user.id)
+    return [RepoFileResponse.model_validate(f) for f in files]
+
+
+@router.post("/repos/{repo_id}/files", response_model=RepoFileResponse, status_code=status.HTTP_201_CREATED)
+async def create_or_save_repo_file(
+    workspace_id: UUID,
+    repo_id: UUID,
+    data: RepoFileCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RepoFileResponse:
+    file_record = await save_repo_file(db, workspace_id, repo_id, current_user, data)
+    return RepoFileResponse.model_validate(file_record)
+
+
+@router.delete("/repos/{repo_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_repo_file_endpoint(
+    workspace_id: UUID,
+    repo_id: UUID,
+    file_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await delete_repo_file(db, workspace_id, repo_id, file_id, current_user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+

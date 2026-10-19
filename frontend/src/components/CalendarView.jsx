@@ -17,12 +17,14 @@ import {
   Tag,
 } from 'lucide-react';
 import { api } from '../api';
+import FeatureHeader from './FeatureHeader';
 
 export default function CalendarView({
   workspaceId,
   user,
   sessions,
   onRefreshSessions,
+  onBack,
 }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
@@ -192,9 +194,25 @@ export default function CalendarView({
   };
 
   return (
-    <div className="h-full flex flex-col lg:flex-row overflow-y-auto bg-[#F8FAFC] font-sans antialiased text-[#191C1E] gap-6">
-      {/* 1. Main Calendar Workspace */}
-      <div className="flex-1 flex flex-col bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
+    <div className="h-full flex flex-col select-none">
+      <FeatureHeader
+        title="Calendar & Scheduling"
+        icon={CalendarIcon}
+        badge="Sprint Schedule"
+        onBack={onBack}
+        actions={
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-xs active:scale-95"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Event</span>
+          </button>
+        }
+      />
+      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto bg-slate-50 font-sans antialiased text-slate-900 gap-6 pt-2">
+        {/* 1. Main Calendar Workspace */}
+        <div className="flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
           <div className="flex items-center gap-3">
@@ -559,6 +577,7 @@ export default function CalendarView({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

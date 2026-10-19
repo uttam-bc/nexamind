@@ -47,6 +47,7 @@ class MessageResponse(BaseModel):
     channel_id: UUID
     sender_id: UUID | None = None
     sender_name: str | None = None
+    sender_username: str | None = None
     parent_id: UUID | None = None
     content: str
     created_at: datetime

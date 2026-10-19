@@ -280,7 +280,7 @@ export default function Sidebar({
                       }}
                       className="flex-1 text-center py-1 text-[11px] font-bold text-[#4F46E5] hover:bg-indigo-50 rounded-lg transition"
                     >
-                      + Create
+                      + Create Group
                     </button>
                     <button
                       onClick={() => {
@@ -357,6 +357,40 @@ export default function Sidebar({
                       )}
                     </button>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'solo_chat' && (
+              <div className="mb-3 space-y-1.5">
+                <div className="flex items-center justify-between px-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  <span>Direct Chats</span>
+                  <button
+                    onClick={() => onTabChange('solo_chat')}
+                    className="hover:text-indigo-600 transition"
+                    title="Open Direct Messages"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="space-y-0.5 max-h-56 overflow-y-auto">
+                  {channels
+                    .filter((c) => c.is_private && (c.name.startsWith('dm-') || c.name.includes('-')))
+                    .map((chan) => (
+                      <button
+                        key={chan.id}
+                        onClick={() => onTabChange('solo_chat')}
+                        className="w-full text-left px-2 py-1.5 rounded-lg text-xs text-slate-700 hover:bg-[#ECEEF0] flex items-center justify-between truncate"
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          <User className="w-3.5 h-3.5 text-indigo-500" />
+                          <span className="truncate">{chan.name.replace('dm-', '@')}</span>
+                        </div>
+                      </button>
+                    ))}
+                  {channels.filter((c) => c.is_private && c.name.startsWith('dm-')).length === 0 && (
+                    <div className="text-[11px] text-slate-400 px-2 py-1 italic">No direct chats yet</div>
+                  )}
                 </div>
               </div>
             )}

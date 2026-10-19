@@ -21,6 +21,9 @@ import {
   Rocket,
   PartyPopper,
   Eye,
+  ArrowLeft,
+  UserPlus,
+  AtSign,
 } from 'lucide-react';
 import { api, getAuthToken } from '../api';
 
@@ -41,6 +44,7 @@ export default function Channels({
   unreadCounts = {},
   onRefreshChannels,
   onMarkRead,
+  onBack,
 }) {
   const [activeChannel, setActiveChannel] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -60,6 +64,13 @@ export default function Channels({
   const [newChannelDesc, setNewChannelDesc] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [activeHoverMessageId, setActiveHoverMessageId] = useState(null);
+
+  // DM / Invite by Username Modal
+  const [showDmModal, setShowDmModal] = useState(false);
+  const [targetUsernameInput, setTargetUsernameInput] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [dmLoading, setDmLoading] = useState(false);
+  const [dmError, setDmError] = useState('');
 
   // Presence State
   const [presenceList, setPresenceList] = useState([]);
@@ -87,14 +98,26 @@ export default function Channels({
     }
   }, [workspaceId]);
 
+  // Search users when DM modal is open
+  useEffect(() => {
+    if (!showDmModal) return;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.searchUsers(targetUsernameInput);
+        setUserSearchResults((res || []).filter((u) => u.id !== user?.id));
+      } catch (err) {
+        console.warn('Search users error:', err);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [targetUsernameInput, showDmModal]);
+
   // Load messages, mark channel read, and connect WebSocket when activeChannel changes
   useEffect(() => {
     if (activeChannel && workspaceId) {
       loadMessagesAndConnectWS(activeChannel.id);
-      // Mark read
       api.markChannelRead(workspaceId, activeChannel.id).catch(() => {});
       if (onMarkRead) onMarkRead(activeChannel.id);
-      // Close thread if switching channel
       setThreadRootMessage(null);
       setThreadReplies([]);
     }
@@ -113,7 +136,6 @@ export default function Channels({
 
   const loadMessagesAndConnectWS = async (channelId) => {
     try {
-      // Fetch root messages for Teams feed view
       const msgs = await api.listMessages(workspaceId, channelId, null, true);
       setMessages(msgs || []);
     } catch (err) {
@@ -133,7 +155,6 @@ export default function Channels({
           if (payload.event === 'new_message' && payload.data) {
             const incoming = payload.data;
             if (incoming.parent_id) {
-              // It's a thread reply
               setThreadReplies((prev) => {
                 if (threadRootMessage && incoming.parent_id === threadRootMessage.id) {
                   if (prev.some((m) => m.id === incoming.id)) return prev;
@@ -141,7 +162,6 @@ export default function Channels({
                 }
                 return prev;
               });
-              // Update reply_count on the root message in main stream
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === incoming.parent_id
@@ -150,7 +170,6 @@ export default function Channels({
                 )
               );
             } else {
-              // It's a root message
               setMessages((prev) => {
                 if (prev.some((m) => m.id === incoming.id)) return prev;
                 return [...prev, incoming];
@@ -169,64 +188,54 @@ export default function Channels({
             );
           }
         } catch (err) {
-          console.warn('WS message parse error:', err);
+          console.warn('WS message parse error', err);
         }
       };
 
       wsRef.current = ws;
-    } catch (e) {
-      console.warn('WS connection error:', e);
+    } catch (err) {
+      console.warn('WS connection error', err);
     }
   };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!inputText.trim() || !activeChannel || isSending) return;
+    const textToSend = inputText.trim();
+    setInputText('');
     setIsSending(true);
 
-    const content = inputText.trim();
     try {
-      const sent = await api.postMessage(workspaceId, activeChannel.id, { content });
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === sent.id)) return prev;
-        return [...prev, sent];
+      const created = await api.postMessage(workspaceId, activeChannel.id, {
+        content: textToSend,
       });
-      setInputText('');
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === created.id)) return prev;
+        return [...prev, created];
+      });
     } catch (err) {
-      alert(`Send error: ${err.message}`);
+      alert(`Send failed: ${err.message}`);
     } finally {
       setIsSending(false);
     }
   };
 
-  // Open Teams Thread Side Panel
-  const handleOpenThread = async (msg) => {
-    setThreadRootMessage(msg);
-    setThreadReplies([]);
-    try {
-      const replies = await api.listMessages(workspaceId, activeChannel.id, msg.id, false);
-      setThreadReplies(replies || []);
-    } catch (err) {
-      console.warn('Could not load thread replies:', err);
-    }
-  };
-
-  // Send Thread Reply
   const handleSendThreadReply = async (e) => {
     e.preventDefault();
     if (!threadInputText.trim() || !threadRootMessage || isThreadSending) return;
+    const replyToSend = threadInputText.trim();
+    setThreadInputText('');
     setIsThreadSending(true);
 
     try {
-      const sent = await api.postMessage(workspaceId, activeChannel.id, {
-        content: threadInputText.trim(),
+      const created = await api.postMessage(workspaceId, activeChannel.id, {
+        content: replyToSend,
         parent_id: threadRootMessage.id,
       });
       setThreadReplies((prev) => {
-        if (prev.some((m) => m.id === sent.id)) return prev;
-        return [...prev, sent];
+        if (prev.some((m) => m.id === created.id)) return prev;
+        return [...prev, created];
       });
-      // Increment reply_count on the root message
       setMessages((prev) =>
         prev.map((m) =>
           m.id === threadRootMessage.id
@@ -234,16 +243,25 @@ export default function Channels({
             : m
         )
       );
-      setThreadInputText('');
     } catch (err) {
-      alert(`Thread reply error: ${err.message}`);
+      alert(`Thread reply failed: ${err.message}`);
     } finally {
       setIsThreadSending(false);
     }
   };
 
-  // Toggle Reaction on message
+  const handleOpenThread = async (msg) => {
+    setThreadRootMessage(msg);
+    try {
+      const replies = await api.listMessages(workspaceId, activeChannel.id, msg.id, false);
+      setThreadReplies(replies || []);
+    } catch (err) {
+      console.warn('Could not load replies', err);
+    }
+  };
+
   const handleToggleReaction = async (messageId, emoji) => {
+    if (!activeChannel) return;
     try {
       const updatedReactions = await api.toggleReaction(
         workspaceId,
@@ -287,7 +305,26 @@ export default function Channels({
       if (onRefreshChannels) await onRefreshChannels();
       setActiveChannel(created);
     } catch (err) {
-      alert(`Create subchat error: ${err.message}`);
+      alert(`Create channel error: ${err.message}`);
+    }
+  };
+
+  const handleOpenOrCreateDm = async (targetUsername) => {
+    if (!targetUsername || dmLoading) return;
+    const cleanUser = targetUsername.trim().lstrip ? targetUsername.trim().replace(/^@/, '') : targetUsername.trim().replace(/^@/, '');
+    setDmLoading(true);
+    setDmError('');
+
+    try {
+      const channel = await api.createOrOpenDm(workspaceId, cleanUser);
+      setShowDmModal(false);
+      setTargetUsernameInput('');
+      if (onRefreshChannels) await onRefreshChannels();
+      setActiveChannel(channel);
+    } catch (err) {
+      setDmError(err.message || 'Failed to start direct message');
+    } finally {
+      setDmLoading(false);
     }
   };
 
@@ -296,72 +333,114 @@ export default function Channels({
       (p) => p.user_name?.toLowerCase() === senderName?.toLowerCase()
     );
     const status = match ? match.status : 'offline';
-
     if (status === 'online') return 'bg-emerald-500 ring-2 ring-white';
     if (status === 'away') return 'bg-amber-500 ring-2 ring-white';
     if (status === 'busy') return 'bg-rose-500 ring-2 ring-white';
     return 'bg-slate-300 ring-2 ring-white';
   };
 
+  // Group channels into Team Channels and Direct Messages
   const generalChannel = (channels || []).find((c) => c.name === 'general');
-  const subchatChannels = (channels || []).filter((c) => c.name !== 'general');
+  const teamChannels = (channels || []).filter(
+    (c) => c.name !== 'general' && !c.name.startsWith('dm-')
+  );
+  const dmChannels = (channels || []).filter((c) => c.name.startsWith('dm-'));
 
-  const filteredSubchats = subchatChannels.filter((c) =>
+  const filteredTeamChannels = teamChannels.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const filteredDmChannels = dmChannels.filter(
+    (c) =>
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.description && c.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const getChannelDisplayName = (ch) => {
+    if (ch.name.startsWith('dm-')) {
+      if (ch.description && ch.description.includes('between')) {
+        return ch.description.replace('Direct message between', '').trim();
+      }
+      return ch.name.replace('dm-', '@');
+    }
+    return ch.name;
+  };
 
   return (
-    <div className="h-full flex overflow-hidden -m-6 md:-m-8 bg-[#F8FAFC] text-[#191C1E] font-sans">
-      {/* 1. Left Channel Navigation Sidebar */}
-      <aside className="w-72 bg-white border-r border-[#E2E8F0] flex flex-col h-full flex-shrink-0 select-none shadow-sm">
-        {/* Sidebar Header */}
-        <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
+    <div className="h-full flex overflow-hidden -m-6 md:-m-8 bg-slate-50 text-slate-900 font-sans">
+      {/* ------------------------------------------------------------- */}
+      {/* 1. LEFT CHANNEL & DM SIDEBAR                                   */}
+      {/* ------------------------------------------------------------- */}
+      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col h-full flex-shrink-0 select-none shadow-sm">
+        {/* Sidebar Header with Back Button */}
+        <div className="p-3.5 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-[#4F46E5]" />
-            <h2 className="font-bold text-sm text-[#191C1E] tracking-tight">Teams & Channels</h2>
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition"
+                title="Back to Dashboard"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            )}
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-indigo-600" />
+              <h2 className="font-extrabold text-sm text-slate-900 tracking-tight">
+                Chats & Channels
+              </h2>
+            </div>
           </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            title="Create New Channel"
-            className="p-1.5 bg-[#F2F4F6] hover:bg-[#ECEEF0] text-[#4F46E5] rounded-xl transition shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowDmModal(true)}
+              title="New DM by @username"
+              className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition shadow-sm"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              title="Create Channel"
+              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        {/* Channel Search */}
-        <div className="p-3 border-b border-[#E2E8F0]">
+        {/* Search */}
+        <div className="p-3 border-b border-slate-200">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Search channels..."
-              className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] placeholder-slate-400 transition"
+              placeholder="Filter channels or @users..."
+              className="w-full bg-slate-100 border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </div>
 
-        {/* Channel Lists */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          {/* Main Workspace Channel (#general) */}
+        {/* Scrollable Channels & DMs */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-5">
+          {/* Main Workspace General Channel */}
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider px-2 mb-2 flex items-center justify-between">
-              <span>Main Workspace</span>
-              <span className="bg-indigo-50 text-[#4F46E5] text-[9px] px-1.5 py-0.5 rounded font-bold">
-                Teams
+            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+              <span>Main Channel</span>
+              <span className="bg-indigo-50 text-indigo-700 text-[9px] px-1.5 py-0.5 rounded font-bold">
+                Team
               </span>
             </div>
 
             {generalChannel ? (
               <button
                 onClick={() => setActiveChannel(generalChannel)}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition ${
                   activeChannel?.id === generalChannel.id
-                    ? 'bg-[#4F46E5] text-white shadow-sm font-bold'
-                    : 'text-slate-700 hover:bg-[#F2F4F6]'
+                    ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/25'
+                    : 'text-slate-800 hover:bg-slate-100 font-semibold'
                 }`}
               >
                 <div className="flex items-center gap-2">
@@ -369,45 +448,82 @@ export default function Channels({
                   <span className="truncate">general</span>
                 </div>
                 {unreadCounts[generalChannel.id] > 0 && activeChannel?.id !== generalChannel.id && (
-                  <span className="bg-[#4F46E5] text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                     {unreadCounts[generalChannel.id]}
                   </span>
                 )}
               </button>
-            ) : (
-              <button
-                onClick={() => {
-                  api.createChannel(workspaceId, {
-                    name: 'general',
-                    description: 'General team channel',
-                  }).then(() => onRefreshChannels && onRefreshChannels());
-                }}
-                className="w-full text-left px-3 py-2 rounded-xl text-xs text-[#4F46E5] bg-indigo-50 hover:bg-indigo-100 font-bold transition flex items-center gap-2"
-              >
-                <Plus className="w-3.5 h-3.5" /> Initialize #general
-              </button>
-            )}
+            ) : null}
           </div>
 
-          {/* Subchannels & Topic Channels */}
+          {/* Team Topic Channels */}
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider px-2 mb-2 flex items-center justify-between">
-              <span>Channels ({filteredSubchats.length})</span>
+            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+              <span>Channels ({filteredTeamChannels.length})</span>
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="text-[10px] text-[#4F46E5] hover:underline font-bold"
+                className="text-[10px] text-indigo-600 hover:underline font-bold"
               >
-                + Channel
+                + Add
               </button>
             </div>
 
             <div className="space-y-1">
-              {filteredSubchats.length === 0 ? (
-                <div className="px-2 py-3 text-center text-slate-400 text-xs italic bg-[#F8FAFC] rounded-xl border border-[#E2E8F0]">
-                  No subchannels yet. Click "+ Channel" to create one.
+              {filteredTeamChannels.map((ch) => {
+                const isActive = activeChannel?.id === ch.id;
+                const unread = unreadCounts[ch.id] || 0;
+
+                return (
+                  <button
+                    key={ch.id}
+                    onClick={() => setActiveChannel(ch)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition text-left ${
+                      isActive
+                        ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/25'
+                        : 'text-slate-800 hover:bg-slate-100 font-semibold'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      {ch.is_private ? (
+                        <Lock className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <Hash className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                      <span className="truncate">{ch.name}</span>
+                    </div>
+                    {unread > 0 && !isActive && (
+                      <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        {unread}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Direct Messages (DMs) by @username */}
+          <div>
+            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+              <span>Direct Messages ({filteredDmChannels.length})</span>
+              <button
+                onClick={() => setShowDmModal(true)}
+                className="text-[10px] text-indigo-600 hover:underline font-bold flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> New DM
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              {filteredDmChannels.length === 0 ? (
+                <div
+                  onClick={() => setShowDmModal(true)}
+                  className="px-3 py-2.5 text-center text-slate-400 hover:text-indigo-600 text-xs italic bg-slate-50 hover:bg-indigo-50/50 rounded-xl border border-dashed border-slate-200 cursor-pointer transition"
+                >
+                  + Message user by @username
                 </div>
               ) : (
-                filteredSubchats.map((ch) => {
+                filteredDmChannels.map((ch) => {
                   const isActive = activeChannel?.id === ch.id;
                   const unread = unreadCounts[ch.id] || 0;
 
@@ -415,22 +531,18 @@ export default function Channels({
                     <button
                       key={ch.id}
                       onClick={() => setActiveChannel(ch)}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition text-left ${
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition text-left ${
                         isActive
-                          ? 'bg-[#4F46E5] text-white shadow-sm font-bold'
-                          : 'text-slate-700 hover:bg-[#F2F4F6]'
+                          ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/25'
+                          : 'text-slate-800 hover:bg-slate-100 font-semibold'
                       }`}
                     >
                       <div className="flex items-center gap-2 truncate">
-                        {ch.is_private ? (
-                          <Lock className="w-3.5 h-3.5 shrink-0" />
-                        ) : (
-                          <Hash className="w-3.5 h-3.5 shrink-0" />
-                        )}
-                        <span className="truncate">{ch.name}</span>
+                        <AtSign className="w-3.5 h-3.5 shrink-0 text-indigo-400" />
+                        <span className="truncate">{getChannelDisplayName(ch)}</span>
                       </div>
                       {unread > 0 && !isActive && (
-                        <span className="bg-[#4F46E5] text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                           {unread}
                         </span>
                       )}
@@ -440,98 +552,91 @@ export default function Channels({
               )}
             </div>
           </div>
+        </div>
 
-          {/* Active Collaborators Presence Strip */}
-          <div className="pt-2 border-t border-[#E2E8F0]">
-            <div className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider px-2 mb-2 flex items-center justify-between">
-              <span>Live Presence</span>
-              <span className="text-[9px] text-emerald-600 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Active
+        {/* User Presence Footer */}
+        <div className="p-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
+          <div className="flex items-center gap-2 truncate">
+            <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-[10px]">
+              {user?.name ? user.name.slice(0, 2).toUpperCase() : 'ME'}
+            </div>
+            <div className="min-w-0">
+              <span className="font-bold text-slate-900 block truncate">{user?.name}</span>
+              <span className="text-[10px] font-mono text-indigo-600 block truncate">
+                @{user?.username || 'user'}
               </span>
             </div>
-            <div className="space-y-1 px-1">
-              {presenceList.slice(0, 4).map((p, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between py-1 px-2 rounded-lg text-xs text-slate-600 hover:bg-slate-50"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="relative">
-                      <div className="w-5 h-5 rounded-full bg-indigo-100 text-[#4F46E5] flex items-center justify-center text-[10px] font-bold">
-                        {p.user_name ? p.user_name.slice(0, 2).toUpperCase() : 'US'}
-                      </div>
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ${
-                          p.status === 'online'
-                            ? 'bg-emerald-500'
-                            : p.status === 'away'
-                            ? 'bg-amber-500'
-                            : p.status === 'busy'
-                            ? 'bg-rose-500'
-                            : 'bg-slate-400'
-                        }`}
-                      />
-                    </div>
-                    <span className="truncate font-medium text-slate-700">{p.user_name}</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-slate-400 capitalize">{p.status}</span>
-                </div>
-              ))}
-            </div>
           </div>
+          <span className="text-[10px] font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+            online
+          </span>
         </div>
       </aside>
 
-      {/* 2. Main Chat Conversation Area */}
-      <main className="flex-1 flex flex-col h-full bg-white overflow-hidden shadow-sm relative">
+      {/* ------------------------------------------------------------- */}
+      {/* 2. MAIN CHAT CONVERSATION AREA                                 */}
+      {/* ------------------------------------------------------------- */}
+      <main className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden shadow-sm relative">
         {activeChannel ? (
           <>
             {/* Chat Top Header */}
-            <header className="p-4 border-b border-[#E2E8F0] bg-white flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-[#4F46E5] flex items-center justify-center font-bold">
-                  {activeChannel.is_private ? <Lock className="w-4 h-4" /> : <Hash className="w-4 h-4" />}
+            <header className="px-6 py-4 border-b border-slate-200 bg-white flex items-center justify-between flex-shrink-0 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center font-bold">
+                  {activeChannel.name.startsWith('dm-') ? (
+                    <AtSign className="w-5 h-5 text-indigo-600" />
+                  ) : activeChannel.is_private ? (
+                    <Lock className="w-5 h-5" />
+                  ) : (
+                    <Hash className="w-5 h-5" />
+                  )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-[#191C1E] flex items-center gap-2">
-                    <span>#{activeChannel.name}</span>
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                    <span>{getChannelDisplayName(activeChannel)}</span>
                     {activeChannel.name === 'general' && (
-                      <span className="text-[9px] font-mono bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded-full font-bold">
-                        General Channel
+                      <span className="text-[10px] font-mono bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
+                        Workspace General
                       </span>
                     )}
                   </h3>
-                  <p className="text-[11px] text-slate-500 font-sans">
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
                     {activeChannel.description ||
-                      (activeChannel.name === 'general'
-                        ? 'General workspace chat for all team members.'
-                        : 'Dedicated discussion channel.')}
+                      (activeChannel.name.startsWith('dm-')
+                        ? 'Direct private message with teammate.'
+                        : 'Dedicated team collaboration channel.')}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-mono flex items-center gap-1.5 bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1.5 rounded-xl">
-                  <Users className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{presenceList.length || 1} Present</span>
-                </span>
+                <button
+                  onClick={() => setShowDmModal(true)}
+                  className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Invite Teammate</span>
+                </button>
               </div>
             </header>
 
-            {/* Message Feed */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#F8FAFC]">
+            {/* Message Feed - HIGH CONTRAST & LEGIBILITY */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-100/70">
               {messages.length === 0 ? (
-                <div className="text-center py-16 text-slate-400 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-white border border-[#E2E8F0] flex items-center justify-center mx-auto text-[#4F46E5] shadow-sm">
-                    <Hash className="w-6 h-6" />
+                <div className="text-center py-20 text-slate-400 space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center mx-auto text-indigo-600 shadow-sm">
+                    {activeChannel.name.startsWith('dm-') ? (
+                      <AtSign className="w-7 h-7" />
+                    ) : (
+                      <Hash className="w-7 h-7" />
+                    )}
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-[#191C1E]">
-                      Welcome to #{activeChannel.name}!
+                    <h4 className="font-extrabold text-base text-slate-900">
+                      Welcome to #{getChannelDisplayName(activeChannel)}!
                     </h4>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Start the conversation, share updates, or reply in threads.
+                    <p className="text-xs text-slate-600 mt-1">
+                      Start the conversation, mention teammates, or reply in threads.
                     </p>
                   </div>
                 </div>
@@ -539,17 +644,18 @@ export default function Channels({
                 messages.map((msg) => {
                   const isHovered = activeHoverMessageId === msg.id;
                   const replyCount = msg.reply_count || 0;
+                  const isOwn = msg.sender_id === user?.id;
 
                   return (
                     <div
                       key={msg.id}
                       onMouseEnter={() => setActiveHoverMessageId(msg.id)}
                       onMouseLeave={() => setActiveHoverMessageId(null)}
-                      className="flex gap-3 group relative rounded-2xl p-2 transition hover:bg-white/80"
+                      className="flex gap-3.5 group relative rounded-2xl p-2 transition hover:bg-white/60"
                     >
                       {/* Avatar with Presence Dot */}
                       <div className="relative shrink-0 mt-0.5">
-                        <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-xs font-bold text-[#4F46E5]">
+                        <div className="w-9 h-9 rounded-2xl bg-indigo-100 border border-indigo-200 flex items-center justify-center text-xs font-black text-indigo-700 shadow-sm">
                           {msg.sender_name ? msg.sender_name.slice(0, 2).toUpperCase() : 'US'}
                         </div>
                         <span
@@ -561,11 +667,17 @@ export default function Channels({
 
                       {/* Message Content & Thread Hook */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-bold text-xs text-[#191C1E]">
+                        {/* Header: Name + Username + Timestamp */}
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-slate-900">
                             {msg.sender_name || 'Teammate'}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-400">
+                          {msg.sender_username && (
+                            <span className="text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                              @{msg.sender_username}
+                            </span>
+                          )}
+                          <span className="text-xs font-mono text-slate-400 ml-1">
                             {new Date(msg.created_at).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -573,8 +685,8 @@ export default function Channels({
                           </span>
                         </div>
 
-                        {/* Message Bubble */}
-                        <div className="mt-1 bg-white border border-[#E2E8F0] rounded-2xl rounded-tl-none p-3.5 shadow-sm text-xs text-[#191C1E] max-w-2xl leading-relaxed whitespace-pre-wrap">
+                        {/* Message Bubble - CRISP, HIGH CONTRAST */}
+                        <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed whitespace-pre-wrap font-sans font-normal">
                           {msg.content}
                         </div>
 
@@ -585,14 +697,14 @@ export default function Channels({
                               <button
                                 key={idx}
                                 onClick={() => handleToggleReaction(msg.id, r.emoji)}
-                                className={`px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border transition ${
+                                className={`px-2.5 py-0.5 rounded-full text-xs flex items-center gap-1.5 border transition ${
                                   r.has_reacted
-                                    ? 'bg-indigo-50 border-[#4F46E5] text-[#4F46E5] font-bold shadow-sm'
-                                    : 'bg-white border-[#E2E8F0] text-slate-600 hover:border-slate-300'
+                                    ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold shadow-sm'
+                                    : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
                                 }`}
                               >
                                 <span>{r.emoji}</span>
-                                <span className="font-mono text-[10px]">{r.count}</span>
+                                <span className="font-mono text-xs font-bold">{r.count}</span>
                               </button>
                             ))}
                           </div>
@@ -603,7 +715,7 @@ export default function Channels({
                           {replyCount > 0 ? (
                             <button
                               onClick={() => handleOpenThread(msg)}
-                              className="text-xs font-bold text-[#4F46E5] hover:underline flex items-center gap-1"
+                              className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
                             >
                               <CornerDownRight className="w-3.5 h-3.5" />
                               <span>
@@ -613,9 +725,9 @@ export default function Channels({
                           ) : (
                             <button
                               onClick={() => handleOpenThread(msg)}
-                              className="opacity-0 group-hover:opacity-100 text-[11px] font-medium text-slate-400 hover:text-[#4F46E5] transition flex items-center gap-1"
+                              className="opacity-0 group-hover:opacity-100 text-xs font-semibold text-slate-500 hover:text-indigo-600 transition flex items-center gap-1"
                             >
-                              <Reply className="w-3 h-3" /> Reply in thread
+                              <Reply className="w-3.5 h-3.5" /> Reply in thread
                             </button>
                           )}
                         </div>
@@ -623,7 +735,7 @@ export default function Channels({
 
                       {/* Hover Action Bar (Reactions + Reply) */}
                       {isHovered && (
-                        <div className="absolute right-4 -top-3 bg-white border border-[#E2E8F0] rounded-xl px-2 py-1 shadow-lg flex items-center gap-1 z-10 animate-in fade-in zoom-in-95">
+                        <div className="absolute right-4 -top-3 bg-white border border-slate-200 rounded-xl px-2 py-1 shadow-lg flex items-center gap-1 z-10 animate-in fade-in zoom-in-95">
                           {QUICK_REACTIONS.map((re) => (
                             <button
                               key={re.emoji}
@@ -638,7 +750,7 @@ export default function Channels({
                           <button
                             title="Reply in thread"
                             onClick={() => handleOpenThread(msg)}
-                            className="p-1 text-slate-500 hover:text-[#4F46E5] hover:bg-indigo-50 rounded-lg transition"
+                            className="p-1 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
                           >
                             <Reply className="w-3.5 h-3.5" />
                           </button>
@@ -651,15 +763,15 @@ export default function Channels({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input Form */}
+            {/* Message Input Form - High Contrast, Large Readable Text */}
             <form
               onSubmit={handleSendMessage}
-              className="p-4 border-t border-[#E2E8F0] bg-white flex items-center gap-2"
+              className="p-4 border-t border-slate-200 bg-white flex items-center gap-3"
             >
               <input
                 type="text"
-                placeholder={`Message #${activeChannel.name}...`}
-                className="flex-1 bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] placeholder-slate-400 focus:outline-none transition"
+                placeholder={`Type message in #${getChannelDisplayName(activeChannel)}...`}
+                className="flex-1 bg-slate-50 border-2 border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl px-5 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none transition shadow-sm font-sans"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
               />
@@ -667,28 +779,29 @@ export default function Channels({
               <button
                 type="submit"
                 disabled={!inputText.trim() || isSending}
-                className="bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5"
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-3 rounded-2xl text-xs font-bold shadow-md shadow-indigo-600/30 transition flex items-center gap-2"
               >
-                <Send className="w-3.5 h-3.5" />
+                <Send className="w-4 h-4" />
                 <span>Send</span>
               </button>
             </form>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-400 text-xs">
+          <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
             Select or create a channel to start communicating with your team.
           </div>
         )}
       </main>
 
-      {/* 3. Microsoft Teams Dedicated Thread Side Panel */}
+      {/* ------------------------------------------------------------- */}
+      {/* 3. DEDICATED THREAD PANEL                                      */}
+      {/* ------------------------------------------------------------- */}
       {threadRootMessage && (
-        <aside className="w-96 bg-white border-l border-[#E2E8F0] flex flex-col h-full flex-shrink-0 shadow-lg animate-in slide-in-from-right duration-200">
-          {/* Thread Panel Header */}
-          <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
+        <aside className="w-96 bg-white border-l border-slate-200 flex flex-col h-full flex-shrink-0 shadow-xl animate-in slide-in-from-right duration-200">
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <CornerDownRight className="w-4 h-4 text-[#4F46E5]" />
-              <h3 className="font-bold text-sm text-[#191C1E]">Thread</h3>
+              <CornerDownRight className="w-4 h-4 text-indigo-600" />
+              <h3 className="font-extrabold text-sm text-slate-900">Thread Discussion</h3>
             </div>
             <button
               onClick={() => setThreadRootMessage(null)}
@@ -699,47 +812,31 @@ export default function Channels({
           </div>
 
           {/* Root Message Card */}
-          <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC] space-y-2">
+          <div className="p-4 border-b border-slate-200 bg-slate-50 space-y-2">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-indigo-100 text-[#4F46E5] flex items-center justify-center text-[10px] font-bold">
+              <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-black">
                 {threadRootMessage.sender_name
                   ? threadRootMessage.sender_name.slice(0, 2).toUpperCase()
                   : 'US'}
               </div>
               <div>
-                <span className="font-bold text-xs text-[#191C1E]">
+                <span className="font-bold text-xs text-slate-900">
                   {threadRootMessage.sender_name || 'Teammate'}
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono ml-2">
-                  {new Date(threadRootMessage.created_at).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
+                {threadRootMessage.sender_username && (
+                  <span className="text-[10px] font-mono text-indigo-600 ml-1.5">
+                    @{threadRootMessage.sender_username}
+                  </span>
+                )}
               </div>
             </div>
-            <div className="text-xs text-slate-800 leading-relaxed bg-white p-3 rounded-xl border border-slate-200">
+            <div className="text-sm text-slate-900 leading-relaxed bg-white p-3.5 rounded-xl border border-slate-200 font-sans shadow-sm">
               {threadRootMessage.content}
             </div>
-            {/* Root Reactions */}
-            {threadRootMessage.reactions && threadRootMessage.reactions.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {threadRootMessage.reactions.map((r, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleToggleReaction(threadRootMessage.id, r.emoji)}
-                    className="px-2 py-0.5 rounded-full text-xs flex items-center gap-1 bg-white border border-[#E2E8F0] text-slate-600"
-                  >
-                    <span>{r.emoji}</span>
-                    <span className="font-mono text-[10px]">{r.count}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {/* Thread Replies List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#F8FAFC]">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
             {threadReplies.length === 0 ? (
               <div className="text-center py-10 text-slate-400 text-xs">
                 No replies yet. Be the first to reply in this thread!
@@ -747,40 +844,29 @@ export default function Channels({
             ) : (
               threadReplies.map((reply) => (
                 <div key={reply.id} className="flex gap-2.5">
-                  <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                  <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
                     {reply.sender_name ? reply.sender_name.slice(0, 2).toUpperCase() : 'US'}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2">
-                      <span className="font-bold text-[11px] text-[#191C1E]">
+                      <span className="font-bold text-xs text-slate-900">
                         {reply.sender_name || 'Teammate'}
                       </span>
-                      <span className="text-[9px] font-mono text-slate-400">
+                      {reply.sender_username && (
+                        <span className="text-[10px] font-mono text-indigo-600">
+                          @{reply.sender_username}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400 font-mono">
                         {new Date(reply.created_at).toLocaleTimeString([], {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
                       </span>
                     </div>
-                    <div className="mt-1 bg-white border border-[#E2E8F0] rounded-xl p-2.5 text-xs text-[#191C1E] leading-relaxed shadow-sm">
+                    <div className="mt-1 text-xs text-slate-900 bg-white p-3 rounded-xl border border-slate-200 shadow-sm leading-relaxed">
                       {reply.content}
                     </div>
-
-                    {/* Reply Reactions */}
-                    {reply.reactions && reply.reactions.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {reply.reactions.map((r, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => handleToggleReaction(reply.id, r.emoji)}
-                            className="px-1.5 py-0.5 rounded-full text-[10px] flex items-center gap-1 bg-white border border-[#E2E8F0]"
-                          >
-                            <span>{r.emoji}</span>
-                            <span className="font-mono">{r.count}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               ))
@@ -788,22 +874,22 @@ export default function Channels({
             <div ref={threadEndRef} />
           </div>
 
-          {/* Thread Reply Input Form */}
+          {/* Thread Input Form */}
           <form
             onSubmit={handleSendThreadReply}
-            className="p-3 border-t border-[#E2E8F0] bg-white flex items-center gap-2"
+            className="p-3 border-t border-slate-200 bg-white flex items-center gap-2"
           >
             <input
               type="text"
               placeholder="Reply to thread..."
-              className="flex-1 bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3 py-2 text-xs text-[#191C1E] placeholder-slate-400 focus:outline-none transition"
+              className="flex-1 bg-slate-100 border border-slate-200 focus:border-indigo-600 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none transition"
               value={threadInputText}
               onChange={(e) => setThreadInputText(e.target.value)}
             />
             <button
               type="submit"
               disabled={!threadInputText.trim() || isThreadSending}
-              className="bg-[#4F46E5] hover:bg-[#4338CA] disabled:opacity-50 text-white p-2 rounded-xl transition shadow-sm"
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white p-2 rounded-xl transition"
             >
               <Send className="w-3.5 h-3.5" />
             </button>
@@ -811,34 +897,31 @@ export default function Channels({
         </aside>
       )}
 
-      {/* Create Channel Modal */}
+      {/* ------------------------------------------------------------- */}
+      {/* 4. CREATE NEW CHANNEL MODAL                                    */}
+      {/* ------------------------------------------------------------- */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-sm w-full space-y-4 shadow-2xl text-[#191C1E]">
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 max-w-sm w-full space-y-4 shadow-2xl text-slate-900">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#191C1E]">Create Teams Channel</h3>
+              <h3 className="text-base font-extrabold text-slate-900">Create New Channel</h3>
               <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Create a dedicated channel for team syncs, engineering tasks, or topic-based rooms.
-            </p>
-
-            <form onSubmit={handleCreateSubchat} className="space-y-3">
+            <form onSubmit={handleCreateSubchat} className="space-y-4">
               <div>
                 <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
                   Channel Name
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2 text-slate-400 text-xs">#</span>
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-mono text-xs">#</span>
                   <input
                     type="text"
                     required
-                    autoFocus
-                    placeholder="frontend-team"
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl pl-7 pr-3 py-2 text-xs text-[#191C1E] focus:outline-none"
+                    placeholder="frontend-releases"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-7 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                     value={newChannelName}
                     onChange={(e) => setNewChannelName(e.target.value)}
                   />
@@ -847,12 +930,12 @@ export default function Channels({
 
               <div>
                 <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Description (Optional)
+                  Description
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Dedicated discussion for frontend devs"
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none"
+                  placeholder="What is this channel for?"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                   value={newChannelDesc}
                   onChange={(e) => setNewChannelDesc(e.target.value)}
                 />
@@ -861,13 +944,13 @@ export default function Channels({
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
-                  id="private-check"
+                  id="private_ch"
+                  className="rounded text-indigo-600 focus:ring-0"
                   checked={isPrivate}
                   onChange={(e) => setIsPrivate(e.target.checked)}
-                  className="rounded border-[#CBD5E1] text-[#4F46E5]"
                 />
-                <label htmlFor="private-check" className="text-xs text-slate-700 cursor-pointer">
-                  Private Channel (Restricted to invited members)
+                <label htmlFor="private_ch" className="text-xs text-slate-700 font-medium">
+                  Make private (invite only)
                 </label>
               </div>
 
@@ -875,18 +958,118 @@ export default function Channels({
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-800"
+                  className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-700"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-sm"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30"
                 >
                   Create Channel
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. DIRECT MESSAGE / INVITE USER BY @USERNAME MODAL             */}
+      {/* ------------------------------------------------------------- */}
+      {showDmModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 max-w-md w-full space-y-4 shadow-2xl text-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <AtSign className="w-5 h-5 text-indigo-600" />
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Direct Message / Invite User
+                </h3>
+              </div>
+              <button onClick={() => setShowDmModal(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 font-sans">
+              Search by <strong>@username</strong> or full name to start a private 1-on-1 chat.
+            </p>
+
+            {dmError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
+                {dmError}
+              </div>
+            )}
+
+            {/* Input with @ Prefix */}
+            <div className="relative">
+              <span className="absolute left-3.5 top-2.5 text-indigo-600 font-mono text-sm font-bold">@</span>
+              <input
+                type="text"
+                autoFocus
+                placeholder="type username e.g. jason_bourne..."
+                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-xs text-slate-900 outline-none transition font-mono font-bold"
+                value={targetUsernameInput}
+                onChange={(e) => setTargetUsernameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleOpenOrCreateDm(targetUsernameInput);
+                  }
+                }}
+              />
+            </div>
+
+            {/* Matching Users List */}
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {userSearchResults.length > 0 ? (
+                userSearchResults.map((u) => (
+                  <div
+                    key={u.id}
+                    onClick={() => handleOpenOrCreateDm(u.username || u.name)}
+                    className="p-2.5 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/50 flex items-center justify-between cursor-pointer transition group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                        {u.name ? u.name.slice(0, 2).toUpperCase() : 'US'}
+                      </div>
+                      <div>
+                        <span className="font-bold text-xs text-slate-900 group-hover:text-indigo-600 transition block">
+                          {u.name}
+                        </span>
+                        <span className="text-[10px] font-mono text-indigo-600">
+                          @{u.username || 'user'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1 rounded-lg border border-indigo-200 transition"
+                    >
+                      Chat
+                    </button>
+                  </div>
+                ))
+              ) : targetUsernameInput.trim() ? (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  <span className="text-xs text-slate-600 font-mono">
+                    Start chat with <strong>@{targetUsernameInput.trim()}</strong>
+                  </span>
+                  <button
+                    onClick={() => handleOpenOrCreateDm(targetUsernameInput)}
+                    disabled={dmLoading}
+                    className="bg-indigo-600 text-white font-bold text-xs px-3 py-1 rounded-lg shadow-sm"
+                  >
+                    {dmLoading ? 'Opening...' : 'Start'}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center py-6 text-slate-400 text-xs">
+                  Type a username above to search.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
