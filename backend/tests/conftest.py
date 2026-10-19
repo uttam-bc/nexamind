@@ -1,5 +1,18 @@
 import asyncio
+import os
 from collections.abc import AsyncGenerator, Generator
+
+# Configure before the app is imported: tests never call real AI providers or use .env secrets.
+os.environ.update({
+    "APP_ENV": "test",
+    "GEMINI_API_KEY": "",
+    "GROQ_API_KEY": "",
+    "REDIS_URL": "",
+    "RATE_LIMIT_ENABLED": "false",
+    "RUN_BACKGROUND_JOBS": "false",
+    "AUTO_CREATE_SCHEMA": "false",
+    "UPLOAD_DIR": os.path.join(os.path.dirname(__file__), ".test_uploads"),
+})
 
 import pytest
 import pytest_asyncio
@@ -9,8 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.database as app_db
-from app.database import Base, get_db
+from app.database import Base, enable_sqlite_foreign_keys, get_db
 from app.main import app
+from app.security import rate_limiter
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -30,6 +44,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         poolclass=StaticPool,
         future=True,
     )
+    enable_sqlite_foreign_keys(engine.sync_engine)
     session_factory = async_sessionmaker(
         bind=engine,
         class_=AsyncSession,
@@ -54,6 +69,11 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     await engine.dispose()
 
 
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits() -> None:
+    rate_limiter.reset()
 
 
 @pytest_asyncio.fixture

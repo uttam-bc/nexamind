@@ -772,7 +772,12 @@ export default function LandingPage({
                   className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  minLength={authMode === 'register' ? 8 : undefined}
+                  autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                 />
+                {authMode === 'register' && (
+                  <p className="text-[11px] text-slate-500">At least 8 characters, with letters and numbers.</p>
+                )}
               </div>
 
               <button
@@ -799,7 +804,8 @@ export default function LandingPage({
                 type="button"
                 onClick={() => {
                   setAuthMode(authMode === 'login' ? 'register' : 'login');
-                  if (setAuthError) setAuthError('');
+                  setLocalError('');
+                  propSetAuthError?.('');
                 }}
                 className="text-xs text-indigo-600 hover:underline font-semibold"
               >

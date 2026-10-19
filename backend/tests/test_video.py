@@ -26,7 +26,7 @@ async def test_create_join_and_end_video_room_with_ai_summary(
     room_id = room["room_id"]
     assert room["name"] == "Sprint 5 Standup & Planning"
     assert room["status"] == "active"
-    assert "daily.co" in room["room_url"]
+    assert room["room_url"] == f"/meetings/{room['room_id']}"
     assert len(room["participants"]) == 1
 
     # 2. List active video rooms

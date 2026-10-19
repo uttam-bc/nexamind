@@ -1,7 +1,7 @@
+import asyncio
 import logging
 import os
 import uuid
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -13,12 +13,22 @@ from app.models import SessionRecord, SessionSource, SessionStatus, User
 
 from app.schemas.session import SessionCreate, SessionResponse, SessionUpdate
 from app.services.ai_service import summarize_meeting_transcript, transcribe_audio
+from app.config import get_settings
 from app.services.auth_service import AuthError
+from app.services.upload_utils import (
+    delete_stored_file,
+    safe_content_type,
+    safe_extension,
+    sanitize_filename,
+    save_upload,
+    upload_root,
+)
 from app.services.websocket_manager import ws_manager
 from app.services.workspace_service import get_workspace_membership
 
 logger = logging.getLogger(__name__)
-SESSION_UPLOAD_DIR = Path("uploads/sessions")
+# Background pipelines in flight; holding references keeps tasks from being garbage collected.
+_PIPELINE_TASKS: set[asyncio.Task] = set()
 
 
 async def list_sessions(
@@ -89,22 +99,18 @@ async def upload_session_file(
 ) -> SessionRecord:
     await _require_workspace_access(db, workspace_id, user.id)
 
-    target_dir = SESSION_UPLOAD_DIR / str(workspace_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
+    mime_type = safe_content_type(file.content_type or "audio/webm")
+    if not (mime_type.startswith("audio/") or mime_type.startswith("video/")):
+        raise AuthError("Recordings must be audio or video files", status_code=415)
 
     file_uuid = uuid.uuid4()
-    original_filename = file.filename or "recording.webm"
-    file_extension = Path(original_filename).suffix or ".webm"
-    saved_filename = f"{file_uuid}{file_extension}"
-    target_path = target_dir / saved_filename
+    original_filename = sanitize_filename(file.filename, fallback="recording.webm")
+    target_path = (
+        upload_root() / "sessions" / str(workspace_id) / f"{file_uuid}{safe_extension(original_filename, '.webm')}"
+    )
+    file_size = await save_upload(file, target_path, get_settings().max_recording_mb * 1024 * 1024)
 
-    content = await file.read()
-    file_size = len(content)
-
-    with open(target_path, "wb") as f:
-        f.write(content)
-
-    session_title = title.strip() if title else f"Meeting Recording - {Path(original_filename).stem}"
+    session_title = (title or "").strip()[:255] or f"Meeting Recording - {os.path.splitext(original_filename)[0]}"
 
     session = SessionRecord(
         id=file_uuid,
@@ -113,7 +119,7 @@ async def upload_session_file(
         source=SessionSource.UPLOAD,
         file_path=str(target_path),
         file_size=file_size,
-        mime_type=file.content_type or "audio/webm",
+        mime_type=mime_type,
         status=SessionStatus.UPLOADING,
         created_by=user.id,
     )
@@ -154,13 +160,10 @@ async def delete_session(
     user_id: UUID,
 ) -> None:
     session = await get_session(db, workspace_id, session_id, user_id)
-    if session.file_path and os.path.exists(session.file_path):
-        try:
-            os.remove(session.file_path)
-        except OSError:
-            pass
+    file_path = session.file_path
     await db.delete(session)
     await db.flush()
+    delete_stored_file(file_path)
 
 
 async def process_session_pipeline(
@@ -185,10 +188,10 @@ async def process_session_pipeline(
         res = await session.execute(select(SessionRecord).where(SessionRecord.id == session_id))
         s = res.scalar_one_or_none()
         if not s:
-            return None, None
-        return s.file_path, s.title
+            return None, None, None
+        return s.file_path, s.title, s.mime_type
 
-    file_path, session_title = await _execute_with_session(_fetch_info)
+    file_path, session_title, mime_type = await _execute_with_session(_fetch_info)
     if not file_path:
         logger.error("Session %s not found for pipeline processing", session_id)
         return
@@ -221,7 +224,7 @@ async def process_session_pipeline(
         if d1:
             await _broadcast_session_status(workspace_id, session_id, SessionStatus.TRANSCRIBING, d1)
 
-        transcript = await transcribe_audio(file_path)
+        transcript = await transcribe_audio(file_path, mime_type or "audio/webm")
 
         # Step 2: Summarizing
         async def _set_summarizing(session: AsyncSession):
@@ -257,12 +260,12 @@ async def process_session_pipeline(
         logger.info("Session %s successfully processed by pipeline", session_id)
 
     except Exception as exc:
-        logger.error("Pipeline failed for session %s: %s", session_id, exc)
+        logger.exception("Pipeline failed for session %s: %s", session_id, exc)
         async def _set_failed(session: AsyncSession):
             s = (await session.execute(select(SessionRecord).where(SessionRecord.id == session_id))).scalar_one_or_none()
             if s:
                 s.status = SessionStatus.FAILED
-                s.error_message = str(exc)
+                s.error_message = "Processing failed. Try uploading the recording again."
                 await session.flush()
                 await session.refresh(s)
                 return SessionResponse.model_validate(s).model_dump(mode="json")
@@ -270,6 +273,33 @@ async def process_session_pipeline(
         d_err = await _execute_with_session(_set_failed)
         if d_err:
             await _broadcast_session_status(workspace_id, session_id, SessionStatus.FAILED, d_err)
+
+
+def schedule_session_pipeline(session_id: UUID, workspace_id: UUID) -> None:
+    if not get_settings().run_background_jobs:
+        return
+    task = asyncio.create_task(process_session_pipeline(session_id, workspace_id))
+    _PIPELINE_TASKS.add(task)
+    task.add_done_callback(_PIPELINE_TASKS.discard)
+
+
+async def resume_interrupted_sessions() -> int:
+    """Restart pipelines for recordings left mid-processing by a restart or crash."""
+    in_flight = (SessionStatus.UPLOADING, SessionStatus.TRANSCRIBING, SessionStatus.SUMMARIZING)
+    async with database.AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.id, SessionRecord.workspace_id).where(
+                    SessionRecord.status.in_(in_flight),
+                    SessionRecord.file_path.is_not(None),
+                )
+            )
+        ).all()
+    for session_id, workspace_id in rows:
+        schedule_session_pipeline(session_id, workspace_id)
+    if rows:
+        logger.info("Resumed %d interrupted recording pipeline(s)", len(rows))
+    return len(rows)
 
 
 async def _broadcast_session_status(

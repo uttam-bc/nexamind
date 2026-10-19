@@ -10,7 +10,6 @@ class FileResponse(BaseModel):
     id: UUID
     workspace_id: UUID
     filename: str
-    file_path: str
     file_size: int
     mime_type: str
     uploaded_by: UUID | None = None

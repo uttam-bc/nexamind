@@ -35,7 +35,7 @@ import {
   Trash2,
   ListChecks,
 } from 'lucide-react';
-import { api, getAuthToken } from '../api';
+import { api, openSocket } from '../api';
 import FeatureHeader from './FeatureHeader';
 
 const ICE_SERVERS = {
@@ -374,10 +374,7 @@ export default function Meetings({
   useEffect(() => {
     if (!workspaceId) return;
     try {
-      const token = getAuthToken();
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/workspaces/${workspaceId}/events?token=${token}`;
-      const ws = new WebSocket(wsUrl);
+      const ws = openSocket(`/ws/workspaces/${workspaceId}/events`);
 
       ws.onopen = () => {
         if (activeRoom) {

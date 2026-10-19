@@ -1,4 +1,3 @@
-import json
 import logging
 from uuid import UUID
 
@@ -7,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Document, ReportRecord, ReportType, SessionRecord, User
 from app.schemas.report import ReportGenerateRequest
+from app.services import llm_client
 from app.services.auth_service import AuthError
 from app.services.finance_service import calculate_runway
 from app.services.websocket_manager import ws_manager
@@ -92,6 +92,10 @@ async def generate_report(
         finance_info=finance_info,
         custom_prompt=data.custom_prompt,
     )
+    analysis = await _ai_analysis(data, content, user)
+    if analysis:
+        content = f"{content}\n\n## AI Analysis\n{analysis}"
+        summary = analysis.split("\n\n")[0][:500]
 
     source_session_ids = [str(s.id) for s in sessions]
     source_document_ids = [str(d.id) for d in documents]
@@ -184,7 +188,7 @@ def _synthesize_report_content(
         for item in all_action_items:
             sections.append(f"- [ ] {item}")
     else:
-        sections.append("- [ ] Continue sprint velocity and review milestone progress.")
+        sections.append("- No action items were recorded in the referenced meetings.")
 
     if finance_info:
         sections.append("\n## 4. Financial Health & Runway")
@@ -197,10 +201,22 @@ def _synthesize_report_content(
         sections.append(f"- **Estimated Runway:** {runway_str}")
 
     if custom_prompt:
-        sections.append(f"\n## 5. Custom Analysis\n{custom_prompt}")
+        sections.append(f"\n## 5. Requested Focus\n{custom_prompt}")
 
     content = "\n".join(sections)
     return content, summary
+
+
+async def _ai_analysis(data: ReportGenerateRequest, source_markdown: str, user: User) -> str | None:
+    """Executive analysis written by the LLM from the assembled sources; None when no model is available."""
+    focus = f"\nFocus requested by the user: {data.custom_prompt}" if data.custom_prompt else ""
+    prompt = (
+        f"Write an executive analysis for the report '{data.title}' ({data.report_type.value.replace('_', ' ')}). "
+        "Start with a 2-3 sentence summary paragraph, then key risks and recommended next steps as bullets. "
+        "Use only facts from the source material below; say so when information is missing."
+        f"{focus}\n\nSOURCE MATERIAL:\n{source_markdown[:30000]}"
+    )
+    return await llm_client.complete_text(prompt, gemini_key=llm_client.resolve_gemini_key(user))
 
 
 async def _require_workspace_access(

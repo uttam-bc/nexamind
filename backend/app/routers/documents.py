@@ -1,13 +1,11 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
-from app.models.ai import AiMemory
 from app.schemas.document import (
     DocumentCreate,
     DocumentListItem,
@@ -25,7 +23,7 @@ from app.services.document_service import (
     search_documents,
     update_document,
 )
-from app.services.memory_engine import ingest_document
+from app.services.memory_engine import forget_source, schedule_document_ingestion
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/documents", tags=["documents"])
 
@@ -69,11 +67,8 @@ async def create_workspace_document(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentResponse:
     document = await create_document(db, workspace_id, current_user, data)
-    try:
-        await ingest_document(db, document)
-        await db.commit()
-    except Exception:
-        pass
+    await db.commit()
+    schedule_document_ingestion(document.id)
     return DocumentResponse.model_validate(document)
 
 
@@ -98,11 +93,8 @@ async def update_workspace_document(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentResponse:
     document = await update_document(db, workspace_id, document_id, current_user.id, data)
-    try:
-        await ingest_document(db, document)
-        await db.commit()
-    except Exception:
-        pass
+    await db.commit()
+    schedule_document_ingestion(document.id)
     return DocumentResponse.model_validate(document)
 
 
@@ -114,9 +106,5 @@ async def delete_workspace_document(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     await delete_document(db, workspace_id, document_id, current_user.id)
-    try:
-        await db.execute(delete(AiMemory).where(AiMemory.source_id == str(document_id)))
-        await db.commit()
-    except Exception:
-        pass
+    await forget_source(db, workspace_id, str(document_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)

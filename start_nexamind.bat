@@ -7,8 +7,11 @@ echo.
 
 cd /d "%~dp0"
 
-echo [1/2] Starting NexaMind FastAPI Backend (Port 8000)...
-start "NexaMind Backend" cmd /k "cd /d "%~dp0backend" && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+set "PY=python"
+if exist "%~dp0backend\.venv\Scripts\python.exe" set "PY=%~dp0backend\.venv\Scripts\python.exe"
+
+echo [1/2] Applying database migrations and starting the FastAPI backend (port 8000)...
+start "NexaMind Backend" cmd /k "cd /d "%~dp0backend" && "%PY%" -m alembic upgrade head && "%PY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
 
 echo [2/2] Starting NexaMind React Frontend (Vite)...
 start "NexaMind Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"

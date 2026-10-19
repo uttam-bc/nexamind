@@ -25,7 +25,7 @@ import {
   UserPlus,
   AtSign,
 } from 'lucide-react';
-import { api, getAuthToken } from '../api';
+import { api, openSocket } from '../api';
 import FormattedChatMessage from './FormattedChatMessage';
 
 const QUICK_REACTIONS = [
@@ -145,10 +145,7 @@ export default function Channels({
 
     try {
       if (wsRef.current) wsRef.current.close();
-      const token = getAuthToken();
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/workspaces/${workspaceId}/channels/${channelId}?token=${token}`;
-      const ws = new WebSocket(wsUrl);
+      const ws = openSocket(`/ws/workspaces/${workspaceId}/channels/${channelId}`);
 
       ws.onmessage = (event) => {
         try {
@@ -343,9 +340,9 @@ export default function Channels({
   // Group channels into Team Channels and Direct Messages
   const generalChannel = (channels || []).find((c) => c.name === 'general');
   const teamChannels = (channels || []).filter(
-    (c) => c.name !== 'general' && !c.name.startsWith('dm-')
+    (c) => c.name !== 'general' && !c.is_direct
   );
-  const dmChannels = (channels || []).filter((c) => c.name.startsWith('dm-'));
+  const dmChannels = (channels || []).filter((c) => c.is_direct);
 
   const filteredTeamChannels = teamChannels.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())

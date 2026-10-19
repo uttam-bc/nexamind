@@ -14,6 +14,10 @@ const TAB_LABELS = {
   reports: 'Report Synthesizer',
 };
 
+export function isKnownTab(tab) {
+  return Object.prototype.hasOwnProperty.call(TAB_LABELS, tab);
+}
+
 export function getTabLabel(tab, workspaceType) {
   if (tab === 'dashboard') {
     return workspaceType === 'personal' ? 'Personal Dashboard' : 'Team Dashboard';

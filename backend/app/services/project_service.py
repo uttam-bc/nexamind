@@ -42,6 +42,8 @@ async def create_task(
     data: TaskCreate,
 ) -> Task:
     await _require_workspace_access(db, workspace_id, user.id)
+    if data.assignee_id and not await get_workspace_membership(db, workspace_id, data.assignee_id):
+        raise AuthError("Tasks can only be assigned to workspace members", status_code=400)
     task = Task(
         workspace_id=workspace_id,
         title=data.title.strip(),
@@ -94,6 +96,8 @@ async def update_task(
     if data.priority is not None:
         task.priority = data.priority
     if data.assignee_id is not None:
+        if not await get_workspace_membership(db, workspace_id, data.assignee_id):
+            raise AuthError("Tasks can only be assigned to workspace members", status_code=400)
         task.assignee_id = data.assignee_id
     if data.due_date is not None:
         task.due_date = data.due_date

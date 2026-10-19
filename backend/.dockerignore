@@ -1,0 +1,14 @@
+# Secrets, local data, and dev artifacts must never end up in the image.
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.bak
+uploads/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,9 @@ from app.schemas.channel import (
     ReactionToggleRequest,
 )
 from app.services.channel_service import (
+    add_channel_member,
     create_channel,
+    create_or_get_dm_channel,
     get_channel,
     get_channel_unreads,
     list_channels,
@@ -59,11 +61,12 @@ async def create_workspace_channel(
     db: AsyncSession = Depends(get_db),
 ) -> ChannelResponse:
     channel = await create_channel(db, workspace_id, current_user, data)
-    channel_data = ChannelResponse.model_validate(channel).model_dump(mode="json")
-    await ws_manager.broadcast_to_workspace(
-        workspace_id,
-        {"event": "channel_created", "workspace_id": str(workspace_id), "data": channel_data},
-    )
+    if not channel.is_private:
+        channel_data = ChannelResponse.model_validate(channel).model_dump(mode="json")
+        await ws_manager.broadcast_to_workspace(
+            workspace_id,
+            {"event": "channel_created", "workspace_id": str(workspace_id), "data": channel_data},
+        )
     return ChannelResponse.model_validate(channel)
 
 
@@ -78,8 +81,19 @@ async def create_or_open_dm(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChannelResponse:
-    from app.services.channel_service import create_or_get_dm_channel
     channel = await create_or_get_dm_channel(db, workspace_id, current_user, data.target_username)
+    return ChannelResponse.model_validate(channel)
+
+
+@router.post("/{channel_id}/members", response_model=ChannelResponse)
+async def add_private_channel_member(
+    workspace_id: UUID,
+    channel_id: UUID,
+    data: CreateDmRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChannelResponse:
+    channel = await add_channel_member(db, workspace_id, channel_id, current_user, data.target_username)
     return ChannelResponse.model_validate(channel)
 
 
@@ -100,7 +114,7 @@ async def get_channel_messages(
     channel_id: UUID,
     parent_id: UUID | None = None,
     root_only: bool = False,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=500),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MessageResponse]:

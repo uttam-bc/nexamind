@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -5,7 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.models import User
-from app.routers.websockets import authenticate_websocket, channel_websocket, workspace_events_websocket
+from app.routers.websockets import _authenticate, channel_websocket
 from app.services.websocket_manager import ConnectionManager, ws_manager
 
 
@@ -22,10 +23,10 @@ async def test_connection_manager_channel_and_workspace_broadcast() -> None:
     ws_workspace = AsyncMock()
 
     # Connect clients
-    await manager.connect_channel(channel_a, ws_a1)
-    await manager.connect_channel(channel_a, ws_a2)
-    await manager.connect_channel(channel_b, ws_b1)
-    await manager.connect_workspace(workspace_id, ws_workspace)
+    manager.add_channel(channel_a, ws_a1)
+    manager.add_channel(channel_a, ws_a2)
+    manager.add_channel(channel_b, ws_b1)
+    manager.add_workspace(workspace_id, ws_workspace)
 
     # Broadcast to Channel A
     msg_a = {"event": "new_message", "content": "Hello Channel A"}
@@ -57,20 +58,27 @@ async def test_connection_manager_channel_and_workspace_broadcast() -> None:
 @pytest.mark.asyncio
 async def test_websocket_auth_validation(db_session, auth_context: dict) -> None:
     token = auth_context["token"]
+
+    # No token in the URL and no auth frame -> closed
     ws_missing = AsyncMock()
-    user_none = await authenticate_websocket(ws_missing, None, db_session)
-    assert user_none is None
+    ws_missing.receive_text.return_value = '{"type": "ping"}'
+    assert await _authenticate(ws_missing, None) is None
     ws_missing.close.assert_awaited_once()
 
     ws_invalid = AsyncMock()
-    user_invalid = await authenticate_websocket(ws_invalid, "invalid-jwt-token", db_session)
-    assert user_invalid is None
+    assert await _authenticate(ws_invalid, "invalid-jwt-token") is None
     ws_invalid.close.assert_awaited_once()
 
-    ws_valid = AsyncMock()
-    user_valid = await authenticate_websocket(ws_valid, token, db_session)
-    assert user_valid is not None
-    assert isinstance(user_valid, User)
+    # Token sent as the first frame (keeps it out of URLs and logs)
+    ws_frame = AsyncMock()
+    ws_frame.receive_text.return_value = f'{{"type": "auth", "token": "{token}"}}'
+    user = await _authenticate(ws_frame, None)
+    assert isinstance(user, User)
+    ws_frame.close.assert_not_awaited()
+
+    # Legacy query-string token still works
+    ws_query = AsyncMock()
+    assert isinstance(await _authenticate(ws_query, token), User)
 
 
 @pytest.mark.asyncio
@@ -91,6 +99,7 @@ async def test_channel_websocket_flow(client: AsyncClient, auth_context: dict, d
     mock_ws = AsyncMock()
     # Mock messages: first a chat message, then typing indicator, then disconnect
     mock_ws.receive_text.side_effect = [
+        f'{{"type": "auth", "token": "{token}"}}',
         '{"action": "message", "content": "Hello from WS!"}',
         '{"action": "typing_start"}',
         Exception("Client disconnected"),
@@ -100,14 +109,39 @@ async def test_channel_websocket_flow(client: AsyncClient, auth_context: dict, d
         websocket=mock_ws,
         workspace_id=workspace_id,
         channel_id=channel_id,
-        token=token,
-        db=db_session,
+        token=None,
     )
 
     mock_ws.accept.assert_awaited_once()
     assert mock_ws.send_json.await_count >= 1
     first_call_args = mock_ws.send_json.call_args_list[0][0][0]
     assert first_call_args["event"] == "connected"
+
+    # The message sent over the socket was persisted
+    msgs = await client.get(
+        f"/workspaces/{workspace_id}/channels/{channel_id}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert [m["content"] for m in msgs.json()] == ["Hello from WS!"]
+
+
+@pytest.mark.asyncio
+async def test_channel_websocket_rejects_non_members(client: AsyncClient, auth_context: dict) -> None:
+    workspace_id = uuid.UUID(auth_context["workspace_id"])
+    channels = await client.get(
+        f"/workspaces/{workspace_id}/channels",
+        headers={"Authorization": f"Bearer {auth_context['token']}"},
+    )
+    channel_id = uuid.UUID(channels.json()[0]["id"])
+    outsider = await client.post(
+        "/auth/register",
+        json={"email": "outsider@example.com", "password": "securepass123", "name": "Outsider"},
+    )
+    mock_ws = AsyncMock()
+    await channel_websocket(websocket=mock_ws, workspace_id=workspace_id, channel_id=channel_id,
+                            token=outsider.json()["access_token"])
+    mock_ws.close.assert_awaited_once()
+    assert mock_ws.receive_text.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -130,8 +164,8 @@ async def test_rest_endpoints_trigger_websocket_broadcasts(
     assert chan_res.status_code == 201
     channel_id = uuid.UUID(chan_res.json()["id"])
 
-    await ws_manager.connect_channel(channel_id, mock_ws_channel)
-    await ws_manager.connect_workspace(uuid.UUID(workspace_id), mock_ws_events)
+    ws_manager.add_channel(channel_id, mock_ws_channel)
+    ws_manager.add_workspace(uuid.UUID(workspace_id), mock_ws_events)
 
     try:
         # Post message via REST -> broadcasts to channel
@@ -184,3 +218,72 @@ async def test_rest_endpoints_trigger_websocket_broadcasts(
     finally:
         ws_manager.disconnect_channel(channel_id, mock_ws_channel)
         ws_manager.disconnect_workspace(uuid.UUID(workspace_id), mock_ws_events)
+
+
+class _FakeRedis:
+    """Just enough of redis.asyncio for ConnectionManager: hashes plus pub/sub fan-out."""
+
+    def __init__(self) -> None:
+        self.hashes: dict[str, dict[str, str]] = {}
+        self.subscribers: list[asyncio.Queue] = []
+
+    async def hset(self, name, field, value):
+        self.hashes.setdefault(name, {})[field] = value
+
+    async def hget(self, name, field):
+        return self.hashes.get(name, {}).get(field)
+
+    async def hdel(self, name, field):
+        self.hashes.get(name, {}).pop(field, None)
+
+    async def hgetall(self, name):
+        return dict(self.hashes.get(name, {}))
+
+    async def publish(self, channel, data):
+        for queue in self.subscribers:
+            queue.put_nowait({"type": "message", "data": data})
+
+    def pubsub(self):
+        redis = self
+        queue: asyncio.Queue = asyncio.Queue()
+
+        class _PubSub:
+            async def subscribe(self, _channel):
+                redis.subscribers.append(queue)
+
+            async def listen(self):
+                while True:
+                    yield await queue.get()
+
+            async def aclose(self):
+                pass
+
+        return _PubSub()
+
+
+@pytest.mark.asyncio
+async def test_events_reach_clients_on_other_instances_via_redis() -> None:
+    from app.services import websocket_manager as wm
+
+    shared = _FakeRedis()
+    instance_a, instance_b = ConnectionManager(), ConnectionManager()
+    for manager in (instance_a, instance_b):
+        manager._redis = shared
+        manager.state.use_redis(shared)
+        pubsub = shared.pubsub()
+        await pubsub.subscribe(wm.PUBSUB_CHANNEL)
+        manager._listener = asyncio.create_task(manager._listen(pubsub))
+
+    workspace_id = uuid.uuid4()
+    client_on_b = AsyncMock()
+    instance_b.add_workspace(workspace_id, client_on_b)
+
+    try:
+        await instance_a.broadcast_to_workspace(workspace_id, {"event": "task_created"})
+        await instance_a.set_presence(workspace_id, uuid.uuid4(), "Ada", "online")
+        await asyncio.sleep(0.05)
+        client_on_b.send_json.assert_awaited_once_with({"event": "task_created"})
+        assert [p["name"] for p in await instance_b.get_workspace_presence(workspace_id)] == ["Ada"]
+    finally:
+        for manager in (instance_a, instance_b):
+            manager._listener.cancel()

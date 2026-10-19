@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ChannelCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=2000)
     is_private: bool = False
 
 
@@ -18,13 +18,14 @@ class ChannelResponse(BaseModel):
     name: str
     description: str | None = None
     is_private: bool
+    is_direct: bool = False
     created_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class MessageCreate(BaseModel):
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=10000)
     parent_id: UUID | None = None
 
 

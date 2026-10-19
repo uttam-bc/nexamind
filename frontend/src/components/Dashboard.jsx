@@ -33,7 +33,13 @@ export default function Dashboard({
 }) {
   const openTasks = (tasks || []).filter((t) => t.status !== 'done');
   const completedTasks = (tasks || []).filter((t) => t.status === 'done');
-  const runwayMonths = financeSummary?.runway_months ?? 12;
+  // runway_months is null when the workspace isn't burning cash.
+  const runwayMonths = financeSummary?.runway_months;
+  const runwayLabel = !financeSummary
+    ? '—'
+    : runwayMonths == null
+      ? 'No burn'
+      : `${runwayMonths} ${runwayMonths === 1 ? 'Month' : 'Months'}`;
 
   const presenceColors = {
     online: 'bg-emerald-500',
@@ -139,7 +145,7 @@ export default function Dashboard({
                 Runway Health
               </h3>
               <div className="text-3xl font-bold text-[#10B981] mt-1 tracking-tight">
-                {runwayMonths} Months
+                {runwayLabel}
               </div>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -148,12 +154,16 @@ export default function Dashboard({
           </div>
 
           <div>
+            {/* Bar shows runway against an 18-month benchmark; full when not burning cash. */}
             <div className="w-full bg-[#ECEEF0] rounded-full h-2 mt-4 overflow-hidden">
-              <div className="bg-[#10B981] h-2 rounded-full" style={{ width: '82%' }}></div>
+              <div
+                className="bg-[#10B981] h-2 rounded-full"
+                style={{ width: `${!financeSummary ? 0 : runwayMonths == null ? 100 : Math.min(100, (runwayMonths / 18) * 100)}%` }}
+              ></div>
             </div>
             <div className="flex justify-between text-xs font-mono text-slate-500 mt-2">
-              <span>Operational Burn: Stable</span>
-              <span>Target: 18 mo</span>
+              <span>Cash: ${Number(financeSummary?.cash_balance || 0).toLocaleString()}</span>
+              <span>Burn: ${Number(financeSummary?.net_burn_rate || 0).toLocaleString()}/mo</span>
             </div>
           </div>
         </div>

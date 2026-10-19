@@ -87,7 +87,12 @@ async def test_session_audio_upload_and_pipeline_execution(
     client: AsyncClient,
     auth_context: dict,
     db_session,
+    monkeypatch,
 ) -> None:
+    async def fake_transcribe(path: str, mime_type: str = "audio/webm") -> str:
+        return "Sam will build the real-time socket server. We agreed to ship on Friday."
+
+    monkeypatch.setattr("app.services.session_service.transcribe_audio", fake_transcribe)
     workspace_id = auth_context["workspace_id"]
     token = auth_context["token"]
 
@@ -106,7 +111,8 @@ async def test_session_audio_upload_and_pipeline_execution(
     session_data = upload_res.json()
     assert session_data["title"] == "Architecture Deep Dive"
     assert session_data["status"] == "uploading"
-    assert session_data["file_path"] is not None
+    assert session_data["has_recording"] is True
+    assert "file_path" not in session_data
     session_id = uuid.UUID(session_data["id"])
 
     # 2. Execute background processing pipeline

@@ -375,7 +375,7 @@ export default function Sidebar({
                 </div>
                 <div className="space-y-0.5 max-h-56 overflow-y-auto">
                   {channels
-                    .filter((c) => c.is_private && (c.name.startsWith('dm-') || c.name.includes('-')))
+                    .filter((c) => c.is_direct)
                     .map((chan) => (
                       <button
                         key={chan.id}
@@ -388,7 +388,7 @@ export default function Sidebar({
                         </div>
                       </button>
                     ))}
-                  {channels.filter((c) => c.is_private && c.name.startsWith('dm-')).length === 0 && (
+                  {channels.filter((c) => c.is_direct).length === 0 && (
                     <div className="text-[11px] text-slate-400 px-2 py-1 italic">No direct chats yet</div>
                   )}
                 </div>

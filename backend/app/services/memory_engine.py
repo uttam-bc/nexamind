@@ -1,341 +1,236 @@
+"""Long-term workspace memory: ingestion -> extraction -> storage -> retrieval.
+
+Sources (documents, tasks, meetings, public channel messages) are distilled into short memory
+items. Retrieval ranks them with Gemini embeddings when a key is available and falls back to a
+BM25-style lexical score, so it works offline too.
+"""
+
+import asyncio
 import json
 import logging
-import os
+import math
 import re
+from collections import Counter
+from datetime import datetime, timezone
 from uuid import UUID
-from datetime import datetime
 
-import httpx
-from sqlalchemy import select, delete, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import database
 from app.config import get_settings
-from app.models import Document, SessionRecord, Task, Channel, Message, User
-from app.models.ai import AiMemory, AiMemorySource, AiMemoryType
+from app.models import Channel, Document, Message, SessionRecord, Task, User
+from app.models.ai import AiMemory
+from app.services import llm_client
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3-flash-preview",
-    "gemini-flash-lite-latest",
-    "gemini-flash-latest",
-]
+MEMORY_TYPES = {"summary", "fact", "decision", "action_item", "entity"}
+STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "of", "to", "in", "on", "for", "with", "at", "by", "from",
+    "is", "are", "was", "were", "be", "been", "it", "this", "that", "these", "those", "as", "do", "does",
+    "did", "what", "which", "who", "whom", "how", "when", "where", "why", "i", "me", "my", "we", "our",
+    "you", "your", "they", "their", "he", "she", "his", "her", "can", "could", "should", "would", "will",
+    "about", "please", "tell", "show", "give", "any", "all", "there", "have", "has", "had", "so", "not",
+}
 
 
 def extract_text_from_document(doc: Document) -> str:
-    """Extracts human-readable text from any document content structure."""
-    title = (doc.title or "Untitled Document").strip()
+    """Human-readable text from any document content shape (plain text or Notion-style blocks)."""
     raw_content = doc.content
-
     if isinstance(raw_content, str):
         try:
             raw_content = json.loads(raw_content)
-        except Exception:
-            pass
+        except json.JSONDecodeError:
+            return raw_content.strip()
 
-    extracted_parts = []
+    parts: list[str] = []
     if isinstance(raw_content, dict):
-        # 1. Direct text field
         if raw_content.get("text"):
-            extracted_parts.append(str(raw_content["text"]).strip())
-
-        # 2. Block-based content (Notion-style blocks)
-        blocks = raw_content.get("blocks", [])
-        if isinstance(blocks, list):
-            for b in blocks:
-                if isinstance(b, dict):
-                    b_text = b.get("text") or ""
-                    b_items = b.get("items")
-                    if b_items and isinstance(b_items, list):
-                        b_text += "\n" + "\n".join(f"- {item}" for item in b_items)
-                    if b_text.strip():
-                        extracted_parts.append(b_text.strip())
-
-        # 3. Fallback to body or content keys
-        for key in ["body", "content", "markdown"]:
-            if key in raw_content and isinstance(raw_content[key], str) and raw_content[key].strip():
-                extracted_parts.append(raw_content[key].strip())
-
-    elif isinstance(raw_content, str) and raw_content.strip():
-        extracted_parts.append(raw_content.strip())
-
-    combined_text = "\n\n".join(p for p in extracted_parts if p).strip()
-    if not combined_text:
-        return f"Document '{title}' is present in the workspace with no written body text yet."
-    return combined_text
+            parts.append(str(raw_content["text"]).strip())
+        for block in raw_content.get("blocks") or []:
+            if not isinstance(block, dict):
+                continue
+            text = str(block.get("text") or "")
+            items = block.get("items")
+            if isinstance(items, list):
+                text += "\n" + "\n".join(f"- {item}" for item in items)
+            if text.strip() and text.strip() not in parts:
+                parts.append(text.strip())
+        for key in ("body", "content", "markdown"):
+            value = raw_content.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+    return "\n\n".join(p for p in parts if p).strip()
 
 
-async def extract_with_gemini(text: str, source_type: str, title: str, gemini_key: str) -> list[dict]:
-    """Uses Google Gemini API to extract atomic knowledge nodes (facts, decisions, action items, summary)."""
-    clean_key = gemini_key.strip()
-    prompt = (
-        f"You are the NexaMind Memory Extraction Engine. Deeply analyze this {source_type} content:\n\n"
-        f"Title: {title}\n"
-        f"Content:\n{text[:4000]}\n\n"
-        f"Extract key knowledge items as a JSON list of objects. Each object MUST have:\n"
-        f"- 'memory_type': one of ['summary', 'fact', 'decision', 'action_item', 'entity']\n"
-        f"- 'title': concise descriptive title (under 10 words)\n"
-        f"- 'content': 1-2 sentence distillation of the insight or facts contained in the document\n"
-        f"- 'tags': list of 2-5 relevant keywords\n"
-        f"- 'importance_score': float between 0.1 and 1.0\n\n"
-        f"IMPORTANT: You MUST include at least one 'summary' object giving an executive overview of this {source_type}.\n"
-        f"Return ONLY a valid JSON array of objects without markdown fences."
-    )
+# ---------------------------------------------------------------------------------------------
+# Extraction
+# ---------------------------------------------------------------------------------------------
 
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 1500,
-            "response_mime_type": "application/json",
-        },
-    }
+EXTRACTION_PROMPT = """You extract durable knowledge from workspace content.
+Source type: {source_type}
+Title: {title}
+Content:
+{text}
 
-    timeout_config = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-    for model in GEMINI_MODELS:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
-        try:
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                        clean_text = raw_text.strip()
-                        if clean_text.startswith("```json"):
-                            clean_text = clean_text[7:-3].strip()
-                        elif clean_text.startswith("```"):
-                            clean_text = clean_text[3:-3].strip()
-                        parsed = json.loads(clean_text)
-                        if isinstance(parsed, list) and parsed:
-                            logger.info("Gemini (%s) successfully extracted %d memories from '%s'", model, len(parsed), title)
-                            return parsed
-                else:
-                    logger.warning("Gemini extraction model %s returned status %d: %s", model, res.status_code, res.text[:200])
-        except Exception as exc:
-            logger.warning("Gemini extraction attempt failed with model %s: %s", model, exc)
-            continue
-
-    return []
-
-
-def extract_with_heuristics(text: str, source_type: str, title: str) -> list[dict]:
-    """Fallback high-precision heuristic extraction engine."""
-    items = []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-    # 1. High-level Summary
-    summary_text = lines[0] if lines else f"{source_type.capitalize()}: {title}"
-    if len(summary_text) > 300:
-        summary_text = summary_text[:297] + "..."
-    items.append({
-        "memory_type": "summary",
-        "title": f"Summary: {title[:40]}",
-        "content": summary_text,
-        "tags": [source_type, "overview", title.lower()[:20]],
-        "importance_score": 0.85,
-    })
-
-    # 2. Extract decisions, action items, facts
-    for line in lines:
-        lower = line.lower()
-        if any(kw in lower for kw in ["todo:", "action item", "need to", "will implement", "- [ ]", "assignee", "deadline"]):
-            clean = re.sub(r"^[-*#\s\[\]x]+", "", line).strip()
-            if clean:
-                items.append({
-                    "memory_type": "action_item",
-                    "title": f"Action: {clean[:40]}",
-                    "content": clean,
-                    "tags": [source_type, "todo"],
-                    "importance_score": 0.85,
-                })
-        elif any(kw in lower for kw in ["decided", "agreed", "approved", "chosen", "finalized", "we will"]):
-            clean = re.sub(r"^[-*#\s]+", "", line).strip()
-            if clean:
-                items.append({
-                    "memory_type": "decision",
-                    "title": f"Decision: {clean[:40]}",
-                    "content": clean,
-                    "tags": [source_type, "decision"],
-                    "importance_score": 0.9,
-                })
-        elif any(kw in lower for kw in ["architecture", "endpoint", "api", "database", "schema", "version", "config", "port", "stack", "module"]):
-            clean = re.sub(r"^[-*#\s]+", "", line).strip()
-            if len(clean) > 10:
-                items.append({
-                    "memory_type": "fact",
-                    "title": f"Fact: {clean[:40]}",
-                    "content": clean,
-                    "tags": [source_type, "architecture"],
-                    "importance_score": 0.8,
-                })
-        elif len(line) > 20 and not line.startswith("#"):
-            clean = re.sub(r"^[-*#\s]+", "", line).strip()
-            if len(clean) > 25:
-                items.append({
-                    "memory_type": "fact",
-                    "title": f"Note: {clean[:40]}",
-                    "content": clean,
-                    "tags": [source_type, "notes"],
-                    "importance_score": 0.7,
-                })
-
-    return items[:12]
+Return a JSON array. Each item has:
+- "memory_type": one of summary, fact, decision, action_item, entity
+- "title": under 10 words
+- "content": one or two sentences, using only information in the content
+- "tags": 2-5 keywords
+- "importance_score": number between 0.1 and 1.0
+Include exactly one "summary" item. Return [] if the content has no meaningful information."""
 
 
 async def extract_knowledge(text: str, source_type: str, title: str, gemini_key: str | None = None) -> list[dict]:
-    """Stage 2: Extraction. Uses Gemini if available, falling back to heuristics."""
     clean_text = (text or "").strip()
     if not clean_text:
-        clean_text = f"Document '{title}' is registered in the workspace."
-
-    settings = get_settings()
-    active_key = (gemini_key or os.getenv("GEMINI_API_KEY") or settings.gemini_api_key or "").strip()
-    if active_key and len(active_key) > 10:
-        extracted = await extract_with_gemini(clean_text, source_type, title, active_key)
-        if extracted:
-            return extracted
-
+        return []
+    key = gemini_key or llm_client.resolve_gemini_key()
+    if key:
+        raw = await llm_client.gemini_text(
+            key,
+            EXTRACTION_PROMPT.format(source_type=source_type, title=title, text=clean_text[:6000]),
+            json_mode=True,
+            max_tokens=1500,
+        )
+        parsed = llm_client.parse_json(raw)
+        if isinstance(parsed, list):
+            items = [_normalize_item(i) for i in parsed if isinstance(i, dict)]
+            items = [i for i in items if i]
+            if items:
+                return items
     return extract_with_heuristics(clean_text, source_type, title)
 
 
-async def consolidate_and_store(
+def _normalize_item(item: dict) -> dict | None:
+    content = str(item.get("content") or "").strip()
+    if not content:
+        return None
+    memory_type = str(item.get("memory_type") or "fact").lower()
+    try:
+        score = min(1.0, max(0.1, float(item.get("importance_score", 0.6))))
+    except (TypeError, ValueError):
+        score = 0.6
+    tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+    return {
+        "memory_type": memory_type if memory_type in MEMORY_TYPES else "fact",
+        "title": str(item.get("title") or content[:60]).strip()[:255],
+        "content": content[:4000],
+        "tags": [str(t)[:40] for t in tags[:8]],
+        "importance_score": score,
+    }
+
+
+def extract_with_heuristics(text: str, source_type: str, title: str) -> list[dict]:
+    """Offline extraction: a summary plus lines that read like decisions, actions, or facts."""
+    lines = [re.sub(r"^[-*#>\s\[\]x]+", "", line).strip() for line in text.split("\n")]
+    lines = [line for line in lines if line]
+    if not lines:
+        return []
+    summary = " ".join(lines)[:300]
+    items = [{
+        "memory_type": "summary",
+        "title": f"Summary: {title[:60]}",
+        "content": summary,
+        "tags": [source_type],
+        "importance_score": 0.8,
+    }]
+    for line in lines:
+        lower = line.lower()
+        if any(k in lower for k in ("todo", "action item", "need to", "will implement", "assignee", "deadline", "due ")):
+            kind, score = "action_item", 0.85
+        elif any(k in lower for k in ("decided", "agreed", "approved", "chosen", "finalized", "we will")):
+            kind, score = "decision", 0.9
+        elif len(line) > 25:
+            kind, score = "fact", 0.6
+        else:
+            continue
+        items.append({
+            "memory_type": kind,
+            "title": line[:60],
+            "content": line[:1000],
+            "tags": [source_type],
+            "importance_score": score,
+        })
+    return items[:12]
+
+
+async def replace_source_memories(
     db: AsyncSession,
     workspace_id: UUID,
     source_type: str,
-    source_id: str | None,
+    source_id: str,
     source_title: str | None,
-    extracted_items: list[dict],
+    items: list[dict],
 ) -> int:
-    """Stage 3 & 4: Consolidation & Storage.
-    Deduplicates against existing memories for this source/workspace and saves.
-    """
-    if not extracted_items:
-        return 0
-
-    saved_count = 0
-    # Fetch existing memories for this source to consolidate/update
-    existing_q = select(AiMemory).where(
-        AiMemory.workspace_id == workspace_id,
-        AiMemory.source_id == source_id,
+    """Store the latest extraction for a source, replacing what was extracted before."""
+    await db.execute(
+        delete(AiMemory).where(AiMemory.workspace_id == workspace_id, AiMemory.source_id == source_id)
     )
-    res = await db.execute(existing_q)
-    existing_memories = list(res.scalars().all())
-    existing_by_title = {m.title.lower().strip(): m for m in existing_memories}
-
-    for item in extracted_items:
-        title = item.get("title", "Untitled Memory").strip()
-        content = item.get("content", "").strip()
-        if not content:
-            continue
-
-        mem_type = item.get("memory_type", "fact")
-        tags = item.get("tags", [])
-        score = float(item.get("importance_score", 0.7))
-
-        title_lower = title.lower().strip()
-        if title_lower in existing_by_title:
-            em = existing_by_title[title_lower]
-            em.content = content
-            em.importance_score = max(em.importance_score, score)
-            em.tags = list(set((em.tags or []) + tags))
-            em.updated_at = datetime.now()
-            saved_count += 1
-        else:
-            new_mem = AiMemory(
-                workspace_id=workspace_id,
-                source_type=source_type,
-                source_id=source_id,
-                source_title=source_title or title,
-                memory_type=mem_type,
-                title=title,
-                content=content,
-                tags=tags,
-                importance_score=score,
-            )
-            db.add(new_mem)
-            saved_count += 1
-
+    for item in items:
+        db.add(AiMemory(
+            workspace_id=workspace_id,
+            source_type=source_type,
+            source_id=source_id,
+            source_title=(source_title or item["title"])[:255],
+            memory_type=item["memory_type"],
+            title=item["title"],
+            content=item["content"],
+            tags=item.get("tags") or [],
+            importance_score=item["importance_score"],
+        ))
     await db.flush()
-    return saved_count
+    return len(items)
 
 
-# =========================================================================
-# STAGE 1: INGESTION PIPELINE HANDLERS
-# =========================================================================
+async def forget_source(db: AsyncSession, workspace_id: UUID, source_id: str) -> None:
+    await db.execute(delete(AiMemory).where(AiMemory.workspace_id == workspace_id, AiMemory.source_id == source_id))
+
+
+# ---------------------------------------------------------------------------------------------
+# Ingestion
+# ---------------------------------------------------------------------------------------------
 
 async def ingest_document(db: AsyncSession, doc: Document, gemini_key: str | None = None) -> int:
-    """Ingests, extracts, consolidates, and stores a Document into AI Memory."""
-    content_text = extract_text_from_document(doc)
-    extracted = await extract_knowledge(content_text, "document", doc.title, gemini_key=gemini_key)
-    count = await consolidate_and_store(
-        db,
-        doc.workspace_id,
-        source_type="document",
-        source_id=str(doc.id),
-        source_title=doc.title,
-        extracted_items=extracted,
-    )
-    logger.info("Ingested document '%s' (ID: %s) -> %d memories stored in AI Memory", doc.title, doc.id, count)
-    return count
+    text = extract_text_from_document(doc)
+    items = await extract_knowledge(f"{doc.title}\n\n{text}", "document", doc.title, gemini_key)
+    return await replace_source_memories(db, doc.workspace_id, "document", str(doc.id), doc.title, items)
 
 
 async def ingest_task(db: AsyncSession, task: Task, gemini_key: str | None = None) -> int:
-    """Ingests, extracts, consolidates, and stores a Task."""
-    text = f"Task: {task.title}\nStatus: {task.status}\nPriority: {task.priority}\nDescription: {task.description or 'No details'}"
-    extracted = await extract_knowledge(text, "task", task.title, gemini_key=gemini_key)
-    return await consolidate_and_store(
-        db,
-        task.workspace_id,
-        source_type="task",
-        source_id=str(task.id),
-        source_title=task.title,
-        extracted_items=extracted,
-    )
+    status = getattr(task.status, "value", task.status)
+    priority = getattr(task.priority, "value", task.priority)
+    text = f"Task: {task.title}\nStatus: {status}\nPriority: {priority}\nDescription: {task.description or ''}"
+    items = await extract_knowledge(text, "task", task.title, gemini_key)
+    return await replace_source_memories(db, task.workspace_id, "task", str(task.id), task.title, items)
 
 
 async def ingest_chat_message(db: AsyncSession, message: Message, sender_name: str, channel_name: str, gemini_key: str | None = None) -> int:
-    """Ingests a high-signal chat message or announcement."""
     if len(message.content) < 15:
         return 0
-
     text = f"Channel #{channel_name} | From {sender_name}: {message.content}"
-    extracted = await extract_knowledge(text, "chat", f"#{channel_name} chat", gemini_key=gemini_key)
-    return await consolidate_and_store(
-        db,
-        message.workspace_id,
-        source_type="chat",
-        source_id=str(message.id),
-        source_title=f"#{channel_name}",
-        extracted_items=extracted,
-    )
+    items = await extract_knowledge(text, "chat", f"#{channel_name}", gemini_key)
+    return await replace_source_memories(db, message.workspace_id, "chat", str(message.id), f"#{channel_name}", items)
 
 
 async def ingest_video_meeting(db: AsyncSession, session: SessionRecord, gemini_key: str | None = None) -> int:
-    """Ingests a video meeting session, transcript, and minutes."""
-    parts = [f"Meeting Session: {session.title or 'Workspace Sync'}"]
-    summary_val = getattr(session, "ai_summary", None) or getattr(session, "summary", None)
-    if summary_val:
-        parts.append(f"Minutes of Meeting (MoM):\n{summary_val}")
+    parts = [f"Meeting: {session.title or 'Meeting'}"]
+    if session.ai_summary:
+        parts.append(f"Minutes:\n{session.ai_summary}")
     if session.action_items:
-        items = session.action_items if isinstance(session.action_items, list) else [str(session.action_items)]
-        parts.append("Action Items:\n" + "\n".join(f"- {a}" for a in items))
-    transcript_val = getattr(session, "transcript", None) or getattr(session, "raw_transcript", None)
-    if transcript_val:
-        parts.append(f"Transcript Snippet:\n{transcript_val[:1500]}")
+        parts.append("Action items:\n" + "\n".join(f"- {a}" for a in session.action_items))
+    if session.transcript:
+        parts.append(f"Transcript excerpt:\n{session.transcript[:3000]}")
+    items = await extract_knowledge("\n\n".join(parts), "video_call", session.title or "Meeting", gemini_key)
+    return await replace_source_memories(db, session.workspace_id, "video_call", str(session.id), session.title, items)
 
-    full_text = "\n\n".join(parts)
-    extracted = await extract_knowledge(full_text, "video_call", session.title or "Meeting Session", gemini_key=gemini_key)
-    return await consolidate_and_store(
-        db,
-        session.workspace_id,
-        source_type="video_call",
-        source_id=str(session.id),
-        source_title=session.title or "Video Meeting",
-        extracted_items=extracted,
-    )
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 async def sync_all_workspace_documents_to_memory(
@@ -343,94 +238,68 @@ async def sync_all_workspace_documents_to_memory(
     workspace_id: UUID,
     gemini_key: str | None = None,
     force_refresh: bool = False,
+    max_documents: int = 10,
 ) -> dict:
-    """Ensures every document in the workspace is actively read and consolidated into AI memory."""
-    docs_res = await db.execute(select(Document).where(Document.workspace_id == workspace_id))
-    docs = list(docs_res.scalars().all())
+    """Ingest documents that are new or edited since their memory was last extracted.
 
-    memories_res = await db.execute(
-        select(AiMemory).where(
-            AiMemory.workspace_id == workspace_id,
-            AiMemory.source_type == "document",
-        )
-    )
-    existing_mems = list(memories_res.scalars().all())
-    existing_source_ids = {m.source_id for m in existing_mems if m.source_id}
+    Capped per call so a large backlog is worked through gradually instead of blocking a chat turn.
+    """
+    docs = list((await db.execute(select(Document).where(Document.workspace_id == workspace_id))).scalars().all())
+    last_extracted = dict((await db.execute(
+        select(AiMemory.source_id, func.max(AiMemory.updated_at))
+        .where(AiMemory.workspace_id == workspace_id, AiMemory.source_type == "document")
+        .group_by(AiMemory.source_id)
+    )).all())
 
-    total_ingested = 0
-    total_memories_added = 0
-
+    stale = []
     for doc in docs:
-        doc_id_str = str(doc.id)
-        # Ingest if document has no memory stored or if force_refresh is enabled
-        if force_refresh or doc_id_str not in existing_source_ids:
-            count = await ingest_document(db, doc, gemini_key=gemini_key)
-            total_ingested += 1
-            total_memories_added += count
+        extracted_at = _aware(last_extracted.get(str(doc.id)))
+        if force_refresh or extracted_at is None or (_aware(doc.updated_at) or extracted_at) > extracted_at:
+            stale.append(doc)
+    stale.sort(key=lambda d: _aware(d.updated_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
-    if total_ingested > 0:
-        await db.commit()
-
+    memories_added = 0
+    for doc in stale[:max_documents]:
+        memories_added += await ingest_document(db, doc, gemini_key)
     return {
         "documents_checked": len(docs),
-        "documents_ingested": total_ingested,
-        "memories_added": total_memories_added,
+        "documents_ingested": min(len(stale), max_documents),
+        "documents_pending": max(0, len(stale) - max_documents),
+        "memories_added": memories_added,
     }
 
 
 async def run_full_workspace_ingestion(db: AsyncSession, workspace_id: UUID, gemini_key: str | None = None) -> dict:
-    """Complete 4-stage ingestion, extraction, consolidation, and storage for an entire workspace."""
-    logger.info("Starting complete workspace memory ingestion for workspace %s", workspace_id)
-    stats = {
-        "docs_ingested": 0,
-        "tasks_ingested": 0,
-        "chats_ingested": 0,
-        "meetings_ingested": 0,
-        "total_memories_consolidated": 0,
-    }
+    """Re-extract every source in a workspace. Only public channel messages are included."""
+    stats = {"docs_ingested": 0, "tasks_ingested": 0, "chats_ingested": 0, "meetings_ingested": 0,
+             "total_memories_consolidated": 0}
 
-    # 1. Documents
-    docs_res = await db.execute(select(Document).where(Document.workspace_id == workspace_id))
-    docs = list(docs_res.scalars().all())
-    for d in docs:
-        count = await ingest_document(db, d, gemini_key=gemini_key)
+    for doc in (await db.execute(select(Document).where(Document.workspace_id == workspace_id))).scalars():
+        stats["total_memories_consolidated"] += await ingest_document(db, doc, gemini_key)
         stats["docs_ingested"] += 1
-        stats["total_memories_consolidated"] += count
-
-    # 2. Tasks
-    tasks_res = await db.execute(select(Task).where(Task.workspace_id == workspace_id))
-    tasks = list(tasks_res.scalars().all())
-    for t in tasks:
-        count = await ingest_task(db, t, gemini_key=gemini_key)
+    for task in (await db.execute(select(Task).where(Task.workspace_id == workspace_id))).scalars():
+        stats["total_memories_consolidated"] += await ingest_task(db, task, gemini_key)
         stats["tasks_ingested"] += 1
-        stats["total_memories_consolidated"] += count
-
-    # 3. Video Sessions
-    sessions_res = await db.execute(select(SessionRecord).where(SessionRecord.workspace_id == workspace_id))
-    sessions = list(sessions_res.scalars().all())
-    for s in sessions:
-        count = await ingest_video_meeting(db, s, gemini_key=gemini_key)
+    for meeting in (await db.execute(select(SessionRecord).where(SessionRecord.workspace_id == workspace_id))).scalars():
+        stats["total_memories_consolidated"] += await ingest_video_meeting(db, meeting, gemini_key)
         stats["meetings_ingested"] += 1
-        stats["total_memories_consolidated"] += count
 
-    # 4. Recent Chat Messages
-    msgs_res = await db.execute(
-        select(Message)
-        .where(Message.workspace_id == workspace_id)
+    # Private channels and DMs never feed shared memory, or the copilot could repeat them to others.
+    public_messages = (await db.execute(
+        select(Message, Channel.name, User.name)
+        .join(Channel, Channel.id == Message.channel_id)
+        .outerjoin(User, User.id == Message.sender_id)
+        .where(Message.workspace_id == workspace_id, Channel.is_private.is_(False))
         .order_by(Message.created_at.desc())
         .limit(30)
-    )
-    msgs = list(msgs_res.scalars().all())
-    for m in msgs:
-        if len(m.content) >= 20:
-            count = await ingest_chat_message(db, m, "Teammate", "team", gemini_key=gemini_key)
+    )).all()
+    for message, channel_name, sender_name in public_messages:
+        if len(message.content) >= 20:
+            sender = sender_name or "Teammate"
+            stats["total_memories_consolidated"] += await ingest_chat_message(db, message, sender, channel_name, gemini_key)
             stats["chats_ingested"] += 1
-            stats["total_memories_consolidated"] += count
 
-    await db.commit()
-    logger.info("Workspace memory ingestion finished: %s", stats)
-
-    # Supply keys expected by both backend and frontend UI
+    await db.flush()
     return {
         "status": "success",
         "ingested_count": stats["docs_ingested"] + stats["tasks_ingested"] + stats["meetings_ingested"],
@@ -440,100 +309,161 @@ async def run_full_workspace_ingestion(db: AsyncSession, workspace_id: UUID, gem
     }
 
 
-# =========================================================================
-# MEMORY RETRIEVAL (Used by Agentic AI during user interaction)
-# =========================================================================
+# Debounced background ingestion so editor autosaves don't trigger an extraction per keystroke.
+_PENDING_DOCS: dict[UUID, asyncio.Task] = {}
+INGEST_DEBOUNCE_SECONDS = 15.0
+
+
+def schedule_document_ingestion(document_id: UUID, delay: float = INGEST_DEBOUNCE_SECONDS) -> None:
+    if not get_settings().run_background_jobs:
+        return
+    existing = _PENDING_DOCS.get(document_id)
+    if existing and not existing.done():
+        return
+
+    async def run() -> None:
+        try:
+            await asyncio.sleep(delay)
+            async with database.AsyncSessionLocal() as session:
+                doc = await session.get(Document, document_id)
+                if doc is not None:
+                    await ingest_document(session, doc)
+                    await session.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Background memory ingestion failed for document %s: %s", document_id, exc)
+        finally:
+            _PENDING_DOCS.pop(document_id, None)
+
+    _PENDING_DOCS[document_id] = asyncio.create_task(run())
+
+
+# ---------------------------------------------------------------------------------------------
+# Retrieval
+# ---------------------------------------------------------------------------------------------
+
+def tokenize(text: str) -> list[str]:
+    tokens = []
+    for word in re.findall(r"[a-z0-9]+", text.lower()):
+        if word in STOPWORDS or len(word) < 2:
+            continue
+        for suffix in ("ing", "ies", "es", "ed", "s"):
+            if len(word) > len(suffix) + 2 and word.endswith(suffix):
+                word = word[: -len(suffix)] + ("y" if suffix == "ies" else "")
+                break
+        tokens.append(word)
+    return tokens
+
+
+def _memory_text(m: AiMemory) -> str:
+    return f"{m.title} {m.content} {' '.join(m.tags or [])} {m.source_title or ''}"
+
+
+def _bm25_scores(query_tokens: list[str], documents: list[list[str]], k1: float = 1.5, b: float = 0.75) -> list[float]:
+    if not documents:
+        return []
+    n = len(documents)
+    avg_len = sum(len(d) for d in documents) / n or 1.0
+    df = Counter(t for d in documents for t in set(d))
+    scores = []
+    for doc in documents:
+        tf = Counter(doc)
+        score = 0.0
+        for term in set(query_tokens):
+            if term not in tf:
+                continue
+            idf = math.log(1 + (n - df[term] + 0.5) / (df[term] + 0.5))
+            score += idf * tf[term] * (k1 + 1) / (tf[term] + k1 * (1 - b + b * len(doc) / avg_len))
+        scores.append(score)
+    return scores
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+async def _ensure_embeddings(db: AsyncSession, memories: list[AiMemory], api_key: str, limit: int = 100) -> None:
+    model = get_settings().gemini_embedding_model
+    missing = [m for m in memories if not m.embedding or m.embedding_model != model][:limit]
+    for start in range(0, len(missing), 50):
+        batch = missing[start:start + 50]
+        vectors = await llm_client.gemini_embed(api_key, [_memory_text(m) for m in batch])
+        if not vectors:
+            return
+        for memory, vector in zip(batch, vectors):
+            memory.embedding = vector
+            memory.embedding_model = model
+    if missing:
+        await db.flush()
+
 
 async def retrieve_memories(
     db: AsyncSession,
     workspace_id: UUID,
     query: str,
     limit: int = 10,
+    gemini_key: str | None = None,
 ) -> list[dict]:
-    """Retrieves top relevant consolidated memories for the Agentic AI."""
-    q_lower = query.lower().strip()
-    words = [w for w in re.findall(r"\w+", q_lower) if len(w) > 1]
-    is_doc_query = any(w in q_lower for w in ["document", "documents", "doc", "docs", "file", "files", "note", "notes", "all", "everything", "read", "what is in"])
-
-    # Fetch top memories for workspace sorted by importance
-    mem_q = (
+    """Top memories for a query: semantic similarity when possible, lexical relevance otherwise."""
+    memories = list((await db.execute(
         select(AiMemory)
         .where(AiMemory.workspace_id == workspace_id)
-        .order_by(AiMemory.importance_score.desc(), AiMemory.updated_at.desc())
-        .limit(60)
-    )
-    res = await db.execute(mem_q)
-    memories = list(res.scalars().all())
-
+        .order_by(AiMemory.updated_at.desc())
+        .limit(2000)
+    )).scalars().all())
     if not memories:
         return []
 
-    # Score each memory based on keyword relevance + importance score
-    scored = []
-    for m in memories:
-        text_content = f"{m.title} {m.content} {' '.join(m.tags or [])} {m.source_title or ''}".lower()
-        match_count = sum(1 for w in words if w in text_content)
+    query_tokens = tokenize(query)
+    lexical = _bm25_scores(query_tokens, [tokenize(_memory_text(m)) for m in memories])
+    max_lex = max(lexical) if lexical and max(lexical) > 0 else 1.0
+    scores = [0.7 * (s / max_lex) + 0.3 * m.importance_score for s, m in zip(lexical, memories)]
 
-        relevance_score = (match_count * 2.5) + (m.importance_score * 2.0)
-        # Boost document memories if the user is asking about documents
-        if is_doc_query and m.source_type == "document":
-            relevance_score += 4.0
-        if is_doc_query and m.memory_type == "summary":
-            relevance_score += 3.0
+    key = gemini_key or llm_client.resolve_gemini_key()
+    if key and query.strip():
+        await _ensure_embeddings(db, memories, key)
+        query_vectors = await llm_client.gemini_embed(key, [query], task_type="RETRIEVAL_QUERY")
+        if query_vectors:
+            qv = query_vectors[0]
+            model = get_settings().gemini_embedding_model
+            scores = [
+                (0.55 * _cosine(qv, m.embedding) + 0.3 * (lex / max_lex) + 0.15 * m.importance_score)
+                if m.embedding and m.embedding_model == model else score
+                for m, lex, score in zip(memories, lexical, scores)
+            ]
 
-        scored.append((relevance_score, m))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top_items = [item[1] for item in scored[:limit]]
-
+    ranked = sorted(zip(scores, memories), key=lambda pair: pair[0], reverse=True)[:limit]
     return [
         {
             "id": str(m.id),
             "source_type": m.source_type,
+            "source_id": m.source_id,
             "source_title": m.source_title,
             "memory_type": m.memory_type,
             "title": m.title,
             "content": m.content,
             "importance_score": m.importance_score,
+            "relevance": round(score, 4),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
-        for m in top_items
+        for score, m in ranked
     ]
 
 
 async def get_workspace_memory_stats(db: AsyncSession, workspace_id: UUID) -> dict:
-    """Returns memory statistics for the admin dashboard."""
-    total_q = select(func.count(AiMemory.id)).where(AiMemory.workspace_id == workspace_id)
-    total = (await db.execute(total_q)).scalar() or 0
-
-    docs_q = select(func.count(AiMemory.id)).where(
-        AiMemory.workspace_id == workspace_id,
-        AiMemory.source_type == "document",
-    )
-    docs_count = (await db.execute(docs_q)).scalar() or 0
-
-    chats_q = select(func.count(AiMemory.id)).where(
-        AiMemory.workspace_id == workspace_id,
-        AiMemory.source_type == "chat",
-    )
-    chats_count = (await db.execute(chats_q)).scalar() or 0
-
-    tasks_q = select(func.count(AiMemory.id)).where(
-        AiMemory.workspace_id == workspace_id,
-        AiMemory.source_type == "task",
-    )
-    tasks_count = (await db.execute(tasks_q)).scalar() or 0
-
-    meetings_q = select(func.count(AiMemory.id)).where(
-        AiMemory.workspace_id == workspace_id,
-        AiMemory.source_type == "video_call",
-    )
-    meetings_count = (await db.execute(meetings_q)).scalar() or 0
-
+    counts = dict((await db.execute(
+        select(AiMemory.source_type, func.count(AiMemory.id))
+        .where(AiMemory.workspace_id == workspace_id)
+        .group_by(AiMemory.source_type)
+    )).all())
     return {
-        "total_memories": total,
-        "documents_indexed": docs_count,
-        "chats_indexed": chats_count,
-        "tasks_indexed": tasks_count,
-        "meetings_indexed": meetings_count,
+        "total_memories": sum(counts.values()),
+        "documents_indexed": counts.get("document", 0),
+        "chats_indexed": counts.get("chat", 0),
+        "tasks_indexed": counts.get("task", 0),
+        "meetings_indexed": counts.get("video_call", 0),
     }

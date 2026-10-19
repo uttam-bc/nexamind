@@ -1,4 +1,8 @@
+"""Workspace actions the AI copilot can take. Each tool runs with the caller's own permissions."""
+
 import json
+from datetime import date as date_type
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -7,90 +11,91 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     Channel,
     CodeRepo,
-    Commit,
     Document,
     FinanceTransaction,
-    Issue,
-    Message,
-    ReportRecord,
     ReportType,
     SessionRecord,
     Task,
     User,
+    WorkspaceType,
 )
 from app.models.finance import TransactionType
-from app.models.project import IssueStatus, TaskPriority, TaskStatus
+from app.models.project import TaskPriority, TaskStatus
 from app.schemas.channel import ChannelCreate, MessageCreate
-from app.schemas.document import DocumentCreate, DocumentUpdate
+from app.schemas.document import DocumentCreate
 from app.schemas.finance import TransactionCreate
 from app.schemas.project import CodeRepoCreate, CommitCreate, IssueCreate, TaskCreate, TaskUpdate
 from app.schemas.report import ReportGenerateRequest
-from app.services.channel_service import create_channel, post_message
-from app.services.document_service import create_document, update_document
+from app.services.auth_service import escape_like
+from app.services.channel_service import create_channel, list_channels, post_message
+from app.services.document_service import create_document
 from app.services.finance_service import calculate_runway, create_transaction
-from app.services.project_service import (
-    create_commit,
-    create_issue,
-    create_repo,
-    create_task,
-    update_task,
-)
+from app.services.memory_engine import extract_text_from_document, schedule_document_ingestion
+from app.services.project_service import create_commit, create_issue, create_repo, create_task, update_task
 from app.services.report_service import generate_report
 from app.services.websocket_manager import ws_manager
-from app.services.memory_engine import ingest_document
+from app.services.workspace_service import list_user_workspaces
 
 
-# -------------------------------------------------------------
-# 1. DOCUMENT & WORKSPACE ACCESS TOOLS
-# -------------------------------------------------------------
-async def switch_workspace_tool(
-    db: AsyncSession,
-    user: User,
-    target_query: str,
-) -> dict:
-    """Switch active workspace context to Solo or a specific Group workspace."""
-    from app.models import WorkspaceType
-    from app.services.workspace_service import list_user_workspaces
-    user_workspaces = await list_user_workspaces(db, user.id)
-    if not user_workspaces:
-        return {"error": "No workspaces found for user."}
+class ToolError(Exception):
+    """A tool could not run; the message is safe to show to the user and the model."""
 
-    query_lower = target_query.lower().strip()
-    target_ws = None
 
-    # Check for personal / solo
-    if any(s in query_lower for s in ["solo", "personal", "my account", "private", "me"]):
-        for ws in user_workspaces:
-            if ws.type == WorkspaceType.PERSONAL or "personal" in ws.name.lower() or "solo" in ws.name.lower():
-                target_ws = ws
-                break
-    
-    # Check for group / team generic
-    if not target_ws and any(s in query_lower for s in ["group", "team"]):
-        for ws in user_workspaces:
-            if ws.type == WorkspaceType.TEAM:
-                target_ws = ws
-                break
+def _uuid(value: str, label: str) -> UUID:
+    try:
+        return UUID(str(value))
+    except ValueError as exc:
+        raise ToolError(f"'{value}' is not a valid {label} id") from exc
 
-    # Check by specific workspace name
-    if not target_ws:
-        for ws in user_workspaces:
-            if query_lower in ws.name.lower() or ws.name.lower() in query_lower:
-                target_ws = ws
-                break
 
-    if not target_ws:
-        target_ws = user_workspaces[0]
+def _like(text: str) -> str:
+    return f"%{escape_like(text.strip().lower())}%"
+
+
+# -------------------------------------------------------------------------------------------
+# Workspaces & documents
+# -------------------------------------------------------------------------------------------
+
+async def switch_workspace_tool(db: AsyncSession, user: User, target_query: str) -> dict:
+    """Find one of the user's workspaces by name, or 'personal' / 'team'."""
+    workspaces = await list_user_workspaces(db, user.id)
+    query = target_query.lower().strip()
+    for filler in ("the ", "my ", "workspace", "group "):
+        query = query.replace(filler, " ")
+    query = " ".join(query.split())
+
+    target = next((ws for ws in workspaces if ws.name.lower() == query), None)
+    if target is None and query:
+        target = next((ws for ws in workspaces if query in ws.name.lower() or ws.name.lower() in query), None)
+    if target is None and query in {"solo", "personal", "private", "me", "mine"}:
+        target = next((ws for ws in workspaces if ws.type == WorkspaceType.PERSONAL), None)
+    if target is None and query in {"team", "group"}:
+        target = next((ws for ws in workspaces if ws.type == WorkspaceType.TEAM), None)
+    if target is None:
+        names = ", ".join(ws.name for ws in workspaces)
+        raise ToolError(f"No workspace matches '{target_query}'. Your workspaces: {names}")
 
     return {
-        "id": str(target_ws.id),
-        "workspace_id": str(target_ws.id),
-        "workspace_name": target_ws.name,
-        "workspace_type": target_ws.type.value,
-        "type": "workspace_switch",
+        "workspace_id": str(target.id),
+        "workspace_name": target.name,
+        "workspace_type": target.type.value,
         "action": "switch_workspace",
-        "message": f"Switched active workspace to '{target_ws.name}' ({target_ws.type.value.upper()}).",
+        "message": f"Switched to workspace '{target.name}'.",
     }
+
+
+def _doc_summary(doc: Document, workspace_id: UUID, workspace_name: str | None = None) -> dict:
+    text = extract_text_from_document(doc)
+    item = {
+        "id": str(doc.id),
+        "title": doc.title,
+        "workspace_id": str(workspace_id),
+        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+        "content_preview": text[:300],
+    }
+    if workspace_name:
+        item["workspace_name"] = workspace_name
+    return item
 
 
 async def search_documents_tool(
@@ -99,46 +104,39 @@ async def search_documents_tool(
     query: str,
     user: User | None = None,
     search_all_groups: bool = False,
+    limit: int = 20,
 ) -> list[dict]:
-    """Search workspace documents by title and content across active workspace and group workspaces."""
-    matched = []
-    
-    # 1. Search current workspace
-    result = await db.execute(
-        select(Document).where(Document.workspace_id == workspace_id)
-    )
-    for doc in result.scalars().all():
-        content_str = json.dumps(doc.content or {}).lower()
-        if not query or query.lower() in doc.title.lower() or query.lower() in content_str:
-            matched.append({
-                "id": str(doc.id),
-                "title": doc.title,
-                "workspace_id": str(workspace_id),
-                "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                "content_preview": content_str[:200],
-            })
-
-    # 2. If search_all_groups and user provided, include documents from other member workspaces
+    """Documents whose title or content contains the query, current workspace first."""
+    scopes: list[tuple[UUID, str | None]] = [(workspace_id, None)]
     if search_all_groups and user:
-        from app.services.workspace_service import list_user_workspaces
-        workspaces = await list_user_workspaces(db, user.id)
-        for ws in workspaces:
-            if ws.id == workspace_id:
-                continue
-            res = await db.execute(select(Document).where(Document.workspace_id == ws.id))
-            for doc in res.scalars().all():
-                content_str = json.dumps(doc.content or {}).lower()
-                if not query or query.lower() in doc.title.lower() or query.lower() in content_str:
-                    matched.append({
-                        "id": str(doc.id),
-                        "title": doc.title,
-                        "workspace_id": str(ws.id),
-                        "workspace_name": ws.name,
-                        "created_at": doc.created_at.isoformat() if doc.created_at else None,
-                        "content_preview": content_str[:200],
-                    })
+        scopes += [(ws.id, ws.name) for ws in await list_user_workspaces(db, user.id) if ws.id != workspace_id]
 
+    needle = query.strip().lower()
+    matched: list[dict] = []
+    for scope_id, scope_name in scopes:
+        docs = (await db.execute(
+            select(Document).where(Document.workspace_id == scope_id).order_by(Document.updated_at.desc())
+        )).scalars().all()
+        for doc in docs:
+            if not needle or needle in doc.title.lower() or needle in extract_text_from_document(doc).lower():
+                matched.append(_doc_summary(doc, scope_id, scope_name))
+                if len(matched) >= limit:
+                    return matched
     return matched
+
+
+async def _find_document(db: AsyncSession, workspace_id: UUID, doc_query: str) -> Document | None:
+    docs = (await db.execute(select(Document).where(Document.workspace_id == workspace_id))).scalars().all()
+    query = doc_query.strip().lower()
+    for predicate in (
+        lambda d: str(d.id) == doc_query.strip(),
+        lambda d: d.title.lower() == query,
+        lambda d: query in d.title.lower(),
+    ):
+        match = next((d for d in docs if predicate(d)), None)
+        if match:
+            return match
+    return None
 
 
 async def create_document_tool(
@@ -148,35 +146,19 @@ async def create_document_tool(
     title: str,
     content_text: str = "",
 ) -> dict:
-    """Create a new document or text file in the workspace."""
-    initial_blocks = [
-        {"id": "1", "type": "heading", "level": 1, "text": title},
-        {"id": "2", "type": "paragraph", "text": content_text or "Document created by NexaMind Autonomous AI Agent."},
-    ]
+    title = title.strip()
+    if not title:
+        raise ToolError("A document title is required")
+    blocks = [{"id": "1", "type": "heading", "level": 1, "text": title}]
+    for index, paragraph in enumerate(p for p in content_text.split("\n\n") if p.strip()):
+        blocks.append({"id": str(index + 2), "type": "paragraph", "text": paragraph.strip()})
     doc = await create_document(
-        db,
-        workspace_id,
-        user,
-        DocumentCreate(
-            title=title,
-            content={
-                "text": content_text or f"# {title}\n\nDocument initialized by NexaMind AI.",
-                "blocks": initial_blocks,
-            },
-        ),
+        db, workspace_id, user,
+        DocumentCreate(title=title[:255], content={"text": content_text, "blocks": blocks}),
     )
-    try:
-        await ingest_document(db, doc)
-    except Exception:
-        pass
     await db.commit()
-    return {
-        "id": str(doc.id),
-        "title": doc.title,
-        "type": "document",
-        "action": "create",
-        "message": f"Document '{doc.title}' created and saved to workspace memory.",
-    }
+    schedule_document_ingestion(doc.id, delay=0)
+    return {"id": str(doc.id), "title": doc.title, "action": "create", "message": f"Created document '{doc.title}'."}
 
 
 async def edit_document_tool(
@@ -187,64 +169,31 @@ async def edit_document_tool(
     new_content_text: str,
     mode: str = "append",
 ) -> dict:
-    """Edit or update an existing document or text file in the workspace."""
-    result = await db.execute(
-        select(Document).where(Document.workspace_id == workspace_id)
-    )
-    docs = result.scalars().all()
-    target_doc = None
-    for d in docs:
-        if str(d.id) == doc_query or doc_query.lower() in d.title.lower():
-            target_doc = d
-            break
+    """Append to or replace the text of a document in the current workspace."""
+    if not new_content_text.strip():
+        raise ToolError("No text was given to add to the document")
+    doc = await _find_document(db, workspace_id, doc_query)
+    if doc is None:
+        raise ToolError(f"No document matching '{doc_query}' in this workspace")
 
-    # If not found in current workspace, check user's other workspaces
-    if not target_doc:
-        from app.services.workspace_service import list_user_workspaces
-        workspaces = await list_user_workspaces(db, user.id)
-        for ws in workspaces:
-            if ws.id == workspace_id:
-                continue
-            res = await db.execute(select(Document).where(Document.workspace_id == ws.id))
-            for d in res.scalars().all():
-                if str(d.id) == doc_query or doc_query.lower() in d.title.lower():
-                    target_doc = d
-                    break
-            if target_doc:
-                break
-
-    if not target_doc:
-        return await create_document_tool(
-            db, workspace_id, user, title=doc_query, content_text=new_content_text
-        )
-
-    current_text = ""
-    if isinstance(target_doc.content, dict):
-        current_text = target_doc.content.get("text", "")
-        if not current_text and "blocks" in target_doc.content:
-            current_text = "\n\n".join(
-                b.get("text", "") for b in target_doc.content.get("blocks", [])
-            )
-    elif isinstance(target_doc.content, str):
-        current_text = target_doc.content
-
-    if mode == "append":
-        final_text = f"{current_text}\n\n{new_content_text}".strip()
+    current_text = extract_text_from_document(doc)
+    final_text = f"{current_text}\n\n{new_content_text}".strip() if mode != "replace" else new_content_text.strip()
+    content = dict(doc.content) if isinstance(doc.content, dict) else {}
+    blocks = list(content.get("blocks") or [])
+    if mode == "replace":
+        blocks = [{"id": "1", "type": "paragraph", "text": final_text}]
     else:
-        final_text = new_content_text
-
-    target_doc.content = {"text": final_text}
-    try:
-        await ingest_document(db, target_doc)
-    except Exception:
-        pass
+        blocks.append({"id": str(len(blocks) + 1), "type": "paragraph", "text": new_content_text.strip()})
+    content.update({"text": final_text, "blocks": blocks})
+    doc.content = content
+    doc.updated_at = datetime.now()
     await db.commit()
+    schedule_document_ingestion(doc.id, delay=0)
     return {
-        "id": str(target_doc.id),
-        "title": target_doc.title,
-        "type": "document",
+        "id": str(doc.id),
+        "title": doc.title,
         "action": "edit",
-        "message": f"Document '{target_doc.title}' edited and updated in workspace memory.",
+        "message": f"Updated document '{doc.title}'.",
         "content_preview": final_text[:300],
     }
 
@@ -256,102 +205,84 @@ async def get_document_tool(
     user: User | None = None,
     target_group: str | None = None,
 ) -> dict:
-    """Read full content of a document or file in current workspace or across group workspaces."""
-    def _extract_text(content_val) -> str:
-        if isinstance(content_val, dict):
-            if content_val.get("text"):
-                return str(content_val["text"])
-            if "blocks" in content_val:
-                parts = []
-                for b in content_val["blocks"]:
-                    if isinstance(b, dict) and b.get("text"):
-                        parts.append(b["text"])
-                if parts:
-                    return "\n\n".join(parts)
-            return json.dumps(content_val)
-        return str(content_val or "")
-
-    # 1. Check in current workspace
-    result = await db.execute(
-        select(Document).where(Document.workspace_id == workspace_id)
-    )
-    docs = result.scalars().all()
-    for d in docs:
-        if str(d.id) == doc_query or (doc_query and doc_query.lower() in d.title.lower()):
-            return {
-                "id": str(d.id),
-                "title": d.title,
-                "content": _extract_text(d.content),
-                "workspace_id": str(workspace_id),
-                "created_at": d.created_at.isoformat() if d.created_at else None,
-                "message": f"Retrieved document '{d.title}'.",
-            }
-
-    # 2. If not found in current workspace, check across user's other workspaces
+    """Read a document from the current workspace, or from another workspace the user belongs to."""
+    scopes: list[tuple[UUID, str | None, str | None]] = []
+    if not target_group:
+        scopes.append((workspace_id, None, None))
     if user:
-        from app.services.workspace_service import list_user_workspaces
-        workspaces = await list_user_workspaces(db, user.id)
-        for ws in workspaces:
-            if ws.id == workspace_id:
+        for ws in await list_user_workspaces(db, user.id):
+            if ws.id == workspace_id and not target_group:
                 continue
-            if target_group and target_group.lower() not in ws.name.lower():
+            if target_group and target_group.strip().lower() not in ws.name.lower():
                 continue
-            res = await db.execute(select(Document).where(Document.workspace_id == ws.id))
-            ws_docs = res.scalars().all()
-            for d in ws_docs:
-                if str(d.id) == doc_query or not doc_query or (doc_query.lower() in d.title.lower()):
-                    return {
-                        "id": str(d.id),
-                        "title": d.title,
-                        "content": _extract_text(d.content),
-                        "workspace_id": str(ws.id),
-                        "workspace_name": ws.name,
-                        "workspace_type": ws.type.value,
-                        "created_at": d.created_at.isoformat() if d.created_at else None,
-                        "message": f"Retrieved document '{d.title}' from Group workspace '{ws.name}'.",
-                    }
+            scopes.append((ws.id, ws.name, ws.type.value))
 
-    return {"error": f"Document '{doc_query}' not found."}
+    for scope_id, scope_name, scope_type in scopes:
+        doc = await _find_document(db, scope_id, doc_query)
+        if doc is None:
+            continue
+        result = {
+            "id": str(doc.id),
+            "title": doc.title,
+            "content": extract_text_from_document(doc)[:20000],
+            "workspace_id": str(scope_id),
+            "message": f"Read document '{doc.title}'" + (f" from workspace '{scope_name}'." if scope_name else "."),
+        }
+        if scope_name:
+            result.update({"workspace_name": scope_name, "workspace_type": scope_type})
+        return result
+    where = f" in workspace '{target_group}'" if target_group else ""
+    raise ToolError(f"No document matching '{doc_query}'{where}")
 
 
+# -------------------------------------------------------------------------------------------
+# Meetings
+# -------------------------------------------------------------------------------------------
 
-# -------------------------------------------------------------
-# 2. SESSION & MEETING TOOLS
-# -------------------------------------------------------------
-async def search_sessions_tool(
-    db: AsyncSession,
-    workspace_id: UUID,
-    query: str,
-) -> list[dict]:
-    """Search past meeting recordings, transcripts, summaries, and action items."""
-    term = f"%{query.strip().lower()}%"
-    query_builder = select(SessionRecord).where(SessionRecord.workspace_id == workspace_id)
-    if query:
-        query_builder = query_builder.where(
-            or_(
-                SessionRecord.title.ilike(term),
-                SessionRecord.transcript.ilike(term),
-                SessionRecord.ai_summary.ilike(term),
-            )
-        )
-    result = await db.execute(query_builder.order_by(SessionRecord.created_at.desc()))
-    sessions = result.scalars().all()
+async def search_sessions_tool(db: AsyncSession, workspace_id: UUID, query: str = "", limit: int = 10) -> list[dict]:
+    """Meetings matching the query (all recent meetings when the query is empty), newest first."""
+    stmt = select(SessionRecord).where(SessionRecord.workspace_id == workspace_id)
+    if query.strip():
+        pattern = _like(query)
+        stmt = stmt.where(or_(
+            SessionRecord.title.ilike(pattern, escape="!"),
+            SessionRecord.transcript.ilike(pattern, escape="!"),
+            SessionRecord.ai_summary.ilike(pattern, escape="!"),
+        ))
+    sessions = (await db.execute(stmt.order_by(SessionRecord.created_at.desc()).limit(limit))).scalars().all()
     return [
         {
             "id": str(s.id),
             "title": s.title,
-            "transcript_preview": (s.transcript or "")[:200],
-            "ai_summary": s.ai_summary,
+            "ai_summary": (s.ai_summary or "")[:2000],
             "action_items": s.action_items or [],
+            "transcript_preview": (s.transcript or "")[:300],
             "created_at": s.created_at.isoformat() if s.created_at else None,
         }
         for s in sessions
     ]
 
 
-# -------------------------------------------------------------
-# 3. KANBAN TASK TOOLS
-# -------------------------------------------------------------
+# -------------------------------------------------------------------------------------------
+# Tasks
+# -------------------------------------------------------------------------------------------
+
+async def list_tasks_tool(db: AsyncSession, workspace_id: UUID, query: str = "", status: str | None = None) -> list[dict]:
+    stmt = select(Task).where(Task.workspace_id == workspace_id)
+    if query.strip():
+        stmt = stmt.where(Task.title.ilike(_like(query), escape="!"))
+    if status:
+        try:
+            stmt = stmt.where(Task.status == TaskStatus(status.lower()))
+        except ValueError as exc:
+            raise ToolError(f"Unknown task status '{status}'") from exc
+    tasks = (await db.execute(stmt.order_by(Task.created_at.desc()).limit(50))).scalars().all()
+    return [
+        {"id": str(t.id), "title": t.title, "status": t.status.value, "priority": t.priority.value}
+        for t in tasks
+    ]
+
+
 async def create_task_tool(
     db: AsyncSession,
     workspace_id: UUID,
@@ -361,51 +292,34 @@ async def create_task_tool(
     status: str = "todo",
     priority: str = "medium",
 ) -> dict:
-    """Create a new task on the Kanban board."""
+    title = title.strip()
+    if not title:
+        raise ToolError("A task title is required")
     try:
         task_status = TaskStatus(status.lower())
     except ValueError:
         task_status = TaskStatus.TODO
-
     try:
         task_priority = TaskPriority(priority.lower())
     except ValueError:
         task_priority = TaskPriority.MEDIUM
 
     task = await create_task(
-        db,
-        workspace_id,
-        user,
-        TaskCreate(
-            title=title,
-            description=description,
-            status=task_status,
-            priority=task_priority,
-        ),
+        db, workspace_id, user,
+        TaskCreate(title=title[:255], description=description, status=task_status, priority=task_priority),
     )
     await db.commit()
-
-    await ws_manager.broadcast_to_workspace(
-        workspace_id,
-        {
-            "event": "task_created",
-            "workspace_id": str(workspace_id),
-            "data": {
-                "id": str(task.id),
-                "title": task.title,
-                "status": task.status.value,
-                "priority": task.priority.value,
-            },
-        },
-    )
-
+    await ws_manager.broadcast_to_workspace(workspace_id, {
+        "event": "task_created",
+        "workspace_id": str(workspace_id),
+        "data": {"id": str(task.id), "title": task.title, "status": task.status.value, "priority": task.priority.value},
+    })
     return {
         "id": str(task.id),
         "title": task.title,
-        "type": "task",
         "status": task.status.value,
         "priority": task.priority.value,
-        "message": f"Task '{task.title}' created on Kanban board ({task.priority.value.upper()} priority).",
+        "message": f"Created task '{task.title}' ({task.priority.value} priority, {task.status.value}).",
     }
 
 
@@ -416,151 +330,80 @@ async def update_task_status_tool(
     task_id: str,
     status: str,
 ) -> dict:
-    """Update task status on the Kanban board."""
-    task_uuid = UUID(task_id)
     try:
         new_status = TaskStatus(status.lower())
-    except ValueError:
-        new_status = TaskStatus.TODO
-
-    task = await update_task(
-        db,
-        workspace_id,
-        task_uuid,
-        user_id,
-        TaskUpdate(status=new_status),
-    )
+    except ValueError as exc:
+        raise ToolError(f"Unknown task status '{status}'") from exc
+    task = await update_task(db, workspace_id, _uuid(task_id, "task"), user_id, TaskUpdate(status=new_status))
     await db.commit()
-
-    await ws_manager.broadcast_to_workspace(
-        workspace_id,
-        {
-            "event": "task_updated",
-            "workspace_id": str(workspace_id),
-            "data": {
-                "id": str(task.id),
-                "title": task.title,
-                "status": task.status.value,
-            },
-        },
-    )
-
+    await ws_manager.broadcast_to_workspace(workspace_id, {
+        "event": "task_updated",
+        "workspace_id": str(workspace_id),
+        "data": {"id": str(task.id), "title": task.title, "status": task.status.value},
+    })
     return {
         "id": str(task.id),
         "title": task.title,
-        "type": "task",
         "status": task.status.value,
-        "message": f"Task '{task.title}' moved to {task.status.value.upper()}.",
+        "message": f"Moved task '{task.title}' to {task.status.value}.",
     }
 
 
-# -------------------------------------------------------------
-# 4. CODE REPO & VCS TOOLS
-# -------------------------------------------------------------
-async def create_repo_tool(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user: User,
-    name: str,
-    description: str | None = None,
-) -> dict:
-    """Create a new code repository in the workspace."""
-    repo = await create_repo(
-        db,
-        workspace_id,
-        user,
-        CodeRepoCreate(name=name, description=description),
-    )
+# -------------------------------------------------------------------------------------------
+# Code repositories
+# -------------------------------------------------------------------------------------------
+
+async def list_repos_tool(db: AsyncSession, workspace_id: UUID) -> list[dict]:
+    repos = (await db.execute(select(CodeRepo).where(CodeRepo.workspace_id == workspace_id))).scalars().all()
+    return [{"id": str(r.id), "name": r.name, "description": r.description} for r in repos]
+
+
+async def create_repo_tool(db: AsyncSession, workspace_id: UUID, user: User, name: str, description: str | None = None) -> dict:
+    if not name.strip():
+        raise ToolError("A repository name is required")
+    repo = await create_repo(db, workspace_id, user, CodeRepoCreate(name=name.strip()[:255], description=description))
     await db.commit()
-    return {
-        "id": str(repo.id),
-        "name": repo.name,
-        "type": "code_repo",
-        "message": f"Repository '{repo.name}' created successfully.",
-    }
+    return {"id": str(repo.id), "name": repo.name, "message": f"Created repository '{repo.name}'."}
 
 
-async def create_commit_tool(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user: User,
-    repo_id: str,
-    message: str,
-) -> dict:
-    """Create and log a git commit to a code repository."""
-    repo_uuid = UUID(repo_id)
-    commit = await create_commit(
-        db,
-        workspace_id,
-        repo_uuid,
-        user,
-        CommitCreate(message=message),
-    )
+async def create_commit_tool(db: AsyncSession, workspace_id: UUID, user: User, repo_id: str, message: str) -> dict:
+    commit = await create_commit(db, workspace_id, _uuid(repo_id, "repository"), user, CommitCreate(message=message))
     await db.commit()
     return {
         "id": str(commit.id),
         "hash": commit.hash,
-        "message": commit.message,
-        "type": "commit",
-        "message_detail": f"Commit logged [{commit.hash[:7]}]: '{commit.message}'.",
+        "message": f"Logged commit {commit.hash[:7]}: '{commit.message}'.",
     }
 
 
 async def create_issue_tool(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user: User,
-    repo_id: str,
-    title: str,
-    description: str | None = None,
+    db: AsyncSession, workspace_id: UUID, user: User, repo_id: str, title: str, description: str | None = None
 ) -> dict:
-    """Create an issue in a code repository."""
-    repo_uuid = UUID(repo_id)
     issue = await create_issue(
-        db,
-        workspace_id,
-        repo_uuid,
-        user,
-        IssueCreate(title=title, description=description),
+        db, workspace_id, _uuid(repo_id, "repository"), user, IssueCreate(title=title[:255], description=description)
     )
     await db.commit()
-    return {
-        "id": str(issue.id),
-        "title": issue.title,
-        "type": "issue",
-        "status": issue.status.value,
-        "message": f"Issue #{str(issue.id)[:6]} '{issue.title}' opened.",
-    }
+    return {"id": str(issue.id), "title": issue.title, "status": issue.status.value,
+            "message": f"Opened issue '{issue.title}'."}
 
 
-# -------------------------------------------------------------
-# 5. FINANCIAL TOOLS
-# -------------------------------------------------------------
-async def search_finance_tool(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user_id: UUID,
-    category: str | None = None,
-) -> dict:
-    """Query workspace income/expenses and calculate runway balance."""
+# -------------------------------------------------------------------------------------------
+# Finance
+# -------------------------------------------------------------------------------------------
+
+async def search_finance_tool(db: AsyncSession, workspace_id: UUID, user_id: UUID, category: str | None = None) -> dict:
     runway = await calculate_runway(db, workspace_id, user_id)
-    query = select(FinanceTransaction).where(FinanceTransaction.workspace_id == workspace_id)
+    stmt = select(FinanceTransaction).where(FinanceTransaction.workspace_id == workspace_id)
     if category:
-        query = query.where(FinanceTransaction.category.ilike(f"%{category.strip()}%"))
-    result = await db.execute(query.order_by(FinanceTransaction.date.desc()))
-    txs = result.scalars().all()
+        stmt = stmt.where(FinanceTransaction.category.ilike(_like(category), escape="!"))
+    txs = (await db.execute(stmt.order_by(FinanceTransaction.date.desc()))).scalars().all()
     return {
         "metrics": runway,
         "transactions_count": len(txs),
         "recent_transactions": [
-            {
-                "id": str(t.id),
-                "type": t.type.value,
-                "amount": t.amount,
-                "category": t.category,
-                "date": t.date.isoformat(),
-            }
-            for t in txs[:5]
+            {"id": str(t.id), "type": t.type.value, "amount": t.amount, "category": t.category,
+             "date": t.date.isoformat()}
+            for t in txs[:10]
         ],
     }
 
@@ -573,88 +416,101 @@ async def create_transaction_tool(
     amount: float,
     category: str,
     date: str | None = None,
+    description: str | None = None,
 ) -> dict:
-    """Log an income or expense transaction in the workspace financial ledger."""
-    from datetime import date as d_date
-    tx_type = TransactionType.INCOME if type.lower() == "income" else TransactionType.EXPENSE
-    t_date = d_date.fromisoformat(date) if date else d_date.today()
+    try:
+        value = float(amount)
+    except (TypeError, ValueError) as exc:
+        raise ToolError("The amount must be a number") from exc
+    if value <= 0:
+        raise ToolError("The amount must be greater than zero")
+    if not category.strip():
+        raise ToolError("A category is required")
+    tx_type = TransactionType.INCOME if type.lower() in {"income", "revenue"} else TransactionType.EXPENSE
+    try:
+        tx_date = date_type.fromisoformat(date) if date else date_type.today()
+    except ValueError as exc:
+        raise ToolError(f"'{date}' is not a valid YYYY-MM-DD date") from exc
 
     tx = await create_transaction(
-        db,
-        workspace_id,
-        user,
+        db, workspace_id, user,
         TransactionCreate(
             type=tx_type,
-            amount=amount,
-            category=category,
-            date=t_date,
+            amount=value,
+            category=category.strip()[:128],
+            date=datetime.combine(tx_date, datetime.min.time()),
+            description=description,
         ),
     )
     await db.commit()
     return {
         "id": str(tx.id),
-        "type": "transaction",
         "tx_type": tx.type.value,
         "amount": tx.amount,
         "category": tx.category,
-        "message": f"Logged {tx.type.value.upper()} of ${tx.amount:,.2f} under '{tx.category}'.",
+        "message": f"Logged {tx.type.value} of ${tx.amount:,.2f} under '{tx.category}'.",
     }
 
 
-# -------------------------------------------------------------
-# 6. CHANNEL & MESSAGING TOOLS
-# -------------------------------------------------------------
-async def create_channel_tool(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user: User,
-    name: str,
-) -> dict:
-    """Create a new real-time communication channel."""
-    channel = await create_channel(
-        db,
-        workspace_id,
-        user,
-        ChannelCreate(name=name),
-    )
+# -------------------------------------------------------------------------------------------
+# Channels
+# -------------------------------------------------------------------------------------------
+
+async def list_channels_tool(db: AsyncSession, workspace_id: UUID, user: User) -> list[dict]:
+    channels = await list_channels(db, workspace_id, user.id)
+    return [
+        {"id": str(c.id), "name": c.name, "is_private": c.is_private}
+        for c in channels
+        if c.workspace_id == workspace_id and not c.is_direct
+    ]
+
+
+async def create_channel_tool(db: AsyncSession, workspace_id: UUID, user: User, name: str, is_private: bool = False) -> dict:
+    clean = name.strip().lstrip("#")
+    if not clean:
+        raise ToolError("A channel name is required")
+    channel = await create_channel(db, workspace_id, user, ChannelCreate(name=clean[:128], is_private=is_private))
     await db.commit()
-    return {
-        "id": str(channel.id),
-        "name": channel.name,
-        "type": "channel",
-        "message": f"Channel #{channel.name} created.",
-    }
+    return {"id": str(channel.id), "name": channel.name, "message": f"Created channel #{channel.name}."}
 
 
 async def post_channel_message_tool(
     db: AsyncSession,
     workspace_id: UUID,
     user: User,
-    channel_id: str,
     content: str,
+    channel_id: str | None = None,
+    channel_name: str | None = None,
 ) -> dict:
-    """Post an announcement or message into a real-time channel."""
-    c_uuid = UUID(channel_id)
-    msg = await post_message(
-        db,
-        workspace_id,
-        c_uuid,
-        user,
-        MessageCreate(content=content),
-    )
-    msg_id = msg["id"] if isinstance(msg, dict) else msg.id
-    return {
-        "id": str(msg_id),
-        "channel_id": str(c_uuid),
-        "type": "message",
-        "message": f"Message posted to channel #{str(c_uuid)[:6]}.",
-    }
+    if not content.strip():
+        raise ToolError("Message content is required")
+    channels = await list_channels(db, workspace_id, user.id)
+    channel = None
+    if channel_id:
+        channel = next((c for c in channels if str(c.id) == str(channel_id)), None)
+    elif channel_name:
+        wanted = channel_name.strip().lstrip("#").lower()
+        channel = next((c for c in channels if c.name.lower() == wanted and not c.is_direct), None)
+    if channel is None:
+        raise ToolError(f"No channel named '{channel_name or channel_id}' that you can post to")
+
+    message = await post_message(db, workspace_id, channel.id, user, MessageCreate(content=content.strip()[:10000]))
+    await db.commit()
+    from app.schemas.channel import MessageResponse
+
+    await ws_manager.broadcast_to_channel(channel.id, {
+        "event": "new_message",
+        "channel_id": str(channel.id),
+        "data": MessageResponse.model_validate(message).model_dump(mode="json"),
+    })
+    return {"id": str(message["id"]), "channel_id": str(channel.id), "channel_name": channel.name,
+            "message": f"Posted to #{channel.name}."}
 
 
+# -------------------------------------------------------------------------------------------
+# Reports & calendar
+# -------------------------------------------------------------------------------------------
 
-# -------------------------------------------------------------
-# 7. REPORT TOOLS
-# -------------------------------------------------------------
 async def generate_report_tool(
     db: AsyncSession,
     workspace_id: UUID,
@@ -663,33 +519,19 @@ async def generate_report_tool(
     report_type: str = "sprint_summary",
     prompt: str | None = None,
 ) -> dict:
-    """Synthesize an executive report from workspace meetings, docs, and financials."""
     try:
         r_type = ReportType(report_type.lower())
     except ValueError:
         r_type = ReportType.SPRINT_SUMMARY
-
-    rep = await generate_report(
-        db,
-        workspace_id,
-        user,
-        ReportGenerateRequest(
-            title=title,
-            report_type=r_type,
-            custom_prompt=prompt,
-        ),
+    report = await generate_report(
+        db, workspace_id, user,
+        ReportGenerateRequest(title=title.strip()[:255] or "Workspace Report", report_type=r_type, custom_prompt=prompt),
     )
-    return {
-        "id": str(rep.id),
-        "title": rep.title,
-        "type": "report",
-        "message": f"Executive report '{rep.title}' synthesized.",
-    }
+    await db.commit()
+    return {"id": str(report.id), "title": report.title, "summary": report.summary,
+            "message": f"Generated report '{report.title}'."}
 
 
-# -------------------------------------------------------------
-# 8. CALENDAR & REMINDER TOOLS
-# -------------------------------------------------------------
 async def create_calendar_event_tool(
     db: AsyncSession,
     workspace_id: UUID,
@@ -700,30 +542,31 @@ async def create_calendar_event_tool(
     event_type: str = "meeting",
     priority: str = "medium",
 ) -> dict:
-    """Schedule a meeting, deadline, or milestone on the workspace calendar."""
-    from datetime import date as d_date
-    from app.models.calendar import CalendarEventType, CalendarEventPriority, CalendarEventSource
+    from app.models.calendar import CalendarEventPriority, CalendarEventSource, CalendarEventType
     from app.schemas.calendar import CalendarEventCreate
     from app.services.calendar_service import create_calendar_event
 
+    if not title.strip():
+        raise ToolError("An event title is required")
+    try:
+        date_type.fromisoformat(event_date)
+    except (TypeError, ValueError) as exc:
+        raise ToolError(f"'{event_date}' is not a valid YYYY-MM-DD date") from exc
     try:
         e_type = CalendarEventType(event_type.lower())
     except ValueError:
         e_type = CalendarEventType.MEETING
-
     try:
         p_type = CalendarEventPriority(priority.lower())
     except ValueError:
         p_type = CalendarEventPriority.MEDIUM
 
-    ev = await create_calendar_event(
-        db,
-        workspace_id,
-        user,
+    event = await create_calendar_event(
+        db, workspace_id, user,
         CalendarEventCreate(
-            title=title,
-            event_date=event_date or d_date.today().isoformat(),
-            event_time=event_time or "02:00 PM",
+            title=title.strip()[:255],
+            event_date=event_date,
+            event_time=event_time,
             event_type=e_type,
             priority=p_type,
             source=CalendarEventSource.AI_DETECTED,
@@ -731,203 +574,90 @@ async def create_calendar_event_tool(
     )
     await db.commit()
     return {
-        "id": str(ev.id),
-        "title": ev.title,
-        "event_date": ev.event_date,
-        "event_time": ev.event_time,
-        "type": "calendar",
-        "message": f"Calendar event '{ev.title}' scheduled for {ev.event_date} at {ev.event_time or 'All Day'}.",
+        "id": str(event.id),
+        "title": event.title,
+        "event_date": event.event_date,
+        "event_time": event.event_time,
+        "message": f"Scheduled '{event.title}' on {event.event_date}" + (f" at {event.event_time}." if event.event_time else "."),
     }
 
 
+# -------------------------------------------------------------------------------------------
+# Declarations shown to the model (JSON Schema subset understood by Gemini and Groq)
+# -------------------------------------------------------------------------------------------
 
+def _fn(name: str, description: str, properties: dict | None = None, required: list[str] | None = None) -> dict:
+    declaration = {"name": name, "description": description}
+    if properties:
+        declaration["parameters"] = {"type": "object", "properties": properties, "required": required or []}
+    return declaration
+
+
+STRING = {"type": "string"}
 AVAILABLE_TOOLS = [
-    {
-        "name": "create_document",
-        "description": "Author a new specification or notes document in the workspace.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "Title of the document or filename (e.g. notes.txt, design.md)"},
-                "content_text": {"type": "string", "description": "Body text or document content"},
-            },
-            "required": ["title"],
-        },
-    },
-    {
-        "name": "edit_document",
-        "description": "Edit, append to, or update an existing document or file.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "doc_query": {"type": "string", "description": "Title or keyword of the document to edit"},
-                "new_content_text": {"type": "string", "description": "Text to add or updated content"},
-                "mode": {"type": "string", "enum": ["append", "replace"], "description": "Whether to append to or replace existing content"},
-            },
-            "required": ["doc_query", "new_content_text"],
-        },
-    },
-    {
-        "name": "get_document",
-        "description": "Read the full text and details of a document or file.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "doc_query": {"type": "string", "description": "Title or keyword of the document to read"},
-            },
-            "required": ["doc_query"],
-        },
-    },
-    {
-        "name": "search_documents",
-        "description": "Search across all documents, specifications, and notes in the workspace.",
-        "parameters": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Keywords to search for"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "create_task",
-        "description": "Create a new task on the team Kanban board.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "Title of the task"},
-                "description": {"type": "string", "description": "Task criteria and details"},
-                "status": {"type": "string", "enum": ["todo", "in_progress", "done"], "description": "Column"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"]},
-            },
-            "required": ["title"],
-        },
-    },
-    {
-        "name": "update_task_status",
-        "description": "Move a task between Kanban columns (todo, in_progress, done).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "string", "description": "UUID of the task"},
-                "status": {"type": "string", "enum": ["todo", "in_progress", "done"]},
-            },
-            "required": ["task_id", "status"],
-        },
-    },
-    {
-        "name": "create_repo",
-        "description": "Create a new code repository in the workspace.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Name of the code repository"},
-                "description": {"type": "string", "description": "Repository description"},
-            },
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "create_commit",
-        "description": "Log a git commit to a code repository.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "repo_id": {"type": "string", "description": "Repository UUID"},
-                "message": {"type": "string", "description": "Commit message"},
-            },
-            "required": ["repo_id", "message"],
-        },
-    },
-    {
-        "name": "create_issue",
-        "description": "Create an issue in a code repository.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "repo_id": {"type": "string", "description": "Repository UUID"},
-                "title": {"type": "string", "description": "Issue title"},
-                "description": {"type": "string", "description": "Issue description"},
-            },
-            "required": ["repo_id", "title"],
-        },
-    },
-    {
-        "name": "create_transaction",
-        "description": "Log an income or expense transaction in the workspace financial ledger.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["income", "expense"]},
-                "amount": {"type": "number", "description": "Dollar amount"},
-                "category": {"type": "string", "description": "Category (e.g. Hosting, Payroll, Sales)"},
-                "date": {"type": "string", "description": "Date formatted YYYY-MM-DD"},
-            },
-            "required": ["type", "amount", "category"],
-        },
-    },
-    {
-        "name": "search_finance",
-        "description": "Query workspace financial balance, net burn rate, and runway months.",
-        "parameters": {
-            "type": "object",
-            "properties": {"category": {"type": "string", "description": "Optional category filter"}},
-        },
-    },
-    {
-        "name": "create_channel",
-        "description": "Create a new team real-time chat channel.",
-        "parameters": {
-            "type": "object",
-            "properties": {"name": {"type": "string", "description": "Channel name"}},
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "post_channel_message",
-        "description": "Post a message or announcement into a real-time channel.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "channel_id": {"type": "string", "description": "Channel UUID"},
-                "content": {"type": "string", "description": "Message content to post"},
-            },
-            "required": ["channel_id", "content"],
-        },
-    },
-    {
-        "name": "generate_report",
-        "description": "Synthesize a comprehensive executive report from workspace assets.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "Report title"},
-                "report_type": {"type": "string", "enum": ["sprint_summary", "financial_overview", "meeting_digest", "project_status", "custom"]},
-                "prompt": {"type": "string", "description": "Special instructions or focus"},
-            },
-            "required": ["title"],
-        },
-    },
-    {
-        "name": "search_sessions",
-        "description": "Search past meeting recordings, transcripts, summaries, and action items.",
-        "parameters": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Keywords or meeting topic"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "create_calendar_event",
-        "description": "Schedule a meeting, deadline, or milestone on the workspace calendar.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "Event title"},
-                "event_date": {"type": "string", "description": "Event date formatted YYYY-MM-DD"},
-                "event_time": {"type": "string", "description": "Optional time e.g. 03:00 PM"},
-                "event_type": {"type": "string", "enum": ["meeting", "deadline", "reminder", "milestone", "task"]},
-                "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"]},
-            },
-            "required": ["title", "event_date"],
-        },
-    },
+    _fn("search_documents", "Find documents whose title or text contains a keyword.",
+        {"query": {**STRING, "description": "Keyword or phrase"},
+         "search_all_groups": {"type": "boolean", "description": "Also search the user's other workspaces"}},
+        ["query"]),
+    _fn("get_document", "Read the full text of a document by title or id.",
+        {"doc_query": {**STRING, "description": "Document title or id"},
+         "target_group": {**STRING, "description": "Name of another workspace to read from (optional)"}},
+        ["doc_query"]),
+    _fn("create_document", "Create a new document in the current workspace.",
+        {"title": STRING, "content_text": {**STRING, "description": "Document body (plain text or Markdown)"}},
+        ["title"]),
+    _fn("edit_document", "Append to or replace the text of an existing document.",
+        {"doc_query": {**STRING, "description": "Document title or id"},
+         "new_content_text": STRING,
+         "mode": {"type": "string", "enum": ["append", "replace"]}},
+        ["doc_query", "new_content_text"]),
+    _fn("search_sessions", "Search meeting recordings: summaries, transcripts, and action items. Empty query lists recent meetings.",
+        {"query": STRING}),
+    _fn("list_tasks", "List Kanban tasks, optionally filtered by title keyword or status.",
+        {"query": STRING, "status": {"type": "string", "enum": ["todo", "in_progress", "review", "done"]}}),
+    _fn("create_task", "Create a Kanban task.",
+        {"title": STRING, "description": STRING,
+         "status": {"type": "string", "enum": ["todo", "in_progress", "review", "done"]},
+         "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"]}},
+        ["title"]),
+    _fn("update_task_status", "Move a task to another Kanban column. Use list_tasks to find the id.",
+        {"task_id": STRING, "status": {"type": "string", "enum": ["todo", "in_progress", "review", "done"]}},
+        ["task_id", "status"]),
+    _fn("list_repos", "List code repositories in the workspace."),
+    _fn("create_repo", "Create a code repository.", {"name": STRING, "description": STRING}, ["name"]),
+    _fn("create_commit", "Log a commit to a repository. Use list_repos to find the id.",
+        {"repo_id": STRING, "message": STRING}, ["repo_id", "message"]),
+    _fn("create_issue", "Open an issue in a repository. Use list_repos to find the id.",
+        {"repo_id": STRING, "title": STRING, "description": STRING}, ["repo_id", "title"]),
+    _fn("search_finance", "Get cash balance, monthly burn, runway, and recent transactions.",
+        {"category": {**STRING, "description": "Optional category filter"}}),
+    _fn("create_transaction", "Record an income or expense.",
+        {"type": {"type": "string", "enum": ["income", "expense"]},
+         "amount": {"type": "number", "description": "Positive amount in dollars"},
+         "category": STRING,
+         "date": {**STRING, "description": "YYYY-MM-DD, defaults to today"},
+         "description": STRING},
+        ["type", "amount", "category"]),
+    _fn("list_channels", "List the workspace's chat channels."),
+    _fn("create_channel", "Create a chat channel.", {"name": STRING, "is_private": {"type": "boolean"}}, ["name"]),
+    _fn("post_channel_message", "Post a message to a channel, by channel name.",
+        {"channel_name": STRING, "content": STRING}, ["channel_name", "content"]),
+    _fn("generate_report", "Generate a report from recent meetings, documents, and finances.",
+        {"title": STRING,
+         "report_type": {"type": "string", "enum": ["sprint_summary", "financial_overview", "meeting_digest", "project_status", "custom"]},
+         "prompt": {**STRING, "description": "What the report should focus on"}},
+        ["title"]),
+    _fn("create_calendar_event", "Add a meeting, deadline, reminder, or milestone to the calendar.",
+        {"title": STRING,
+         "event_date": {**STRING, "description": "YYYY-MM-DD"},
+         "event_time": {**STRING, "description": "e.g. 03:00 PM (optional)"},
+         "event_type": {"type": "string", "enum": ["meeting", "deadline", "reminder", "milestone", "task"]},
+         "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"]}},
+        ["title", "event_date"]),
+    _fn("switch_workspace", "Switch the user's active workspace by name, or to 'personal' or 'team'.",
+        {"target": STRING}, ["target"]),
 ]
+
+
+def to_json_safe(value):
+    return json.loads(json.dumps(value, default=str))

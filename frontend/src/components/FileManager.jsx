@@ -52,6 +52,14 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
     }
   };
 
+  const handleDownload = async (file) => {
+    try {
+      await api.downloadFile(workspaceId, file.id, file.filename);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const formatFileSize = (bytes) => {
     if (!bytes) return '0 B';
     const k = 1024;
@@ -83,10 +91,10 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
       {/* Header & Controls */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">
+          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
             Workspace File Storage
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-500 mt-0.5">
             Store documents, design assets, and code files with instant in-app previews.
           </p>
         </div>
@@ -98,7 +106,7 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
             <input
               type="text"
               placeholder="Search files..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-100 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -113,7 +121,7 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
       </div>
 
       {/* Category Tabs */}
-      <div className="flex items-center gap-2 bg-slate-900/80 p-1.5 rounded-xl border border-slate-800 w-fit">
+      <div className="flex items-center gap-2 bg-white p-1.5 rounded-xl border border-slate-200 w-fit">
         {[
           { id: 'all', label: 'All Files' },
           { id: 'image', label: 'Images' },
@@ -127,7 +135,7 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               activeCategory === tab.id
                 ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                : 'text-slate-500 hover:text-slate-900'
             }`}
           >
             {tab.label}
@@ -136,33 +144,44 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
       </div>
 
       {/* Files Grid */}
-      <div className="grid grid-cols-4 gap-4 flex-1 overflow-y-auto min-h-0 pr-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 content-start gap-4 flex-1 overflow-y-auto min-h-0 pr-1">
         {filteredFiles.map((f) => {
           const cat = getFileCategory(f.mime_type, f.filename);
           return (
             <div
               key={f.id}
-              className="glass-panel p-4 rounded-2xl border border-slate-800 hover:border-indigo-500/40 transition flex flex-col justify-between group space-y-3 shadow-md"
+              className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-indigo-500/40 transition flex flex-col justify-between group space-y-3 shadow-sm"
             >
               <div className="flex items-start justify-between">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
                   {cat === 'image' && <Image className="w-5 h-5" />}
                   {cat === 'doc' && <FileText className="w-5 h-5" />}
                   {cat === 'code' && <FileCode className="w-5 h-5 text-emerald-400" />}
                   {cat === 'media' && <Film className="w-5 h-5 text-purple-400" />}
                   {cat === 'other' && <File className="w-5 h-5" />}
                 </div>
-                <button
-                  onClick={() => handleDelete(f.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 transition"
-                  title="Delete file"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
+                  <button
+                    onClick={() => handleDownload(f)}
+                    className="p-1 text-slate-500 hover:text-indigo-600"
+                    title="Download file"
+                    aria-label={`Download ${f.filename}`}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(f.id)}
+                    className="p-1 text-slate-500 hover:text-rose-400"
+                    title="Delete file"
+                    aria-label={`Delete ${f.filename}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               <div>
-                <h4 className="font-bold text-xs text-slate-200 truncate" title={f.filename}>
+                <h4 className="font-bold text-xs text-slate-900 truncate" title={f.filename}>
                   {f.filename}
                 </h4>
                 <div className="text-[10px] text-slate-500 mt-0.5">
@@ -172,7 +191,7 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
 
               <button
                 onClick={() => setPreviewFile(f)}
-                className="w-full py-1.5 bg-slate-900 hover:bg-slate-800 rounded-lg text-xs font-semibold text-slate-300 flex items-center justify-center gap-1.5 border border-slate-800 transition"
+                className="w-full py-1.5 bg-slate-100 hover:bg-slate-100 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 border border-slate-200 transition"
               >
                 <Eye className="w-3.5 h-3.5" />
                 <span>Preview Details</span>
@@ -191,59 +210,57 @@ export default function FileManager({ workspaceId, filesList, onRefreshFiles }) 
 
       {/* File Preview & Metadata Drawer Modal */}
       {previewFile && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50 animate-fade-in">
-          <div className="glass-panel p-6 rounded-2xl border border-slate-700 max-w-2xl w-full space-y-4 max-h-[85vh] flex flex-col bg-slate-900/95">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 bg-slate-100/60 flex items-center justify-center p-6 z-50 animate-fade-in">
+          <div className="bg-white p-6 rounded-2xl border border-slate-300 max-w-2xl w-full space-y-4 max-h-[85vh] flex flex-col bg-white">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div className="flex items-center gap-2 truncate">
-                <FileText className="w-5 h-5 text-indigo-400" />
-                <span className="font-bold text-sm text-slate-100 truncate">{previewFile.filename}</span>
+                <FileText className="w-5 h-5 text-indigo-600" />
+                <span className="font-bold text-sm text-slate-900 truncate">{previewFile.filename}</span>
               </div>
               <button
                 onClick={() => setPreviewFile(null)}
-                className="p-1 text-slate-400 hover:text-slate-200"
+                className="p-1 text-slate-500 hover:text-slate-900"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Preview Box */}
-            <div className="flex-1 overflow-auto bg-slate-950 rounded-xl p-6 border border-slate-800 flex items-center justify-center text-xs text-slate-400 font-mono min-h-[220px]">
+            <div className="flex-1 overflow-auto bg-slate-50 rounded-xl p-6 border border-slate-200 flex items-center justify-center text-xs text-slate-500 font-mono min-h-[220px]">
               {getFileCategory(previewFile.mime_type, previewFile.filename) === 'image' ? (
                 <div className="text-center space-y-2">
-                  <Image className="w-20 h-20 text-indigo-400 mx-auto" />
-                  <span className="font-bold text-slate-300 block">{previewFile.filename}</span>
+                  <Image className="w-20 h-20 text-indigo-600 mx-auto" />
+                  <span className="font-bold text-slate-700 block">{previewFile.filename}</span>
                   <span className="text-slate-500 text-[11px]">Image Asset</span>
                 </div>
               ) : (
                 <div className="text-center space-y-2">
                   <FileText className="w-20 h-20 text-slate-600 mx-auto" />
-                  <span className="font-bold text-slate-300 block">{previewFile.filename}</span>
+                  <span className="font-bold text-slate-700 block">{previewFile.filename}</span>
                   <span className="text-slate-500 text-[11px]">Preview File Ready</span>
                 </div>
               )}
             </div>
 
             {/* Metadata Information Grid */}
-            <div className="grid grid-cols-3 gap-3 bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-xs">
+            <div className="grid grid-cols-3 gap-3 bg-white p-3 rounded-xl border border-slate-200 text-xs">
               <div>
                 <span className="text-[10px] text-slate-500 uppercase font-bold block">Size</span>
-                <span className="font-bold text-slate-200">{formatFileSize(previewFile.file_size)}</span>
+                <span className="font-bold text-slate-900">{formatFileSize(previewFile.file_size)}</span>
               </div>
               <div>
                 <span className="text-[10px] text-slate-500 uppercase font-bold block">MIME Type</span>
-                <span className="text-slate-200 truncate block">{previewFile.mime_type || 'application/octet-stream'}</span>
+                <span className="text-slate-900 truncate block">{previewFile.mime_type || 'application/octet-stream'}</span>
               </div>
               <div>
                 <span className="text-[10px] text-slate-500 uppercase font-bold block">Uploaded</span>
-                <span className="text-slate-200">{new Date(previewFile.created_at).toLocaleDateString()}</span>
+                <span className="text-slate-900">{new Date(previewFile.created_at).toLocaleDateString()}</span>
               </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
-                onClick={() => {
-                  alert(`Downloading ${previewFile.filename}...`);
-                }}
+                onClick={() => handleDownload(previewFile)}
                 className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition"
               >
                 <Download className="w-3.5 h-3.5" />

@@ -123,6 +123,9 @@ class AiMemory(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     importance_score: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    # Semantic embedding vector (list of floats) and the model that produced it.
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now,

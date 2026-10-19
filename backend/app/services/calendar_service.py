@@ -1,12 +1,8 @@
-import json
 import logging
-import os
-import re
 import uuid
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +18,7 @@ from app.schemas.calendar import (
     CalendarEventUpdate,
     DetectedReminderItem,
 )
+from app.services import llm_client
 from app.services.auth_service import AuthError
 
 logger = logging.getLogger(__name__)
@@ -185,7 +182,6 @@ async def detect_ai_reminders_from_context(
     existing_titles = {e.title.lower() for e in existing_events_res.scalars().all()}
 
     detected: list[DetectedReminderItem] = []
-    groq_key = os.getenv("GROQ_API_KEY")
 
     # Combine text context
     context_chunks = []
@@ -200,61 +196,46 @@ async def detect_ai_reminders_from_context(
     if not context_chunks:
         return []
 
-    # 3. LLM Extraction with Groq if available
+    # 3. LLM extraction when a provider is configured
     today_str = date.today().isoformat()
-    if groq_key:
-        try:
-            combined_context = "\n---\n".join(c["text"] for c in context_chunks[:3])
-            prompt = (
-                f"Today is {today_str}.\n"
-                f"Analyze the following meeting MoM summaries and workspace documents. Identify any deadlines, scheduled meetings, review dates, or milestone targets mentioned.\n\n"
-                f"{combined_context}\n\n"
-                f"Return a strict JSON object with a list 'reminders':\n"
-                f"[{{\n"
-                f"  'title': 'Short event or deadline name',\n"
-                f"  'suggested_date': 'YYYY-MM-DD',\n"
-                f"  'suggested_time': 'HH:MM AM/PM' or null,\n"
-                f"  'event_type': 'meeting' | 'deadline' | 'reminder' | 'milestone',\n"
-                f"  'priority': 'low' | 'medium' | 'high' | 'urgent',\n"
-                f"  'source_name': 'Title of the meeting or document',\n"
-                f"  'source_type': 'meeting_mom' | 'document',\n"
-                f"  'context_snippet': 'Sentence where this was found'\n"
-                f"}}]"
-            )
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                res = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0.2,
-                    },
+    combined_context = "\n---\n".join(c["text"] for c in context_chunks[:5])
+    prompt = (
+        f"Today is {today_str}. Find deadlines, scheduled meetings, review dates, and milestones that are "
+        "explicitly mentioned in the workspace content below. Do not invent any.\n\n"
+        f"{combined_context}\n\n"
+        'Return JSON: {"reminders": [{"title": str, "suggested_date": "YYYY-MM-DD", '
+        '"suggested_time": "HH:MM AM/PM" or null, "event_type": "meeting|deadline|reminder|milestone", '
+        '"priority": "low|medium|high|urgent", "source_name": str, "source_type": "meeting_mom|document", '
+        '"context_snippet": str}]}'
+    )
+    parsed = llm_client.parse_json(await llm_client.complete_text(prompt, json_mode=True))
+    if isinstance(parsed, dict) and isinstance(parsed.get("reminders"), list):
+        for it in parsed["reminders"][:6]:
+            title = str(it.get("title") or "").strip()
+            suggested = str(it.get("suggested_date") or "")
+            if not title or title.lower() in existing_titles:
+                continue
+            try:
+                date.fromisoformat(suggested)
+                event_type = CalendarEventType(str(it.get("event_type", "meeting")).lower())
+                priority = CalendarEventPriority(str(it.get("priority", "medium")).lower())
+            except ValueError:
+                continue
+            detected.append(
+                DetectedReminderItem(
+                    id=f"ai-rem-{uuid.uuid4().hex[:8]}",
+                    title=title[:255],
+                    suggested_date=suggested,
+                    suggested_time=it.get("suggested_time"),
+                    event_type=event_type,
+                    priority=priority,
+                    source_name=str(it.get("source_name") or "Workspace"),
+                    source_type=str(it.get("source_type") or "document"),
+                    context_snippet=str(it.get("context_snippet") or "")[:500],
                 )
-                if res.status_code == 200:
-                    raw = res.json()["choices"][0]["message"]["content"]
-                    parsed = json.loads(raw)
-                    items = parsed.get("reminders", [])
-                    for idx, it in enumerate(items[:4]):
-                        if it.get("title") and it.get("title").lower() not in existing_titles:
-                            detected.append(
-                                DetectedReminderItem(
-                                    id=f"ai-rem-{uuid.uuid4().hex[:8]}",
-                                    title=it.get("title"),
-                                    suggested_date=it.get("suggested_date") or (date.today() + timedelta(days=2)).isoformat(),
-                                    suggested_time=it.get("suggested_time") or "02:00 PM",
-                                    event_type=CalendarEventType(it.get("event_type", "meeting")),
-                                    priority=CalendarEventPriority(it.get("priority", "high")),
-                                    source_name=it.get("source_name") or "Meeting MoM",
-                                    source_type=it.get("source_type") or "meeting_mom",
-                                    context_snippet=it.get("context_snippet") or "Detected from meeting synthesis.",
-                                )
-                            )
-                    if detected:
-                        return detected
-        except Exception as exc:
-            logger.warning("Groq reminder extraction fallback: %s", exc)
+            )
+        if detected:
+            return detected
 
     # 4. Deterministic Heuristic Extractor (analyzes action items and sessions)
     future_day = 1

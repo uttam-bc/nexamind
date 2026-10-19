@@ -40,6 +40,7 @@ class TransactionResponse(BaseModel):
 class RunwaySummaryResponse(BaseModel):
     total_income: float
     total_expenses: float
-    net_burn_rate: float
+    net_burn_rate: float  # average monthly net outflow over the last 90 days
     cash_balance: float
-    runway_months: float | None = None  # None if net_burn_rate <= 0 (profitable / neutral)
+    runway_months: float | None = None  # None when not burning cash
+    is_profitable: bool = False

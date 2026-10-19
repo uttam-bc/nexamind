@@ -94,9 +94,15 @@ async def update_document(
     if data.icon is not None:
         document.icon = data.icon
     if data.parent_id is not None:
-        if data.parent_id == document_id:
-            raise AuthError("A document cannot be its own parent", status_code=400)
-        await get_document(db, workspace_id, data.parent_id, user_id)
+        # Walk up from the new parent; reaching this document would create a cycle.
+        ancestor_id: UUID | None = data.parent_id
+        for _ in range(1000):
+            if ancestor_id is None:
+                break
+            if ancestor_id == document_id:
+                raise AuthError("A page cannot be moved inside itself or one of its sub-pages", status_code=400)
+            ancestor = await get_document(db, workspace_id, ancestor_id, user_id)
+            ancestor_id = ancestor.parent_id
         document.parent_id = data.parent_id
 
     await db.flush()

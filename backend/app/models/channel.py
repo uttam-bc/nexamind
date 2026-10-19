@@ -25,6 +25,7 @@ class Channel(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_direct: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -48,6 +49,40 @@ class Channel(Base):
     workspace: Mapped["Workspace"] = relationship(back_populates="channels")
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
     messages: Mapped[list["Message"]] = relationship(back_populates="channel", cascade="all, delete-orphan")
+    members: Mapped[list["ChannelMember"]] = relationship(back_populates="channel", cascade="all, delete-orphan")
+
+
+class ChannelMember(Base):
+    """Who may see a private channel or direct message.
+
+    Public channels are visible to every workspace member and have no rows here.
+    A direct message participant does not need to belong to the channel's workspace.
+    """
+
+    __tablename__ = "channel_members"
+    __table_args__ = (UniqueConstraint("channel_id", "user_id", name="uq_channel_members_channel_user"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+    channel: Mapped["Channel"] = relationship(back_populates="members")
 
 
 class Message(Base):

@@ -1,3 +1,14 @@
+"""NexaMind copilot: an LLM tool-use loop grounded in workspace memory.
+
+Flow for each chat turn:
+1. Load (or create) the caller's own chat session and its recent history.
+2. Retrieve relevant long-term memories and list workspace documents as context.
+3. Ask the model (Gemini, falling back to Groq) with tool declarations; execute the tools it calls
+   and feed results back until it answers or the round limit is reached.
+4. With no reachable model, run the offline command parser instead and describe the results.
+5. Persist the turn.
+"""
+
 import json
 import logging
 import os
@@ -6,48 +17,27 @@ from datetime import date as d_date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import Channel, Document, User
+from app.models import Document, User, Workspace
 from app.models.ai import AiMessage, AiSession
-from app.services.agent_tools import (
-    create_calendar_event_tool,
-    create_channel_tool,
-    create_commit_tool,
-    create_document_tool,
-    create_issue_tool,
-    create_repo_tool,
-    create_task_tool,
-    create_transaction_tool,
-    edit_document_tool,
-    generate_report_tool,
-    get_document_tool,
-    post_channel_message_tool,
-    search_documents_tool,
-    search_finance_tool,
-    search_sessions_tool,
-    switch_workspace_tool,
-    update_task_status_tool,
-)
-from app.services.memory_engine import (
-    extract_text_from_document,
-    retrieve_memories,
-    sync_all_workspace_documents_to_memory,
-)
+from app.services import agent_tools as tools
+from app.services import llm_client
+from app.services.agent_planner import PlannedCall, plan
+from app.services.auth_service import AuthError
+from app.services.memory_engine import retrieve_memories, sync_all_workspace_documents_to_memory
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
-GEMINI_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3-flash-preview",
-    "gemini-flash-lite-latest",
-    "gemini-flash-latest",
-]
+MAX_TOOL_RESULT_CHARS = 8000
+HISTORY_MESSAGES = 20
 
+
+# ---------------------------------------------------------------------------------------------
+# Tool execution
+# ---------------------------------------------------------------------------------------------
 
 async def execute_tool(
     tool_name: str,
@@ -56,55 +46,44 @@ async def execute_tool(
     workspace_id: UUID,
     user: User,
 ) -> dict[str, Any]:
-    """Executes an agent tool call against the workspace database and updates memory."""
-    # 0. Workspace Switch
-    if tool_name == "switch_workspace":
-        return await switch_workspace_tool(
-            db,
-            user,
-            target_query=tool_args.get("target", "solo"),
-        )
+    """Run one tool. Failures come back as {"error": ...} instead of raising."""
+    args = {k: v for k, v in (tool_args or {}).items() if v is not None}
+    declaration = next((t for t in tools.AVAILABLE_TOOLS if t["name"] == tool_name), None)
+    if declaration is None:
+        return {"error": f"Unknown tool '{tool_name}'"}
+    missing = [r for r in declaration.get("parameters", {}).get("required", []) if r not in args or args[r] in ("", None)]
+    if missing:
+        return {"error": f"Missing required argument(s): {', '.join(missing)}"}
 
-    # 1. Documents
-    elif tool_name == "create_document":
-        res = await create_document_tool(
-            db,
-            workspace_id,
-            user,
-            title=tool_args.get("title", "Untitled Document"),
-            content_text=tool_args.get("content_text", ""),
-        )
-        return res
-    elif tool_name == "edit_document":
-        return await edit_document_tool(
-            db,
-            workspace_id,
-            user,
-            doc_query=tool_args.get("doc_query", "Untitled Document"),
-            new_content_text=tool_args.get("new_content_text", ""),
-            mode=tool_args.get("mode", "append"),
-        )
-    elif tool_name == "get_document":
-        return await get_document_tool(
-            db,
-            workspace_id,
-            doc_query=tool_args.get("doc_query", ""),
-            user=user,
-            target_group=tool_args.get("target_group"),
-        )
-    elif tool_name == "search_documents":
-        docs = await search_documents_tool(
-            db,
-            workspace_id,
-            tool_args.get("query", ""),
-            user=user,
-            search_all_groups=tool_args.get("search_all_groups", False),
-        )
+    try:
+        result = await _dispatch(tool_name, args, db, workspace_id, user)
+    except (tools.ToolError, AuthError) as exc:
+        # Raised by validation/access checks before anything is written.
+        return {"error": exc.args[0] if exc.args else str(exc)}
+    except Exception:
+        logger.exception("Tool %s failed", tool_name)
+        await db.rollback()
+        await db.refresh(user)
+        return {"error": f"The {tool_name} action failed unexpectedly."}
+    return tools.to_json_safe(result)
+
+
+async def _dispatch(name: str, a: dict, db: AsyncSession, ws: UUID, user: User) -> dict:
+    if name == "switch_workspace":
+        return await tools.switch_workspace_tool(db, user, str(a["target"]))
+    if name == "search_documents":
+        docs = await tools.search_documents_tool(db, ws, str(a["query"]), user=user,
+                                                 search_all_groups=bool(a.get("search_all_groups")))
         return {"documents": docs, "count": len(docs)}
-
-    # 2. Meetings & Sessions
-    elif tool_name == "search_sessions":
-        sessions = await search_sessions_tool(db, workspace_id, tool_args.get("query", ""))
+    if name == "get_document":
+        return await tools.get_document_tool(db, ws, str(a["doc_query"]), user=user, target_group=a.get("target_group"))
+    if name == "create_document":
+        return await tools.create_document_tool(db, ws, user, str(a["title"]), str(a.get("content_text", "")))
+    if name == "edit_document":
+        return await tools.edit_document_tool(db, ws, user, str(a["doc_query"]), str(a["new_content_text"]),
+                                              str(a.get("mode", "append")))
+    if name == "search_sessions":
+        sessions = await tools.search_sessions_tool(db, ws, str(a.get("query", "")))
         return {"sessions": sessions, "count": len(sessions)}
 
     # 3. Tasks & Kanban
@@ -234,74 +213,136 @@ async def call_gemini(
 
     # Add current user prompt
     contents.append({"role": "user", "parts": [{"text": prompt}]})
+    config = {"temperature": 0.3, "maxOutputTokens": 4096}
 
-    payload = {
-        "system_instruction": {"parts": [{"text": system_instruction}]},
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.25,
-            "maxOutputTokens": 2000,
-        },
-    }
+    for _ in range(get_settings().agent_max_tool_rounds):
+        candidate = await llm_client.gemini_generate(api_key, contents, system=system, tools=tools.AVAILABLE_TOOLS,
+                                                     generation_config=config)
+        if candidate is None:
+            raise _NoModel()
+        parts = candidate.get("content", {}).get("parts") or []
+        calls = [p["functionCall"] for p in parts if "functionCall" in p]
+        if not calls:
+            return llm_client.candidate_text(candidate)
+        contents.append(candidate["content"])
+        responses = []
+        for call in calls:
+            result = await _execute_logged(call.get("name", ""), call.get("args") or {}, ctx)
+            responses.append({"functionResponse": {"name": call.get("name", ""), "response": _for_model(result)}})
+        contents.append({"role": "user", "parts": responses})
+    return await _final_answer_without_tools(api_key, contents, system)
 
-    timeout_config = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0)
 
-    for model in GEMINI_MODELS:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
-        try:
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                        if text:
-                            logger.info("Gemini (%s) response generated successfully (%d chars)", model, len(text))
-                            return text.strip()
-                else:
-                    logger.warning("Gemini model %s returned status %d: %s", model, res.status_code, res.text[:200])
-        except Exception as exc:
-            logger.warning("Gemini invocation error on %s: %s", model, exc)
+async def _final_answer_without_tools(api_key: str, contents: list[dict], system: str) -> str:
+    contents = contents + [{"role": "user", "parts": [{"text": "Summarize what you did and found so far for the user."}]}]
+    candidate = await llm_client.gemini_generate(api_key, contents, system=system)
+    return llm_client.candidate_text(candidate) or "I reached my step limit for this request."
+
+
+async def _run_groq(system: str, history: list[dict], prompt: str, ctx: dict) -> str:
+    messages = [{"role": "system", "content": system}]
+    messages += [{"role": t["role"], "content": t["content"]} for t in history if t["content"].strip()]
+    messages.append({"role": "user", "content": prompt})
+
+    for _ in range(get_settings().agent_max_tool_rounds):
+        message = await llm_client.groq_chat(messages, tools=tools.AVAILABLE_TOOLS)
+        if message is None:
+            raise _NoModel()
+        tool_calls = message.get("tool_calls") or []
+        if not tool_calls:
+            return (message.get("content") or "").strip()
+        messages.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": tool_calls})
+        for call in tool_calls:
+            fn = call.get("function", {})
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = await _execute_logged(fn.get("name", ""), args, ctx)
+            messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": json.dumps(_for_model(result))})
+    return "I reached my step limit for this request. Here is what I did so far:\n\n" + _describe_actions(ctx["log"])
+
+
+async def _execute_logged(name: str, args: dict, ctx: dict) -> dict:
+    result = await execute_tool(name, args, ctx["db"], ctx["workspace_id"], ctx["user"])
+    ctx["log"].append({"tool": name, "args": tools.to_json_safe(args), "result": result})
+    return result
+
+
+# ---------------------------------------------------------------------------------------------
+# Offline path
+# ---------------------------------------------------------------------------------------------
+
+async def _run_offline(prompt: str, ctx: dict, memories: list[dict]) -> str:
+    planned = plan(prompt).calls
+    for call in planned:
+        await _execute_planned(call, ctx)
+    if ctx["log"]:
+        return _describe_actions(ctx["log"])
+
+    lines = ["No AI model is configured, so I can only run explicit commands such as "
+             "“create a task 'Fix login bug'”, “log an expense of $40 for Hosting”, or "
+             "“schedule a meeting 'Retro' tomorrow at 3 PM”."]
+    if memories:
+        lines.append("\nHere is what I found in your workspace that may be relevant:")
+        lines += [f"- **{m['title']}** ({m.get('source_title') or m['source_type']}): {m['content']}" for m in memories[:6]]
+    return "\n".join(lines)
+
+
+async def _execute_planned(call: PlannedCall, ctx: dict) -> None:
+    result = await _execute_logged(call.tool, call.args, ctx)
+    if call.expand != "tasks_from_action_items" or "error" in result:
+        return
+    sessions = [s for s in result.get("sessions", []) if s.get("action_items")]
+    if not sessions:
+        ctx["notes"].append("I couldn't find a meeting with action items.")
+        return
+    meeting = sessions[0]
+    ctx["notes"].append(f"Action items from the meeting **{meeting['title']}**:")
+    for item in meeting["action_items"]:
+        await _execute_logged("create_task", {"title": str(item)[:255],
+                                              "description": f"From meeting: {meeting['title']}"}, ctx)
+
+
+def _describe_actions(log: list[dict], notes: list[str] | None = None) -> str:
+    lines = list(notes or [])
+    for entry in log:
+        result = entry["result"]
+        if "error" in result:
+            lines.append(f"- ⚠️ `{entry['tool']}`: {result['error']}")
             continue
-
-    return None
-
-
-async def call_groq(
-    prompt: str,
-    system_instruction: str,
-    history: list[dict],
-    groq_key: str,
-) -> str | None:
-    """Backup LLM inference via Groq."""
-    try:
-        messages = [{"role": "system", "content": system_instruction}]
-        for turn in history[-8:]:
-            messages.append({
-                "role": "user" if turn.get("role") == "user" else "assistant",
-                "content": turn.get("content", ""),
-            })
-        messages.append({"role": "user", "content": prompt})
-
-        timeout_config = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            res = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "llama-3.1-70b-versatile",
-                    "messages": messages,
-                    "temperature": 0.3,
-                    "max_tokens": 1000,
-                },
+        tool = entry["tool"]
+        if tool == "search_finance":
+            m = result.get("metrics", {})
+            runway = m.get("runway_months")
+            runway_text = "not burning cash" if runway is None else f"{runway} months"
+            lines.append(
+                f"- **Cash Balance:** ${m.get('cash_balance', 0):,.2f}\n"
+                f"- **Total income:** ${m.get('total_income', 0):,.2f} · **Total expenses:** ${m.get('total_expenses', 0):,.2f}\n"
+                f"- **Monthly net burn (last 90 days):** ${m.get('net_burn_rate', 0):,.2f}\n"
+                f"- **Runway:** {runway_text}"
             )
-            if res.status_code == 200:
-                return res.json()["choices"][0]["message"]["content"].strip()
-    except Exception as exc:
-        logger.warning("Groq fallback exception: %s", exc)
-    return None
+        elif tool == "search_sessions":
+            sessions = result.get("sessions", [])
+            if not sessions:
+                lines.append("- No matching meetings found.")
+            for s in sessions[:5]:
+                items = "; ".join(s.get("action_items") or []) or "none"
+                lines.append(f"- **{s['title']}** — action items: {items}")
+        elif tool == "search_documents":
+            docs = result.get("documents", [])
+            lines.append(f"- Found {len(docs)} document(s)" + (":" if docs else "."))
+            lines += [f"  - **{d['title']}**: {d['content_preview'][:120]}" for d in docs[:10]]
+        elif tool == "get_document":
+            lines.append(f"- {result.get('message')}\n\n{result.get('content', '')[:3000]}")
+        else:
+            lines.append(f"- ✅ {result.get('message') or f'Ran {tool}.'}")
+    return "\n".join(lines) if lines else "Done."
 
+
+# ---------------------------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------------------------
 
 async def run_agent(
     db: AsyncSession,
@@ -309,7 +350,6 @@ async def run_agent(
     user: User,
     user_prompt: str,
     session_id: UUID | None = None,
-    gemini_key_override: str | None = None,
 ) -> dict:
     """Orchestrates the NexaMind Agentic AI:
     1. Synchronize all workspace documents to memory
@@ -671,18 +711,19 @@ async def run_agent(
     agent_msg = AiMessage(
         session_id=ai_session.id,
         role="assistant",
-        content=final_response,
-        tool_calls=tool_executions,
-        retrieved_memories=retrieved_mems,
-    )
-    db.add(agent_msg)
-    ai_session.updated_at = datetime.now()
+        content=response,
+        tool_calls=ctx["log"],
+        retrieved_memories=memories,
+    ))
+    stored_session = await db.get(AiSession, session_ref)
+    if stored_session is not None:
+        stored_session.updated_at = datetime.now()
     await db.commit()
 
     return {
-        "session_id": str(ai_session.id),
-        "session_title": ai_session.title,
-        "response": final_response,
-        "tool_calls": tool_executions,
-        "retrieved_memories": retrieved_mems,
+        "session_id": str(session_ref),
+        "session_title": session_title,
+        "response": response,
+        "tool_calls": ctx["log"],
+        "retrieved_memories": memories,
     }

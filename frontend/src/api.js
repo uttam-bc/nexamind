@@ -1,4 +1,16 @@
-const API_BASE = '';
+// Empty in development (Vite proxies API paths); set VITE_API_URL when the API is on another origin.
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
+// Opens an authenticated WebSocket. The token goes in the first frame, never in the URL.
+export function openSocket(path) {
+  const url = new URL(path, API_BASE || window.location.origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(url.toString());
+  ws.addEventListener('open', () => {
+    ws.send(JSON.stringify({ type: 'auth', token: getAuthToken() }));
+  });
+  return ws;
+}
 
 export function getAuthToken() {
   return localStorage.getItem('nexamind_token') || '';
@@ -54,16 +66,25 @@ async function request(path, options = {}) {
     data = {};
   }
 
+  if (res.status === 401 && token) {
+    // Token expired or revoked: let the app return to the login screen.
+    window.dispatchEvent(new CustomEvent('nexamind:unauthorized'));
+  }
+
   if (!res.ok) {
     let errorMsg = 'Request failed';
     if (typeof data.detail === 'string') {
       errorMsg = data.detail;
     } else if (Array.isArray(data.detail)) {
-      errorMsg = data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ');
+      errorMsg = data.detail
+        .map((d) => (d.msg || JSON.stringify(d)).replace(/^Value error, /, ''))
+        .join(', ');
     } else if (data.message) {
       errorMsg = data.message;
     } else if (res.status === 401) {
       errorMsg = 'Session expired or not logged in. Please log in again.';
+    } else if (res.status === 429) {
+      errorMsg = 'Too many requests. Please wait a moment and try again.';
     } else if (res.status === 404) {
       errorMsg = 'Workspace or endpoint not found.';
     } else {
@@ -235,6 +256,20 @@ export const api = {
       method: 'POST',
       body: formData,
     }),
+  downloadFile: async (wsId, fileId, filename) => {
+    const res = await fetch(`${API_BASE}/workspaces/${wsId}/files/${fileId}/download`, {
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+    });
+    if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename || 'download';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
   deleteFile: (wsId, fileId) =>
     request(`/workspaces/${wsId}/files/${fileId}`, {
       method: 'DELETE',
@@ -312,13 +347,11 @@ export const api = {
     }),
 
   // AI Agent & Long-Term Memory
-  chatWithAgent: (wsId, payload) => {
-    const body = typeof payload === 'string' ? { prompt: payload } : payload;
-    return request(`/workspaces/${wsId}/ai/chat`, {
+  chatWithAgent: (wsId, prompt, sessionId = null) =>
+    request(`/workspaces/${wsId}/ai/chat`, {
       method: 'POST',
-      body: JSON.stringify(body),
-    });
-  },
+      body: JSON.stringify({ prompt, session_id: sessionId || undefined }),
+    }),
   listAiSessions: (wsId) => request(`/workspaces/${wsId}/ai/sessions`),
   createAiSession: (wsId) =>
     request(`/workspaces/${wsId}/ai/sessions`, {
@@ -335,20 +368,19 @@ export const api = {
     request(`/workspaces/${wsId}/ai/memory/reindex`, {
       method: 'POST',
     }),
-  testGeminiKey: (arg1, arg2) => {
-    let wsId = arg2 !== undefined ? arg1 : (localStorage.getItem('nexamind_active_workspace') || null);
-    let apiKey = arg2 !== undefined ? arg2 : arg1;
-    if (wsId && wsId.length === 36) {
-      return request(`/workspaces/${wsId}/ai/config/test-gemini`, {
-        method: 'POST',
-        body: JSON.stringify({ api_key: apiKey }),
-      });
-    }
-    return request(`/ai/config/test-gemini`, {
-      method: 'POST',
+  getAiConfig: () => request('/ai/config'),
+  saveGeminiKey: (apiKey) =>
+    request('/ai/config/gemini-key', {
+      method: 'PUT',
       body: JSON.stringify({ api_key: apiKey }),
-    });
-  },
+    }),
+  deleteGeminiKey: () => request('/ai/config/gemini-key', { method: 'DELETE' }),
+  // Tests the given key, or the key the server would use for this user when omitted.
+  testGeminiKey: (apiKey) =>
+    request('/ai/config/test-gemini', {
+      method: 'POST',
+      body: JSON.stringify({ api_key: apiKey || null }),
+    }),
 
   // Calendar & Reminders
   listCalendarEvents: (wsId, eventType) =>

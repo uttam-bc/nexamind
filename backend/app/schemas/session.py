@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, model_validator, Field
 
 from app.models.session import SessionSource, SessionStatus
 
@@ -25,11 +25,21 @@ class SessionUpdate(BaseModel):
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _recording_flag(cls, data):
+        # Server file paths stay private; clients only learn whether a recording exists.
+        if not isinstance(data, dict):
+            data = {k: getattr(data, k) for k in cls.model_fields if hasattr(data, k)} | {"file_path": getattr(data, "file_path", None)}
+        data = dict(data)
+        data["has_recording"] = bool(data.pop("file_path", None))
+        return data
+
     id: UUID
     workspace_id: UUID
     title: str
     source: SessionSource
-    file_path: str | None = None
+    has_recording: bool = False
     file_size: int | None = None
     mime_type: str | None = None
     transcript: str | None = None

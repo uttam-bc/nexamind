@@ -12,13 +12,33 @@ services:
       - key: DEBUG
         value: "false"
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: nexamind-db
+          property: connectionString
       - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
         generateValue: true
       - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
+      # Comma-separated list of frontend origins, e.g. https://nexamind.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      # Set when running more than one instance so real-time events and presence are shared.
+      - key: REDIS_URL
+        sync: false
       - key: LOG_LEVEL
         value: INFO
+    # Uploaded files live on local disk. On a paid plan, attach a persistent disk so they
+    # survive deploys:
+    # disk:
+    #   name: nexamind-uploads
+    #   mountPath: /data
+    #   sizeGB: 5
 
 databases:
   - name: nexamind-db

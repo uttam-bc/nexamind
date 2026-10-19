@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
+import { isKnownTab } from './lib/navigation';
 import {
   Bot,
   Search,
@@ -21,18 +22,21 @@ import {
 
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
-import Meetings from './components/Meetings';
-import Documents from './components/Documents';
-import KanbanBoard from './components/KanbanBoard';
-import CodeWorkspace from './components/CodeWorkspace';
-import Channels from './components/Channels';
-import WorkspaceSettings from './components/WorkspaceSettings';
+// Feature screens load on first use to keep the initial bundle small.
+const Meetings = lazy(() => import('./components/Meetings'));
+const Documents = lazy(() => import('./components/Documents'));
+const KanbanBoard = lazy(() => import('./components/KanbanBoard'));
+const CodeWorkspace = lazy(() => import('./components/CodeWorkspace'));
+const Channels = lazy(() => import('./components/Channels'));
+const WorkspaceSettings = lazy(() => import('./components/WorkspaceSettings'));
+const FileManager = lazy(() => import('./components/FileManager'));
+const ReportSynthesizer = lazy(() => import('./components/ReportSynthesizer'));
 import CommandPalette from './components/CommandPalette';
-import AiAssistant from './components/AiAssistant';
-import SoloChat from './components/SoloChat';
-import CalendarView from './components/CalendarView';
+const AiAssistant = lazy(() => import('./components/AiAssistant'));
+const SoloChat = lazy(() => import('./components/SoloChat'));
+const CalendarView = lazy(() => import('./components/CalendarView'));
 import AiReminderToast from './components/AiReminderToast';
-import FinanceTracker from './components/FinanceTracker';
+const FinanceTracker = lazy(() => import('./components/FinanceTracker'));
 import LandingPage from './pages/LandingPage';
 import CreateGroupModal from './components/CreateGroupModal';
 
@@ -61,7 +65,22 @@ export default function App() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // Active module navigation
-  const [activeTab, setActiveTab] = useState('dashboard');
+  // The active tab lives in the URL hash (#/documents), so refresh, links and Back work.
+  const readTabFromHash = () => {
+    const tab = window.location.hash.replace(/^#\/?/, '');
+    return isKnownTab(tab) ? tab : 'dashboard';
+  };
+  const [activeTab, setActiveTabState] = useState(readTabFromHash);
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab);
+    if (readTabFromHash() !== tab) window.location.hash = `/${tab}`;
+  };
+
+  useEffect(() => {
+    const onHashChange = () => setActiveTabState(readTabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   // Module data
   const [tasks, setTasks] = useState([]);
@@ -129,7 +148,12 @@ export default function App() {
   const loadWorkspaceData = async (wsId) => {
     try {
       // Always keep unread counts updated
-      api.getChannelUnreads(wsId).then(setUnreadCounts).catch(() => {});
+      api
+        .getChannelUnreads(wsId)
+        .then((list) =>
+          setUnreadCounts(Object.fromEntries((list || []).map((u) => [u.channel_id, u.unread_count])))
+        )
+        .catch(() => {});
 
       if (activeTab === 'dashboard') {
         const [tList, fSum, sList, dList, cList] = await Promise.all([
@@ -166,6 +190,17 @@ export default function App() {
       } else if (activeTab === 'code') {
         const rList = await api.listRepos(wsId).catch(() => []);
         setRepos(rList);
+      } else if (activeTab === 'files') {
+        setFilesList(await api.listFiles(wsId).catch(() => []));
+      } else if (activeTab === 'reports') {
+        const [rList, sList, dList] = await Promise.all([
+          api.listReports(wsId).catch(() => []),
+          api.listSessions(wsId).catch(() => []),
+          api.listDocuments(wsId).catch(() => []),
+        ]);
+        setReports(rList);
+        setSessions(sList);
+        setDocuments(dList);
       }
     } catch (err) {
       console.error('Error loading module data', err);
@@ -237,6 +272,12 @@ export default function App() {
     setWorkspaces([]);
     setCurrentWorkspace(null);
   };
+
+  // Any API call that comes back 401 (expired or revoked token) signs the user out.
+  useEffect(() => {
+    window.addEventListener('nexamind:unauthorized', handleLogout);
+    return () => window.removeEventListener('nexamind:unauthorized', handleLogout);
+  }, []);
 
   // If not logged in, render the pre-login Landing Page (Item 5)
   if (!token) {
@@ -366,6 +407,7 @@ export default function App() {
         {/* Canvas Area */}
         <main className="flex-1 flex overflow-hidden bg-[#F8FAFC] relative">
           <div className="flex-1 p-6 md:p-8 overflow-y-auto h-full">
+            <Suspense fallback={<div className="text-sm text-slate-500" role="status">Loading…</div>}>
             {activeTab === 'dashboard' && (
               <Dashboard
                 workspaceId={currentWorkspace?.id}
@@ -489,6 +531,26 @@ export default function App() {
                 onBack={handleBackToDashboard}
               />
             )}
+
+            {activeTab === 'files' && (
+              <FileManager
+                workspaceId={currentWorkspace?.id}
+                filesList={filesList}
+                onRefreshFiles={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+
+            {activeTab === 'reports' && (
+              <ReportSynthesizer
+                workspaceId={currentWorkspace?.id}
+                reports={reports}
+                sessions={sessions}
+                documents={documents}
+                onRefreshReports={() => loadWorkspaceData(currentWorkspace?.id)}
+                onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
+            </Suspense>
           </div>
         </main>
       </div>

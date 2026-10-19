@@ -2,7 +2,6 @@ from uuid import UUID
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -22,7 +21,7 @@ from app.services.session_service import (
     delete_session,
     get_session,
     list_sessions,
-    process_session_pipeline,
+    schedule_session_pipeline,
     update_session,
     upload_session_file,
 )
@@ -46,7 +45,6 @@ async def get_workspace_sessions(
 @router.post("/upload", response_model=SessionResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_meeting_session(
     workspace_id: UUID,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(None),
     current_user: User = Depends(get_current_user),
@@ -61,8 +59,9 @@ async def upload_meeting_session(
         {"event": "session_created", "workspace_id": str(workspace_id), "data": session_data},
     )
 
-    # Schedule background transcription & summarization pipeline
-    background_tasks.add_task(process_session_pipeline, session.id, workspace_id)
+    # Commit first so the background pipeline (its own DB session) can see the record.
+    await db.commit()
+    schedule_session_pipeline(session.id, workspace_id)
     return SessionResponse.model_validate(session)
 
 

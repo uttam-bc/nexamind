@@ -17,10 +17,10 @@ import {
   Sparkles,
   Database,
   ArrowRight,
-  AlertCircle,
   Hash,
 } from 'lucide-react';
 import { api } from '../api';
+import GeminiKeySettings from './GeminiKeySettings';
 import FeatureHeader from './FeatureHeader';
 
 export default function WorkspaceSettings({
@@ -44,9 +44,6 @@ export default function WorkspaceSettings({
   const [inviteSuccessMsg, setInviteSuccessMsg] = useState('');
 
   // AI & Gemini Key configuration
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('nexamind_gemini_key') || '');
-  const [isTestingKey, setIsTestingKey] = useState(false);
-  const [keyTestResult, setKeyTestResult] = useState(null);
   const [memoryStats, setMemoryStats] = useState(null);
   const [isReindexing, setIsReindexing] = useState(false);
 
@@ -143,36 +140,6 @@ export default function WorkspaceSettings({
     navigator.clipboard.writeText(text);
     setInviteSuccessMsg(`Invite details copied for @${targetUser.username}! Share join code: ${workspace.join_code}`);
     setTimeout(() => setInviteSuccessMsg(''), 4000);
-  };
-
-  const handleTestGeminiKey = async () => {
-    if (!geminiApiKey.trim()) {
-      setKeyTestResult({ ok: false, message: 'Please enter a Gemini API Key first.' });
-      return;
-    }
-    setIsTestingKey(true);
-    setKeyTestResult(null);
-    try {
-      const res = await api.testGeminiKey(workspaceId, geminiApiKey.trim());
-      if (res.valid || res.ok || res.status === 'success') {
-        setKeyTestResult({
-          ok: true,
-          message: `Connected successfully! Model: ${res.model || 'gemini-3.8-flash'}`,
-        });
-        localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
-      } else {
-        setKeyTestResult({ ok: false, message: res.message || res.error || 'Invalid Gemini API key.' });
-      }
-    } catch (err) {
-      setKeyTestResult({ ok: false, message: err.message });
-    } finally {
-      setIsTestingKey(false);
-    }
-  };
-
-  const handleSaveGeminiKey = () => {
-    localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
-    alert('Gemini API Key saved for this workspace!');
   };
 
   const handleReindexMemory = async () => {
@@ -491,63 +458,7 @@ export default function WorkspaceSettings({
                 </p>
               </div>
 
-              {/* Gemini Key Config Card */}
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Key className="w-4 h-4 text-indigo-600" />
-                    <span className="font-bold text-sm text-slate-900">Google Gemini API Key</span>
-                  </div>
-                  <span className="text-xs text-slate-500 font-mono">Multi-model Fallback Active</span>
-                </div>
-
-                <div className="space-y-2">
-                  <input
-                    type="password"
-                    placeholder="AIzaSy..."
-                    value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 font-mono"
-                  />
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Used for autonomous multi-turn reasoning, tool execution, and episodic memory extraction. Supports Gemini 2.0 Flash and 1.5 Flash.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <button
-                    onClick={handleTestGeminiKey}
-                    disabled={isTestingKey}
-                    className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingKey ? 'animate-spin' : ''}`} />
-                    <span>{isTestingKey ? 'Verifying...' : 'Test Connection'}</span>
-                  </button>
-                  <button
-                    onClick={handleSaveGeminiKey}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
-                  >
-                    Save API Key
-                  </button>
-                </div>
-
-                {keyTestResult && (
-                  <div
-                    className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                      keyTestResult.ok
-                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                        : 'bg-rose-50 text-rose-800 border border-rose-200'
-                    }`}
-                  >
-                    {keyTestResult.ok ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                    )}
-                    <span>{keyTestResult.message}</span>
-                  </div>
-                )}
-              </div>
+              <GeminiKeySettings />
 
               {/* 4-Stage Memory Pipeline Card (Item 6) */}
               <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Send,
   Sparkles,
-  CheckCircle2,
   FolderKanban,
   FileText,
   MessageSquare,
@@ -21,12 +20,12 @@ import {
   ChevronRight,
   Database,
   RefreshCw,
-  AlertCircle,
   ExternalLink,
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
 import FormattedChatMessage from './FormattedChatMessage';
+import GeminiKeySettings from './GeminiKeySettings';
 
 export default function AiAssistant({
   workspaceId,
@@ -66,9 +65,8 @@ export default function AiAssistant({
   const [showMemoryDrawer, setShowMemoryDrawer] = useState(false);
   const [isReindexing, setIsReindexing] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('nexamind_gemini_key') || '');
-  const [keyTestStatus, setKeyTestStatus] = useState(null); // { ok: bool, message: string }
-  const [isTestingKey, setIsTestingKey] = useState(false);
+  const [aiConfig, setAiConfig] = useState(null);
+  const modelConfigured = !!(aiConfig?.has_personal_key || aiConfig?.server_gemini_available || aiConfig?.server_groq_available);
 
   const messagesEndRef = useRef(null);
   const speechRecognitionRef = useRef(null);
@@ -85,11 +83,8 @@ export default function AiAssistant({
       const list = await api.listAiSessions(workspaceId);
       setSessions(list || []);
       if (list && list.length > 0 && !activeSessionId) {
-        // Switch to the most recent session
+        // Switch to the most recent session; with none, the first message starts one.
         selectSession(list[0].id);
-      } else if (!list || list.length === 0) {
-        // No sessions yet, create one
-        handleCreateNewSession();
       }
     } catch (err) {
       console.warn('Could not load sessions:', err);
@@ -170,32 +165,9 @@ export default function AiAssistant({
     }
   };
 
-  const handleTestKey = async () => {
-    if (!geminiApiKey.trim()) {
-      setKeyTestStatus({ ok: false, message: 'Please enter a Gemini API Key first.' });
-      return;
-    }
-    setIsTestingKey(true);
-    setKeyTestStatus(null);
-    try {
-      const res = await api.testGeminiKey(workspaceId, geminiApiKey.trim());
-      if (res.valid || res.ok || res.status === 'success') {
-        setKeyTestStatus({ ok: true, message: `Connected! Model: ${res.model || 'Gemini 3.8 Flash'}` });
-        localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
-      } else {
-        setKeyTestStatus({ ok: false, message: res.message || res.error || 'Invalid API Key' });
-      }
-    } catch (err) {
-      setKeyTestStatus({ ok: false, message: err.message });
-    } finally {
-      setIsTestingKey(false);
-    }
-  };
-
-  const handleSaveApiKey = () => {
-    localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
-    setShowApiKeyModal(false);
-  };
+  useEffect(() => {
+    api.getAiConfig().then(setAiConfig).catch(() => {});
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -261,12 +233,12 @@ export default function AiAssistant({
     setActivePlanSteps([
       'Loading conversation context & episodic memory...',
       'Synthesizing workspace knowledge (docs, tasks, chats)...',
-      'Executing agentic actions via Gemini 2.0...',
+      modelConfigured ? 'Reasoning and running workspace actions...' : 'Running workspace commands...',
     ]);
 
     try {
-      const activeKey = geminiApiKey.trim() || localStorage.getItem('nexamind_gemini_key') || undefined;
-      const res = await api.chatWithAgent(workspaceId, prompt, activeSessionId, activeKey);
+      const res = await api.chatWithAgent(workspaceId, prompt, activeSessionId);
+      if (res.session_id && res.session_id !== activeSessionId) setActiveSessionId(res.session_id);
       setActivePlanSteps([]);
 
       const assistantMsg = {
@@ -377,7 +349,7 @@ export default function AiAssistant({
       <FeatureHeader
         title="Agentic AI Copilot"
         icon={Bot}
-        badge="Gemini 2.0 Autonomous Engine"
+        badge={modelConfigured ? 'AI model connected' : 'Offline command mode'}
         onBack={onBack}
         actions={
           <div className="flex items-center gap-2">
@@ -400,14 +372,14 @@ export default function AiAssistant({
             <button
               onClick={() => setShowApiKeyModal(true)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
-                geminiApiKey
+                modelConfigured
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                   : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 animate-pulse'
               }`}
               title="Configure Google Gemini API Key"
             >
               <Key className="w-3.5 h-3.5" />
-              <span>{geminiApiKey ? 'Gemini Key Configured' : 'Set Gemini Key'}</span>
+              <span>{modelConfigured ? 'AI model connected' : 'Set Gemini key'}</span>
             </button>
           </div>
         }
@@ -695,67 +667,15 @@ export default function AiAssistant({
               </button>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Integrate your Google AI Studio API Key to power live agentic multi-turn conversations and memory consolidation.
-            </p>
+            <GeminiKeySettings compact onChange={setAiConfig} />
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 block">
-                API Key (starts with AIzaSy...)
-              </label>
-              <input
-                type="password"
-                placeholder="Paste Gemini API Key here..."
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 font-mono"
-              />
-            </div>
-
-            {/* Test Connection Button & Status */}
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={handleTestKey}
-                disabled={isTestingKey}
-                className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isTestingKey ? 'animate-spin' : ''}`} />
-                <span>{isTestingKey ? 'Testing Connection...' : 'Test Key Connection'}</span>
-              </button>
-
-              {keyTestStatus && (
-                <div
-                  className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
-                    keyTestStatus.ok
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-rose-50 text-rose-800 border border-rose-200'
-                  }`}
-                >
-                  {keyTestStatus.ok ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{keyTestStatus.message}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="flex items-center justify-end pt-2">
               <button
                 type="button"
                 onClick={() => setShowApiKeyModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveApiKey}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/30 transition active:scale-95"
-              >
-                Save & Activate
+                Done
               </button>
             </div>
           </div>

@@ -4,17 +4,19 @@ import string
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from sqlalchemy import or_, select
+import bcrypt
+import jwt
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models import User, Workspace, WorkspaceMember, WorkspaceRole, WorkspaceType
 from app.schemas.auth import UserCreate
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
+BCRYPT_ROUNDS = 12
+# Verified against when the account does not exist, so login timing does not reveal valid emails.
+_DUMMY_HASH = bcrypt.hashpw(b"nexamind-timing-guard", bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("utf-8")
 
 
 class AuthError(Exception):
@@ -24,40 +26,48 @@ class AuthError(Exception):
         super().__init__(message)
 
 
-import bcrypt
-
 def hash_password(password: str) -> str:
-    salt = bcrypt.gensalt(rounds=10)
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        if bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8")):
-            return True
-    except Exception:
-        pass
-    try:
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except ValueError:
         return False
 
 
 def create_access_token(subject: str) -> str:
-    expire = datetime.now(UTC) + timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    payload = {"sub": subject, "exp": expire}
+    now = datetime.now(UTC)
+    payload = {
+        "sub": subject,
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.jwt_access_token_expire_minutes),
+        "typ": "access",
+    }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
 def decode_access_token(token: str) -> str:
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-        subject = payload.get("sub")
-        if not subject:
-            raise AuthError("Invalid token payload", status_code=401)
-        return subject
-    except JWTError as exc:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "sub"]},
+        )
+    except jwt.PyJWTError as exc:
         raise AuthError("Could not validate credentials", status_code=401) from exc
+    subject = payload.get("sub")
+    if not subject or payload.get("typ", "access") != "access":
+        raise AuthError("Invalid token payload", status_code=401)
+    return subject
+
+
+
+def escape_like(value: str) -> str:
+    """Escape LIKE wildcards; use with `escape="!"`."""
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def generate_join_code(length: int = 8) -> str:
@@ -81,20 +91,43 @@ async def get_user_by_id(db: AsyncSession, user_id: UUID) -> User | None:
     return result.scalar_one_or_none()
 
 
-async def search_users(db: AsyncSession, query: str, limit: int = 10) -> list[User]:
+async def search_users(db: AsyncSession, requester_id: UUID, query: str, limit: int = 10) -> list[User]:
+    """Find people the requester can message.
+
+    Partial matches only cover users who already share a workspace with the requester;
+    anyone else must be looked up by their exact username or email address.
+    """
     clean = query.strip().lstrip("@").lower()
     if not clean:
-        result = await db.execute(select(User).limit(limit))
-        return list(result.scalars().all())
+        return []
 
-    pattern = f"%{clean}%"
-    q = select(User).where(
-        or_(
-            User.username.ilike(pattern),
-            User.name.ilike(pattern),
-            User.email.ilike(pattern),
+    shared_user_ids = (
+        select(WorkspaceMember.user_id)
+        .where(
+            WorkspaceMember.workspace_id.in_(
+                select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == requester_id)
+            )
         )
-    ).limit(limit)
+    )
+    pattern = f"%{escape_like(clean)}%"
+    q = (
+        select(User)
+        .where(
+            or_(
+                and_(
+                    User.id.in_(shared_user_ids),
+                    or_(
+                        User.username.ilike(pattern, escape="!"),
+                        User.name.ilike(pattern, escape="!"),
+                    ),
+                ),
+                User.username == clean,
+                User.email == clean,
+            )
+        )
+        .order_by(User.name.asc())
+        .limit(limit)
+    )
     res = await db.execute(q)
     return list(res.scalars().all())
 
@@ -158,6 +191,9 @@ async def authenticate_user(db: AsyncSession, identifier: str, password: str) ->
     if not user:
         user = await get_user_by_username(db, clean_id)
 
-    if not user or not verify_password(password, user.password_hash):
+    if not user:
+        verify_password(password, _DUMMY_HASH)
+        raise AuthError("Invalid email/username or password", status_code=401)
+    if not verify_password(password, user.password_hash):
         raise AuthError("Invalid email/username or password", status_code=401)
     return user

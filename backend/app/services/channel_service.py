@@ -1,12 +1,35 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models import Channel, Message, User
+from app.models import (
+    Channel,
+    ChannelMember,
+    ChannelReadState,
+    Message,
+    MessageReaction,
+    User,
+    Workspace,
+    WorkspaceType,
+)
 from app.schemas.channel import ChannelCreate, MessageCreate
-from app.services.auth_service import AuthError
+from app.services.auth_service import AuthError, get_user_by_username
 from app.services.workspace_service import get_workspace_membership
+
+# Access rules
+# - Public channel: any member of the channel's workspace.
+# - Private channel: members of the channel's workspace who are also listed in channel_members.
+# - Direct message: only the users listed in channel_members, regardless of workspace membership,
+#   so starting a DM never grants anyone access to the workspace itself.
+
+
+async def _is_channel_member(db: AsyncSession, channel_id: UUID, user_id: UUID) -> bool:
+    result = await db.execute(
+        select(ChannelMember.id).where(ChannelMember.channel_id == channel_id, ChannelMember.user_id == user_id)
+    )
+    return result.first() is not None
 
 
 async def list_channels(
@@ -15,14 +38,27 @@ async def list_channels(
     user_id: UUID,
 ) -> list[Channel]:
     await _require_workspace_access(db, workspace_id, user_id)
-    result = await db.execute(
-        select(Channel)
-        .where(Channel.workspace_id == workspace_id)
-        .order_by(Channel.created_at.asc())
+
+    member_channel_ids = select(ChannelMember.channel_id).where(ChannelMember.user_id == user_id)
+    visible_here = and_(
+        Channel.workspace_id == workspace_id,
+        or_(Channel.is_private.is_(False), Channel.id.in_(member_channel_ids)),
     )
-    channels = list(result.scalars().all())
-    # Ensure default 'general' channel exists if workspace has no channels
-    if not channels:
+    conditions = [visible_here]
+
+    # A user's DMs live in whichever workspace they were started from; show them all in the
+    # user's personal workspace so both participants can find the conversation.
+    workspace = await db.get(Workspace, workspace_id)
+    if workspace is not None and workspace.type == WorkspaceType.PERSONAL:
+        conditions.append(and_(Channel.is_direct.is_(True), Channel.id.in_(member_channel_ids)))
+
+    result = await db.execute(select(Channel).where(or_(*conditions)).order_by(Channel.created_at.asc()))
+    channels = list(result.scalars().unique().all())
+
+    has_public_channel = await db.execute(
+        select(Channel.id).where(Channel.workspace_id == workspace_id, Channel.is_private.is_(False)).limit(1)
+    )
+    if has_public_channel.first() is None:
         default_channel = Channel(
             workspace_id=workspace_id,
             name="general",
@@ -33,7 +69,7 @@ async def list_channels(
         db.add(default_channel)
         await db.flush()
         await db.refresh(default_channel)
-        channels.append(default_channel)
+        channels.insert(0, default_channel)
 
     return channels
 
@@ -47,14 +83,37 @@ async def create_channel(
     await _require_workspace_access(db, workspace_id, user.id)
     channel = Channel(
         workspace_id=workspace_id,
-        name=data.name.strip().lower(),
-        description=data.description.strip() if data.description else None,
+        name=data.name.strip(),
+        description=data.description,
         is_private=data.is_private,
         created_by=user.id,
     )
     db.add(channel)
     await db.flush()
+    if channel.is_private:
+        db.add(ChannelMember(channel_id=channel.id, user_id=user.id))
+        await db.flush()
     await db.refresh(channel)
+    return channel
+
+
+async def add_channel_member(
+    db: AsyncSession,
+    workspace_id: UUID,
+    channel_id: UUID,
+    current_user: User,
+    target_username: str,
+) -> Channel:
+    """Invite a workspace member into a private channel the requester belongs to."""
+    channel = await get_channel(db, workspace_id, channel_id, current_user.id)
+    if not channel.is_private or channel.is_direct:
+        raise AuthError("Members can only be added to private channels", status_code=400)
+    target = await get_user_by_username(db, target_username)
+    if not target or not await get_workspace_membership(db, channel.workspace_id, target.id):
+        raise AuthError("That user is not a member of this workspace", status_code=404)
+    if not await _is_channel_member(db, channel.id, target.id):
+        db.add(ChannelMember(channel_id=channel.id, user_id=target.id))
+        await db.flush()
     return channel
 
 
@@ -65,52 +124,52 @@ async def create_or_get_dm_channel(
     target_username: str,
 ) -> Channel:
     await _require_workspace_access(db, workspace_id, current_user.id)
-    from app.services.auth_service import get_user_by_username
     target_user = await get_user_by_username(db, target_username)
     if not target_user:
-        raise AuthError(f"User @{target_username} not found", status_code=404)
-    if target_user.id == current_user.id:
-        u1 = current_user.username or str(current_user.id)[:8]
-        dm_name = f"dm-{u1}-notes"
-        q = select(Channel).where(Channel.workspace_id == workspace_id, Channel.name == dm_name)
-        existing = (await db.execute(q)).scalar_one_or_none()
-        if existing:
-            return existing
-        dm_channel = Channel(
-            workspace_id=workspace_id,
-            name=dm_name,
-            description=f"Personal Notes & Saved Messages for @{current_user.username or current_user.name}",
-            is_private=True,
-            created_by=current_user.id,
+        raise AuthError(f"User @{target_username.lstrip('@')} not found", status_code=404)
+
+    participant_ids = {current_user.id, target_user.id}
+
+    # Reuse an existing conversation between exactly these participants, wherever it was started.
+    candidate_ids = (
+        select(ChannelMember.channel_id)
+        .join(Channel, Channel.id == ChannelMember.channel_id)
+        .where(Channel.is_direct.is_(True))
+        .group_by(ChannelMember.channel_id)
+        .having(func.count(ChannelMember.id) == len(participant_ids))
+    )
+    for user_id in participant_ids:
+        candidate_ids = candidate_ids.where(
+            ChannelMember.channel_id.in_(select(ChannelMember.channel_id).where(ChannelMember.user_id == user_id))
         )
-        db.add(dm_channel)
-        await db.flush()
-        await db.refresh(dm_channel)
-        return dm_channel
-
-    # Ensure target user has membership in workspace
-    target_mem = await get_workspace_membership(db, workspace_id, target_user.id)
-    if not target_mem:
-        from app.models import WorkspaceMember, WorkspaceRole
-        db.add(WorkspaceMember(workspace_id=workspace_id, user_id=target_user.id, role=WorkspaceRole.MEMBER))
-        await db.flush()
-
-    u1, u2 = sorted([current_user.username or str(current_user.id)[:8], target_user.username or str(target_user.id)[:8]])
-    dm_name = f"dm-{u1}-{u2}"
-
-    q = select(Channel).where(Channel.workspace_id == workspace_id, Channel.name == dm_name)
-    existing = (await db.execute(q)).scalar_one_or_none()
+    existing = (
+        await db.execute(select(Channel).where(Channel.id.in_(candidate_ids)).order_by(Channel.created_at.asc()))
+    ).scalars().first()
     if existing:
         return existing
 
+    me = current_user.username or str(current_user.id)[:8]
+    if target_user.id == current_user.id:
+        name = f"dm-{me}-notes"
+        description = f"Personal notes and saved messages for @{me}"
+    else:
+        other = target_user.username or str(target_user.id)[:8]
+        u1, u2 = sorted([me, other])
+        name = f"dm-{u1}-{u2}"
+        description = f"Direct message between @{me} and @{other}"
+
     dm_channel = Channel(
         workspace_id=workspace_id,
-        name=dm_name,
-        description=f"Direct message between @{current_user.username or current_user.name} and @{target_user.username or target_user.name}",
+        name=name,
+        description=description,
         is_private=True,
+        is_direct=True,
         created_by=current_user.id,
     )
     db.add(dm_channel)
+    await db.flush()
+    for user_id in participant_ids:
+        db.add(ChannelMember(channel_id=dm_channel.id, user_id=user_id))
     await db.flush()
     await db.refresh(dm_channel)
     return dm_channel
@@ -122,22 +181,22 @@ async def get_channel(
     channel_id: UUID,
     user_id: UUID,
 ) -> Channel:
+    """Load a channel the user may read. `workspace_id` is the workspace in the request path."""
+    channel = await db.get(Channel, channel_id)
+    if channel is None:
+        raise AuthError("Channel not found", status_code=404)
+
+    if channel.is_direct:
+        if await _is_channel_member(db, channel.id, user_id):
+            return channel
+        raise AuthError("Channel not found", status_code=404)
+
+    if channel.workspace_id != workspace_id:
+        raise AuthError("Channel not found", status_code=404)
     await _require_workspace_access(db, workspace_id, user_id)
-    result = await db.execute(
-        select(Channel).where(
-            Channel.id == channel_id,
-            Channel.workspace_id == workspace_id,
-        )
-    )
-    channel = result.scalar_one_or_none()
-    if not channel:
+    if channel.is_private and not await _is_channel_member(db, channel.id, user_id):
         raise AuthError("Channel not found", status_code=404)
     return channel
-
-
-from sqlalchemy.orm import selectinload
-
-from app.models import Channel, ChannelReadState, Message, MessageReaction, User
 
 
 async def list_messages(
@@ -149,7 +208,7 @@ async def list_messages(
     root_only: bool = False,
     limit: int = 100,
 ) -> list[dict]:
-    await get_channel(db, workspace_id, channel_id, user_id)
+    channel = await get_channel(db, workspace_id, channel_id, user_id)
     query = (
         select(Message)
         .options(
@@ -157,7 +216,7 @@ async def list_messages(
             selectinload(Message.reactions),
             selectinload(Message.replies),
         )
-        .where(Message.channel_id == channel_id, Message.workspace_id == workspace_id)
+        .where(Message.channel_id == channel.id)
     )
 
     if parent_id is not None:
@@ -165,9 +224,10 @@ async def list_messages(
     elif root_only:
         query = query.where(Message.parent_id.is_(None))
 
-    query = query.order_by(Message.created_at.asc()).limit(limit)
+    # Newest `limit` messages, returned oldest first.
+    query = query.order_by(Message.created_at.desc()).limit(limit)
     result = await db.execute(query)
-    messages = list(result.scalars().all())
+    messages = list(reversed(result.scalars().all()))
 
     return [format_message_dict(msg, user_id) for msg in messages]
 
@@ -179,23 +239,18 @@ async def post_message(
     user: User,
     data: MessageCreate,
 ) -> dict:
-    await get_channel(db, workspace_id, channel_id, user.id)
+    channel = await get_channel(db, workspace_id, channel_id, user.id)
 
     if data.parent_id:
         parent_result = await db.execute(
-            select(Message).where(
-                Message.id == data.parent_id,
-                Message.channel_id == channel_id,
-                Message.workspace_id == workspace_id,
-            )
+            select(Message).where(Message.id == data.parent_id, Message.channel_id == channel.id)
         )
-        parent = parent_result.scalar_one_or_none()
-        if not parent:
+        if parent_result.scalar_one_or_none() is None:
             raise AuthError("Parent message not found in this channel", status_code=404)
 
     message = Message(
-        workspace_id=workspace_id,
-        channel_id=channel_id,
+        workspace_id=channel.workspace_id,
+        channel_id=channel.id,
         sender_id=user.id,
         parent_id=data.parent_id,
         content=data.content.strip(),
@@ -204,8 +259,7 @@ async def post_message(
     await db.flush()
     await db.refresh(message)
 
-    # Automatically mark as read for sender
-    await mark_channel_read(db, workspace_id, channel_id, user.id, message.id)
+    await _set_read_state(db, channel.id, user.id, message.id)
 
     return {
         "id": message.id,
@@ -213,6 +267,7 @@ async def post_message(
         "channel_id": message.channel_id,
         "sender_id": message.sender_id,
         "sender_name": user.name,
+        "sender_username": user.username,
         "parent_id": message.parent_id,
         "content": message.content,
         "created_at": message.created_at,
@@ -229,23 +284,14 @@ async def toggle_reaction(
     user_id: UUID,
     emoji: str,
 ) -> list[dict]:
-    await get_channel(db, workspace_id, channel_id, user_id)
+    channel = await get_channel(db, workspace_id, channel_id, user_id)
 
-    # Verify message exists
     msg_res = await db.execute(
-        select(Message)
-        .options(selectinload(Message.reactions))
-        .where(
-            Message.id == message_id,
-            Message.channel_id == channel_id,
-            Message.workspace_id == workspace_id,
-        )
+        select(Message.id).where(Message.id == message_id, Message.channel_id == channel.id)
     )
-    message = msg_res.scalar_one_or_none()
-    if not message:
+    if msg_res.first() is None:
         raise AuthError("Message not found", status_code=404)
 
-    # Check if user already reacted with this emoji
     existing_reaction = await db.execute(
         select(MessageReaction).where(
             MessageReaction.message_id == message_id,
@@ -254,26 +300,14 @@ async def toggle_reaction(
         )
     )
     reaction = existing_reaction.scalar_one_or_none()
-
     if reaction:
         await db.delete(reaction)
     else:
-        new_reaction = MessageReaction(
-            message_id=message_id,
-            user_id=user_id,
-            emoji=emoji,
-        )
-        db.add(new_reaction)
-
+        db.add(MessageReaction(message_id=message_id, user_id=user_id, emoji=emoji))
     await db.flush()
 
-    # Re-fetch updated reactions
-    refreshed = await db.execute(
-        select(MessageReaction).where(MessageReaction.message_id == message_id)
-    )
-    all_reactions = list(refreshed.scalars().all())
-
-    return build_reaction_summaries(all_reactions, user_id)
+    refreshed = await db.execute(select(MessageReaction).where(MessageReaction.message_id == message_id))
+    return build_reaction_summaries(list(refreshed.scalars().all()), user_id)
 
 
 async def mark_channel_read(
@@ -283,16 +317,19 @@ async def mark_channel_read(
     user_id: UUID,
     message_id: UUID | None = None,
 ) -> None:
-    await _require_workspace_access(db, workspace_id, user_id)
+    channel = await get_channel(db, workspace_id, channel_id, user_id)
     if message_id is None:
         latest = await db.execute(
             select(Message.id)
-            .where(Message.channel_id == channel_id, Message.workspace_id == workspace_id)
+            .where(Message.channel_id == channel.id)
             .order_by(Message.created_at.desc())
             .limit(1)
         )
         message_id = latest.scalar_one_or_none()
+    await _set_read_state(db, channel.id, user_id, message_id)
 
+
+async def _set_read_state(db: AsyncSession, channel_id: UUID, user_id: UUID, message_id: UUID | None) -> None:
     state_res = await db.execute(
         select(ChannelReadState).where(
             ChannelReadState.channel_id == channel_id,
@@ -303,12 +340,7 @@ async def mark_channel_read(
     if state:
         state.last_read_message_id = message_id
     else:
-        state = ChannelReadState(
-            channel_id=channel_id,
-            user_id=user_id,
-            last_read_message_id=message_id,
-        )
-        db.add(state)
+        db.add(ChannelReadState(channel_id=channel_id, user_id=user_id, last_read_message_id=message_id))
     await db.flush()
 
 
@@ -317,84 +349,67 @@ async def get_channel_unreads(
     workspace_id: UUID,
     user_id: UUID,
 ) -> list[dict]:
-    await _require_workspace_access(db, workspace_id, user_id)
     channels = await list_channels(db, workspace_id, user_id)
+    if not channels:
+        return []
+    channel_ids = [c.id for c in channels]
+
+    read_states = {
+        s.channel_id: s.last_read_message_id
+        for s in (
+            await db.execute(
+                select(ChannelReadState).where(
+                    ChannelReadState.user_id == user_id,
+                    ChannelReadState.channel_id.in_(channel_ids),
+                )
+            )
+        ).scalars()
+    }
+    read_ids = [mid for mid in read_states.values() if mid]
+    read_times = {}
+    if read_ids:
+        read_times = dict((await db.execute(select(Message.id, Message.created_at).where(Message.id.in_(read_ids)))).all())
 
     unreads = []
-    for chan in channels:
-        state_res = await db.execute(
-            select(ChannelReadState).where(
-                ChannelReadState.channel_id == chan.id,
-                ChannelReadState.user_id == user_id,
-            )
-        )
-        state = state_res.scalar_one_or_none()
-        if not state or not state.last_read_message_id:
-            # Count all messages in channel
-            count_res = await db.execute(
-                select(Message.id).where(Message.channel_id == chan.id)
-            )
-            count = len(count_res.scalars().all())
-        else:
-            # Count messages newer than last_read_message_id
-            last_msg = await db.execute(
-                select(Message).where(Message.id == state.last_read_message_id)
-            )
-            read_msg = last_msg.scalar_one_or_none()
-            if read_msg:
-                newer_res = await db.execute(
-                    select(Message.id).where(
-                        Message.channel_id == chan.id,
-                        Message.created_at > read_msg.created_at,
-                    )
-                )
-                count = len(newer_res.scalars().all())
-            else:
-                count = 0
-
-        unreads.append({"channel_id": chan.id, "unread_count": count})
-
+    for channel_id in channel_ids:
+        query = select(func.count(Message.id)).where(Message.channel_id == channel_id)
+        last_read_id = read_states.get(channel_id)
+        if last_read_id:
+            read_at = read_times.get(last_read_id)
+            if read_at is None:
+                unreads.append({"channel_id": channel_id, "unread_count": 0})
+                continue
+            query = query.where(Message.created_at > read_at)
+        count = (await db.execute(query)).scalar() or 0
+        unreads.append({"channel_id": channel_id, "unread_count": count})
     return unreads
 
 
 def format_message_dict(msg: Message, current_user_id: UUID) -> dict:
-    sender_name = msg.sender.name if msg.sender else None
-    sender_username = msg.sender.username if msg.sender else None
-    reply_count = len(msg.replies) if msg.replies else 0
-    reactions = build_reaction_summaries(msg.reactions or [], current_user_id)
-
     return {
         "id": msg.id,
         "workspace_id": msg.workspace_id,
         "channel_id": msg.channel_id,
         "sender_id": msg.sender_id,
-        "sender_name": sender_name,
-        "sender_username": sender_username,
+        "sender_name": msg.sender.name if msg.sender else None,
+        "sender_username": msg.sender.username if msg.sender else None,
         "parent_id": msg.parent_id,
         "content": msg.content,
         "created_at": msg.created_at,
-        "reply_count": reply_count,
-        "reactions": reactions,
+        "reply_count": len(msg.replies) if msg.replies else 0,
+        "reactions": build_reaction_summaries(msg.reactions or [], current_user_id),
     }
 
 
 def build_reaction_summaries(reactions: list[MessageReaction], current_user_id: UUID) -> list[dict]:
     emoji_map: dict[str, dict] = {}
     for r in reactions:
-        if r.emoji not in emoji_map:
-            emoji_map[r.emoji] = {
-                "emoji": r.emoji,
-                "count": 0,
-                "user_ids": [],
-                "has_reacted": False,
-            }
-        emoji_map[r.emoji]["count"] += 1
-        emoji_map[r.emoji]["user_ids"].append(r.user_id)
+        entry = emoji_map.setdefault(r.emoji, {"emoji": r.emoji, "count": 0, "user_ids": [], "has_reacted": False})
+        entry["count"] += 1
+        entry["user_ids"].append(r.user_id)
         if r.user_id == current_user_id:
-            emoji_map[r.emoji]["has_reacted"] = True
-
+            entry["has_reacted"] = True
     return list(emoji_map.values())
-
 
 
 async def _require_workspace_access(

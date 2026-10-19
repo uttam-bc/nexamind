@@ -88,7 +88,13 @@ export default function FinanceTracker({
   const cashBalance = financeSummary?.cash_balance ?? 125000;
   const totalIncome = financeSummary?.total_income ?? 45000;
   const totalExpenses = financeSummary?.total_expenses ?? 18500;
-  const runwayMonths = financeSummary?.runway_months ?? 12;
+  // runway_months is null when the workspace isn't burning cash.
+  const runwayMonths = financeSummary?.runway_months;
+  const runwayLabel = !financeSummary
+    ? '—'
+    : runwayMonths == null
+      ? 'No burn'
+      : `${runwayMonths} ${runwayMonths === 1 ? 'Month' : 'Months'}`;
 
   return (
     <div className="h-full flex flex-col space-y-5 max-w-7xl mx-auto pb-6 font-sans text-slate-900 select-none">
@@ -178,9 +184,11 @@ export default function FinanceTracker({
             </div>
           </div>
           <div className="text-2xl font-bold text-[#8B5CF6] tracking-tight">
-            {runwayMonths} Months
+            {runwayLabel}
           </div>
-          <p className="text-[10px] font-mono text-[#10B981] font-semibold">Burn Rate Stable</p>
+          <p className="text-[10px] font-mono text-slate-500 font-semibold">
+            {financeSummary ? `Net burn ${Number(financeSummary.net_burn_rate || 0).toLocaleString()}/mo (90-day avg)` : 'Loading…'}
+          </p>
         </div>
       </div>
 
@@ -261,8 +269,11 @@ export default function FinanceTracker({
                         {tx.type}
                       </span>
                     </td>
-                    <td className="py-3 px-4 font-medium">{tx.category}</td>
-                    <td className="py-3 px-4 font-mono text-slate-500">{tx.date}</td>
+                    <td className="py-3 px-4 font-medium">
+                      {tx.category}
+                      {tx.description && <div className="text-[11px] font-normal text-slate-500">{tx.description}</div>}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-500">{String(tx.date || '').slice(0, 10)}</td>
                     <td
                       className={`py-3 px-4 text-right font-bold font-mono ${
                         tx.type === 'income' ? 'text-[#10B981]' : 'text-[#F43F5E]'

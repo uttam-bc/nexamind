@@ -21,9 +21,10 @@ Built for modern teams and individual creators, NexaMind delivers real-time mess
 - **Channel Tabs**: Persistent pinned resources per channel (Chat, Channel Documents, Task Boards, and Whiteboards).
 
 ### 🤖 Agentic AI Copilot & Omni-Agent
-- **Workspace-Aware Context**: Grounded in workspace documents, meeting transcripts, channel conversations, and task states with strict tenant permission boundaries.
-- **Actionable Execution**: Tool-assisted capabilities to create tasks, search documents, synthesize meeting minutes, check financial runways, and detect calendar follow-ups.
-- **Traceable Attribution**: Answers include source IDs and references rather than hallucinated facts.
+- **Real tool use**: Gemini (or Groq as fallback) decides which workspace tools to call — create tasks, edit documents, log transactions, schedule events, post to channels — and can chain several steps per request.
+- **Workspace-aware memory**: Documents, meetings, tasks, and public channel messages are distilled into long-term memory and retrieved with semantic embeddings (BM25 keyword ranking when offline). Private channels and DMs are never added to shared memory.
+- **Works offline**: Without an AI key the copilot still runs explicit commands (“create a task 'Fix login'”, “log an expense of $40 for Hosting”) and never invents titles or values.
+- **Personal keys**: Each user can save their own Gemini key in Settings; it is verified and stored encrypted on the server.
 
 ### 📋 Agile Projects & Task Management
 - **Kanban Board**: Drag-and-drop workflow statuses (`todo`, `in_progress`, `review`, `done`) with priority tagging and assignee tracking.
@@ -89,13 +90,15 @@ python -m venv .venv
 # macOS/Linux:
 # source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (requirements-dev.txt adds the test tools)
+pip install -r requirements-dev.txt
 
 # Configure environment variables
 copy .env.example .env     # On Windows
 # cp .env.example .env     # On macOS/Linux
 ```
+
+Set `JWT_SECRET_KEY` in `.env` (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). The app refuses to start with a missing or weak secret when `APP_ENV` is not `development`.
 
 #### Database Configuration
 By default, the backend uses an asynchronous SQLite database for instant out-of-the-box local development.
@@ -110,19 +113,26 @@ Apply database migrations:
 alembic upgrade head
 ```
 
+If you have a local `nexamind.db` created by an older version (before migrations were complete), register it once and then upgrade:
+```bash
+alembic stamp 006_notion_teams_features
+alembic upgrade head
+```
+
 #### Run the API Server
 ```powershell
 # From the backend directory
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
-- Interactive API Swagger Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- OpenAPI JSON Spec: [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json)
+- Interactive API Swagger Docs (development only): [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- OpenAPI JSON Spec (development only): [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json)
 
 #### Run Backend Tests
 ```bash
 cd backend
 pytest -v
 ```
+Tests run against an in-memory database and never call real AI providers.
 
 ---
 
@@ -180,24 +190,30 @@ npm run start
 
 ### Render Deployment (Backend + Database)
 1. Push this repository to GitHub.
-2. Create a new **Blueprint** on [Render](https://render.com) and point it to [`render.yaml`](file:///c:/Users/uttam/nexamind/nexamind/render.yaml).
+2. Create a new **Blueprint** on [Render](https://render.com) and point it to [`render.yaml`](render.yaml).
 3. Render automatically provisions:
    - A managed PostgreSQL instance (`nexamind-db`).
-   - A web service (`nexamind-api`) running from `backend/Dockerfile` with health checks on `/health` and migrations run automatically on boot.
+   - A web service (`nexamind-api`) running from `backend/Dockerfile` with health checks on `/health` and migrations run automatically on boot. `JWT_SECRET_KEY` and `DATA_ENCRYPTION_KEY` are generated for you.
+4. Set `CORS_ORIGINS` to your frontend URL, and optionally `GEMINI_API_KEY` / `GROQ_API_KEY`.
+5. Uploads are stored on local disk at `/data/uploads`; attach a persistent disk there (paid plans) so they survive deploys. Running more than one instance? Set `REDIS_URL` so real-time events and presence are shared.
 
 ### Vercel / Netlify Deployment (Frontend)
 1. Point your Vercel/Netlify project to the `frontend/` directory.
 2. Build command: `npm run build`
 3. Output directory: `dist`
-4. Set environment variable: `VITE_API_URL=https://<your-render-backend-url>`
+4. Set environment variable: `VITE_API_URL=https://<your-render-backend-url>` (and add the frontend URL to the backend's `CORS_ORIGINS`)
 
 ---
 
 ## 🔒 Security & Data Tenancy
 
-- **Strict Tenant Scoping**: Every database transaction is scoped to `workspace_id` with server-side role and membership verification.
-- **Identity Enforcement**: AI tools and background actions execute strictly within the authenticated caller's security perimeter.
-- **Zero Raw Secrets**: Signing secrets, database credentials, and LLM API keys are managed exclusively via environment variables.
+- **Tenant scoping**: Every workspace resource is checked against workspace membership on the server.
+- **Private conversations**: Private channels and DMs are visible only to their members. Starting a DM never grants access to anyone's workspace.
+- **Authentication**: Short-lived HS256 JWTs (PyJWT), bcrypt password hashing, password strength rules, and rate limits on login, registration, and AI endpoints.
+- **WebSockets**: The token is sent in the first message, not in the URL, so it never lands in access logs. Access is re-checked on every message.
+- **Uploads**: Size limits, sanitized filenames, and downloads always served as attachments with `nosniff`, so uploaded HTML/SVG cannot run in the app's origin.
+- **Secrets**: Server secrets come from environment variables; users' personal Gemini keys are encrypted at rest and never returned to the browser. AI provider keys are sent in headers, never in URLs.
+- **Hardening**: Security headers on every response, API docs disabled outside development, generic error messages unless `DEBUG=true`.
 
 ---
 

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -109,27 +109,42 @@ async def calculate_runway(
     db: AsyncSession,
     workspace_id: UUID,
     user_id: UUID,
+    lookback_days: int = 90,
 ) -> dict:
+    """Cash position plus runway based on the average monthly net burn over the last 90 days."""
     transactions = await list_transactions(db, workspace_id, user_id)
     total_income = sum(tx.amount for tx in transactions if tx.type == TransactionType.INCOME)
     total_expenses = sum(tx.amount for tx in transactions if tx.type == TransactionType.EXPENSE)
     cash_balance = total_income - total_expenses
 
-    # Calculate average monthly expense / burn rate based on transactions
-    net_burn_rate = total_expenses - total_income
-    runway_months = None
-    if net_burn_rate > 0 and cash_balance > 0:
-        runway_months = round(cash_balance / net_burn_rate, 2)
-    elif net_burn_rate <= 0:
-        runway_months = None  # Infinite / profitable
+    cutoff = date.today() - timedelta(days=lookback_days)
+    recent = [tx for tx in transactions if _tx_date(tx) >= cutoff]
+    recent_net_outflow = sum(
+        tx.amount if tx.type == TransactionType.EXPENSE else -tx.amount for tx in recent
+    )
+    months = lookback_days / 30.0
+    monthly_burn = max(0.0, recent_net_outflow / months)
+
+    if monthly_burn <= 0:
+        runway_months = None  # not burning cash: runway is unlimited
+    elif cash_balance <= 0:
+        runway_months = 0.0
+    else:
+        runway_months = round(cash_balance / monthly_burn, 1)
 
     return {
         "total_income": total_income,
         "total_expenses": total_expenses,
-        "net_burn_rate": max(0.0, net_burn_rate),
+        "net_burn_rate": round(monthly_burn, 2),
         "cash_balance": cash_balance,
         "runway_months": runway_months,
+        "is_profitable": monthly_burn <= 0,
     }
+
+
+def _tx_date(tx) -> date:
+    value = tx.date
+    return value.date() if isinstance(value, datetime) else value
 
 
 async def _require_workspace_access(

@@ -38,3 +38,11 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+backend/tests/.test_uploads/
+
+# Local tooling
+.claude/
+
+# Evaluation scratch output
+backend/eval/.eval_uploads/
+backend/eval/*.log

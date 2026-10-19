@@ -66,9 +66,7 @@ export default function SoloChat({
       setLoading(true);
       const allChannels = await api.listChannels(workspaceId);
       // Strictly 1-on-1 direct messages only - NO group channels allowed in Solo Chat!
-      const dmList = (allChannels || []).filter(
-        (c) => c.is_private && (c.name.startsWith('dm-') || c.name.includes('-'))
-      );
+      const dmList = (allChannels || []).filter((c) => c.is_direct);
       setChannels(dmList);
 
       if (autoSelectFirst && dmList.length > 0) {
