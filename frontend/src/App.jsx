@@ -247,6 +247,12 @@ export default function App() {
           setUser(userData);
           setAuthToken(newToken);
         }}
+        onLogin={async (email, password) => {
+          return await api.login(email, password);
+        }}
+        onRegister={async (name, email, password, username) => {
+          return await api.register(name, email, password, username);
+        }}
       />
     );
   }
@@ -259,9 +265,12 @@ export default function App() {
       <header className="fixed top-0 left-0 w-full z-40 flex justify-between items-center px-6 h-16 bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] shadow-sm">
         <div className="flex items-center gap-6">
           {/* Brand Logo & Title */}
-          <div className="flex items-center gap-2 text-[#191C1E] font-extrabold text-base tracking-tight">
-            <span className="text-[#4F46E5] text-lg font-bold">⚡</span>
-            <span>NexaMind 2.0</span>
+          <div
+            onClick={handleBackToDashboard}
+            className="flex items-center gap-2 cursor-pointer hover:opacity-90 transition-opacity"
+            title="NexaMind Dashboard"
+          >
+            <img src="/logo.png" alt="NexaMind" className="h-7 w-auto object-contain" />
           </div>
 
           {/* Global Workspace Search (Stitch Spec) */}

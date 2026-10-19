@@ -260,6 +260,37 @@ async def trigger_memory_reindex(
 # GEMINI API KEY VALIDATION / TEST
 # -------------------------------------------------------------
 
+async def _verify_gemini_key(clean_key: str) -> dict:
+    payload = {
+        "contents": [{"parts": [{"text": "Hello, respond with OK"}]}],
+        "generationConfig": {"maxOutputTokens": 10},
+    }
+    timeout_config = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0)
+    for model in ["gemini-3.8-flash", "gemini-3-flash-preview", "gemini-flash-lite-latest", "gemini-flash-latest"]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                res = await client.post(url, json=payload)
+                if res.status_code == 200:
+                    return {
+                        "status": "success",
+                        "ok": True,
+                        "valid": True,
+                        "model": model,
+                        "message": f"Connected to Google Gemini ({model}) successfully!",
+                    }
+        except Exception:
+            continue
+
+    return {
+        "status": "error",
+        "ok": False,
+        "valid": False,
+        "error": "Could not connect to Gemini API with this key. Please check the key validity.",
+        "message": "Could not connect to Gemini API with this key.",
+    }
+
+
 @router.post("/config/test-gemini")
 async def test_gemini_key(
     workspace_id: UUID,
@@ -273,29 +304,20 @@ async def test_gemini_key(
 
     key = request.api_key or os.getenv("GEMINI_API_KEY")
     if not key or not key.strip():
-        return {"status": "error", "message": "No API key provided or configured."}
+        return {"status": "error", "ok": False, "valid": False, "message": "No API key provided or configured."}
 
-    clean_key = key.strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
-    payload = {
-        "contents": [{"parts": [{"text": "Hello, respond with OK"}]}],
-        "generationConfig": {"maxOutputTokens": 10},
-    }
+    return await _verify_gemini_key(key.strip())
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            res = await client.post(url, json=payload)
-            if res.status_code == 200:
-                return {
-                    "status": "success",
-                    "model": "gemini-1.5-flash",
-                    "message": "Gemini API key is active and verified!",
-                }
-            else:
-                return {
-                    "status": "error",
-                    "code": res.status_code,
-                    "message": f"Gemini API error ({res.status_code}): {res.text[:200]}",
-                }
-    except Exception as exc:
-        return {"status": "error", "message": f"Connection error: {str(exc)}"}
+
+global_ai_router = APIRouter(prefix="/ai", tags=["ai_global"])
+
+@global_ai_router.post("/config/test-gemini")
+async def test_gemini_key_global(
+    request: GeminiKeyTestRequest,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    key = request.api_key or os.getenv("GEMINI_API_KEY")
+    if not key or not key.strip():
+        return {"status": "error", "ok": False, "valid": False, "message": "No API key provided or configured."}
+
+    return await _verify_gemini_key(key.strip())

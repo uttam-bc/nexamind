@@ -2,18 +2,19 @@ import json
 import logging
 import os
 import re
-from uuid import UUID
 from datetime import datetime
+from typing import Any
+from uuid import UUID
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import Document, SessionRecord, Task, Channel, User
-from app.models.ai import AiSession, AiMessage, AiMemory
+from app.models import Channel, Document, User
+from app.models.ai import AiMessage, AiSession
 from app.services.agent_tools import (
-    AVAILABLE_TOOLS,
+    create_calendar_event_tool,
     create_channel_tool,
     create_commit_tool,
     create_document_tool,
@@ -28,25 +29,36 @@ from app.services.agent_tools import (
     search_documents_tool,
     search_finance_tool,
     search_sessions_tool,
+    switch_workspace_tool,
     update_task_status_tool,
 )
-from app.services.memory_engine import retrieve_memories, ingest_document, ingest_task
+from app.services.memory_engine import (
+    extract_text_from_document,
+    retrieve_memories,
+    sync_all_workspace_documents_to_memory,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+GEMINI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3-flash-preview",
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+]
+
 
 async def execute_tool(
     tool_name: str,
-    tool_args: dict,
+    tool_args: dict[str, Any],
     db: AsyncSession,
     workspace_id: UUID,
     user: User,
-) -> dict:
+) -> dict[str, Any]:
     """Executes an agent tool call against the workspace database and updates memory."""
     # 0. Workspace Switch
     if tool_name == "switch_workspace":
-        from app.services.agent_tools import switch_workspace_tool
         return await switch_workspace_tool(
             db,
             user,
@@ -187,7 +199,6 @@ async def execute_tool(
 
     # 8. Calendar & Events
     elif tool_name == "create_calendar_event":
-        from app.services.agent_tools import create_calendar_event_tool
         return await create_calendar_event_tool(
             db,
             workspace_id,
@@ -209,11 +220,13 @@ async def call_gemini(
     gemini_key: str,
 ) -> str | None:
     """Calls Google Gemini API with system instructions and chat conversation history."""
-    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    clean_key = gemini_key.strip()
+    if not clean_key:
+        return None
 
     # Format history turns for Gemini
     contents = []
-    for turn in history[-10:]:
+    for turn in history[-12:]:
         role = "user" if turn.get("role") == "user" else "model"
         text = turn.get("content", "").strip()
         if text:
@@ -226,15 +239,17 @@ async def call_gemini(
         "system_instruction": {"parts": [{"text": system_instruction}]},
         "contents": contents,
         "generationConfig": {
-            "temperature": 0.3,
-            "maxOutputTokens": 1500,
+            "temperature": 0.25,
+            "maxOutputTokens": 2000,
         },
     }
 
-    for model in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+    timeout_config = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0)
+
+    for model in GEMINI_MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={clean_key}"
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
                 res = await client.post(url, json=payload)
                 if res.status_code == 200:
                     data = res.json()
@@ -245,7 +260,7 @@ async def call_gemini(
                             logger.info("Gemini (%s) response generated successfully (%d chars)", model, len(text))
                             return text.strip()
                 else:
-                    logger.warning("Gemini model %s returned status %d: %s", model, res.status_code, res.text)
+                    logger.warning("Gemini model %s returned status %d: %s", model, res.status_code, res.text[:200])
         except Exception as exc:
             logger.warning("Gemini invocation error on %s: %s", model, exc)
             continue
@@ -269,12 +284,13 @@ async def call_groq(
             })
         messages.append({"role": "user", "content": prompt})
 
-        async with httpx.AsyncClient(timeout=25.0) as client:
+        timeout_config = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
             res = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "llama-3.1-70b-versatile",
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 1000,
@@ -296,19 +312,56 @@ async def run_agent(
     gemini_key_override: str | None = None,
 ) -> dict:
     """Orchestrates the NexaMind Agentic AI:
-    1. AI Session & History Loading
-    2. Long-term Memory Retrieval (Docs, Chat, Tasks, Video Meetings)
-    3. Tool Recognition & Autonomous Execution
-    4. Gemini Reasoning & Synthesis
-    5. Session Persistence & Memory Feedback
+    1. Synchronize all workspace documents to memory
+    2. AI Session & History Loading
+    3. Document and Long-term Memory Retrieval
+    4. Autonomous Tool Execution
+    5. Gemini 3.8 Flash Reasoning & Grounded Synthesis
+    6. Session Persistence & Memory Feedback
     """
     prompt_clean = user_prompt.strip()
     prompt_lower = prompt_clean.lower()
     tool_executions: list[dict] = []
 
-    # 1. Resolve or Create AI Session
+    gemini_key = (gemini_key_override or os.getenv("GEMINI_API_KEY") or settings.gemini_api_key or "").strip()
+    groq_key = (os.getenv("GROQ_API_KEY") or settings.groq_api_key or "").strip()
+
+    # 1. PRIMARY GOAL: Automatically sync and read ALL workspace documents into AI Memory
+    try:
+        sync_result = await sync_all_workspace_documents_to_memory(
+            db, workspace_id, gemini_key=gemini_key, force_refresh=False
+        )
+        if sync_result.get("documents_ingested", 0) > 0:
+            logger.info("Auto-synced %d new/updated documents to AI memory", sync_result["documents_ingested"])
+    except Exception as sync_exc:
+        logger.warning("Workspace document auto-sync warning: %s", sync_exc)
+
+    # 2. Fetch all current documents directly from workspace for real-time grounded context
+    docs_q = select(Document).where(Document.workspace_id == workspace_id).order_by(Document.updated_at.desc())
+    docs_res = await db.execute(docs_q)
+    all_workspace_docs = list(docs_res.scalars().all())
+
+    docs_context_parts = []
+    for idx, d in enumerate(all_workspace_docs, 1):
+        extracted_text = extract_text_from_document(d)
+        truncated_content = extracted_text[:1200] + ("..." if len(extracted_text) > 1200 else "")
+        docs_context_parts.append(
+            f"{idx}. 📄 **{d.title}** (ID: {d.id})\n"
+            f"   Content Preview:\n   {truncated_content}"
+        )
+
+    docs_context_str = "\n\n".join(docs_context_parts) if docs_context_parts else "No documents created in this workspace yet."
+
+    # 3. Resolve or Create AI Session
     ai_session: AiSession | None = None
     past_messages: list[dict] = []
+
+    if session_id:
+        if isinstance(session_id, str):
+            try:
+                session_id = UUID(session_id)
+            except Exception:
+                session_id = None
 
     if session_id:
         sess_q = select(AiSession).where(
@@ -319,7 +372,6 @@ async def run_agent(
         ai_session = sess_res.scalar_one_or_none()
 
     if not ai_session:
-        # Create new chat session for this user
         title = prompt_clean[:40] + ("..." if len(prompt_clean) > 40 else "")
         ai_session = AiSession(
             workspace_id=workspace_id,
@@ -330,7 +382,6 @@ async def run_agent(
         await db.flush()
         await db.refresh(ai_session)
     else:
-        # Fetch conversation history for this session
         msgs_q = (
             select(AiMessage)
             .where(AiMessage.session_id == ai_session.id)
@@ -341,8 +392,8 @@ async def run_agent(
         for m in msgs_res.scalars().all():
             past_messages.append({"role": m.role, "content": m.content})
 
-    # 2. Retrieve Long-Term AI Memory (Docs, Chat, Tasks, Video Meetings)
-    retrieved_mems = await retrieve_memories(db, workspace_id, user_prompt, limit=6)
+    # 4. Retrieve Long-Term AI Memory (Docs, Chat, Tasks, Video Meetings)
+    retrieved_mems = await retrieve_memories(db, workspace_id, user_prompt, limit=12)
     memory_context_lines = []
     for m in retrieved_mems:
         source_label = m.get("source_title") or m.get("source_type")
@@ -350,7 +401,7 @@ async def run_agent(
 
     memory_context_str = "\n".join(memory_context_lines) if memory_context_lines else "No specific past memory matched."
 
-    # 3. Autonomous Tool Execution Pattern Matching
+    # 5. Autonomous Tool Execution Pattern Matching
     # A. Workspace Switch
     is_ws_switch = any(p in prompt_lower for p in ["switch to", "switch workspace", "go to workspace", "go to group", "go to solo", "open group", "open solo", "switch account"])
     if is_ws_switch:
@@ -378,7 +429,20 @@ async def run_agent(
         doc_res = await execute_tool("create_document", {"title": doc_title, "content_text": doc_content}, db, workspace_id, user)
         tool_executions.append({"tool": "create_document", "args": {"title": doc_title}, "result": doc_res})
 
-    # C. Task Creation (with Status support: To Do, In Progress, Done!)
+    # C. Document Editing / Appending
+    is_doc_edit = (
+        any(w in prompt_lower for w in ["doc", "document", "file", "notes"])
+        and any(p in prompt_lower for p in ["edit", "update", "append", "modify", "add to"])
+    )
+    if is_doc_edit:
+        doc_target_match = re.search(r"(?:doc|document|file)\s+['\"]?([^'\"\n]+?)['\"]?(?:\s+with|\s+to|$)", user_prompt, re.IGNORECASE)
+        doc_target = doc_target_match.group(1).strip() if doc_target_match else "notes.txt"
+        edit_text_match = re.search(r"(?:with|add|text)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
+        edit_text = edit_text_match.group(1).strip() if edit_text_match else "Updated by NexaMind AI Copilot."
+        edit_res = await execute_tool("edit_document", {"doc_query": doc_target, "new_content_text": edit_text, "mode": "append"}, db, workspace_id, user)
+        tool_executions.append({"tool": "edit_document", "args": {"doc_query": doc_target}, "result": edit_res})
+
+    # D. Task Creation (with Status support: To Do, In Progress, Done!)
     if ("task" in prompt_lower or "todo" in prompt_lower or "kanban" in prompt_lower) and any(p in prompt_lower for p in ["create", "new", "add", "make", "assign"]):
         task_match = re.search(r"(?:task|titled|called)\s+['\"]?([^'\"\n]+)['\"]?", user_prompt, re.IGNORECASE)
         task_title = task_match.group(1).strip() if task_match else "Review Sprint Deliverables"
@@ -389,7 +453,7 @@ async def run_agent(
         task_res = await execute_tool("create_task", {"title": task_title, "status": status, "priority": priority}, db, workspace_id, user)
         tool_executions.append({"tool": "create_task", "args": {"title": task_title, "status": status, "priority": priority}, "result": task_res})
 
-    # D. Channel / Message Creation
+    # E. Channel / Message Creation
     if "channel" in prompt_lower and any(p in prompt_lower for p in ["create", "new", "add", "make"]):
         chan_match = re.search(r"(?:channel)\s+(?:named\s+)?['\"]?#?([a-zA-Z0-9_\-]+)['\"]?", user_prompt, re.IGNORECASE)
         chan_name = chan_match.group(1).strip() if chan_match else "team-announcements"
@@ -399,21 +463,18 @@ async def run_agent(
         post_match = re.search(r"(?:message|saying)\s+['\"]?([^'\"\n]+)['\"]?\s+(?:to|in)\s+#?([a-zA-Z0-9_\-]+)", user_prompt, re.IGNORECASE)
         msg_text = post_match.group(1).strip() if post_match else "Team notification from NexaMind Agent"
         ch_target = post_match.group(2).strip() if post_match else "general"
-        # Find channel by name
         chan_lookup = await db.execute(select(Channel).where(Channel.workspace_id == workspace_id, Channel.name == ch_target))
         chan_obj = chan_lookup.scalar_one_or_none()
         if chan_obj:
             p_res = await execute_tool("post_channel_message", {"channel_id": str(chan_obj.id), "content": msg_text}, db, workspace_id, user)
             tool_executions.append({"tool": "post_channel_message", "args": {"channel": ch_target, "content": msg_text}, "result": p_res})
 
-    # E. Search Workspace Memory / Docs / Meetings
-    if any(p in prompt_lower for p in ["search", "find", "what did we discuss", "check documents", "summarize"]):
-        search_res = await execute_tool("search_documents", {"query": user_prompt}, db, workspace_id, user)
-        tool_executions.append({"tool": "search_documents", "args": {"query": user_prompt}, "result": search_res})
-
-    # 4. LLM Synthesis with Gemini / Backup
-    gemini_key = gemini_override = gemini_key_override or os.getenv("GEMINI_API_KEY")
-    groq_key = os.getenv("GROQ_API_KEY")
+    # F. Direct Search Request
+    if any(p in prompt_lower for p in ["search documents for", "find documents about", "lookup in docs"]):
+        search_q_match = re.search(r"(?:search documents for|find documents about|lookup in docs)\s+(.+)", user_prompt, re.IGNORECASE)
+        search_term = search_q_match.group(1).strip() if search_q_match else user_prompt
+        search_res = await execute_tool("search_documents", {"query": search_term}, db, workspace_id, user)
+        tool_executions.append({"tool": "search_documents", "args": {"query": search_term}, "result": search_res})
 
     executed_summary = []
     for t in tool_executions:
@@ -422,34 +483,44 @@ async def run_agent(
         msg = res.get("message") or res.get("message_detail") or f"Executed tool {tool_name}"
         executed_summary.append(f"- Tool `{tool_name}`: {msg}")
 
+    # 6. Build Comprehensive Grounded Context for Gemini
     system_instruction = (
         f"You are the NexaMind Chief AI Officer (Agentic AI Copilot).\n"
-        f"You operate an integrated workspace platform combining Notion Documents, Microsoft Teams-style Chat, Sprint Kanban Tasks, HD Video Meetings, and Long-Term Memory.\n\n"
+        f"You operate an integrated workspace platform combining Notion Documents, Team Chat, Sprint Kanban Tasks, HD Video Meetings, and Persistent Long-Term Memory.\n\n"
         f"WORKSPACE CONTEXT:\n"
         f"- Current Workspace ID: {workspace_id}\n"
-        f"- Current User: {user.name} (@{user.username or 'user'})\n\n"
-        f"LONG-TERM WORKSPACE MEMORY (Ingested & Consolidated from Docs, Chat, Tasks, Video Meetings):\n"
+        f"- Current User: {user.name} (@{user.username or 'user'})\n"
+        f"- Total Documents in Workspace: {len(all_workspace_docs)}\n\n"
+        f"ALL WORKSPACE DOCUMENTS (Stored in active workspace database):\n"
+        f"{docs_context_str}\n\n"
+        f"LONG-TERM WORKSPACE MEMORY (Extracted facts, decisions, summaries, and action items):\n"
         f"{memory_context_str}\n\n"
-        f"TOOLS EXECUTED FOR THIS REQUEST:\n"
+        f"TOOLS EXECUTED FOR THIS TURN:\n"
         f"{chr(10).join(executed_summary) if executed_summary else 'No modification tools were needed; providing direct intelligence.'}\n\n"
-        f"INSTRUCTIONS:\n"
-        f"1. Acknowledge and summarize any actions executed clearly and professionally.\n"
-        f"2. Incorporate insights from the retrieved workspace memories whenever relevant to the user's question.\n"
-        f"3. Maintain conversational continuity with past dialogue.\n"
-        f"4. Propose actionable, concrete next steps for the engineering team."
+        f"CRITICAL INSTRUCTIONS:\n"
+        f"1. You MUST read and answer using the Workspace Documents and Long-Term Memory provided above.\n"
+        f"2. If the user asks 'what is in the documents' or asks about any file or document, summarize EACH document clearly by title, detailing its content, status, and what was decided or recorded.\n"
+        f"3. If any tools were executed (e.g. created task, created document, switched workspace), confirm the action clearly and professionally.\n"
+        f"4. Maintain a high-impact, helpful, executive tone.\n"
+        f"5. FORMATTING GUIDELINES:\n"
+        f"   - Keep text clean, elegant, and readable without unnecessary cluttered symbols.\n"
+        f"   - Avoid redundant markup like `### **Title**` or redundant nested asterisks like `* **Label:**`.\n"
+        f"   - When writing mathematical or scientific formulas, ALWAYS enclose them in standard dollar signs: use $...$ for inline formulas (e.g. $E = mc^2$) and $$...$$ for block formulas (e.g. $$\\int_0^1 f(x) dx$$) so the frontend KaTeX engine converts and renders them into crisp mathematical notation.\n"
+        f"   - Do not output raw unescaped LaTeX commands without math delimiters.\n"
+        f"6. Propose concrete next steps whenever relevant."
     )
 
     final_response = None
 
-    # A. Primary: Google Gemini API
-    if gemini_key and not gemini_key.startswith("AQ.") and len(gemini_key) > 20:
+    # A. Primary: Google Gemini API (gemini-3.8-flash)
+    if gemini_key and len(gemini_key) > 10:
         final_response = await call_gemini(user_prompt, system_instruction, past_messages, gemini_key)
 
-    # B. Secondary: Groq API
+    # B. Secondary: Groq API fallback
     if not final_response and groq_key:
         final_response = await call_groq(user_prompt, system_instruction, past_messages, groq_key)
 
-    # C. Fallback: High-quality Deterministic Synthesis
+    # C. Fallback: Direct Grounded Synthesis from Documents and Memory
     if not final_response:
         if tool_executions:
             actions_list = "\n".join(
@@ -457,22 +528,30 @@ async def run_agent(
                 for t in tool_executions
             )
             final_response = (
-                f"I have autonomously executed the requested actions in your workspace:\n\n"
+                f"I have executed the requested actions in your workspace:\n\n"
                 f"{actions_list}\n\n"
-                f"**Workspace Memory Reference:**\n"
-                f"{memory_context_str[:250]}...\n\n"
-                f"*To enable full Gemini multimodal intelligence, configure your `GEMINI_API_KEY` in Workspace Settings.*"
+                f"**Workspace Documents Summary:**\n"
+                f"{docs_context_str[:400]}..."
             )
         else:
+            # High-quality direct document answer if Gemini is offline
+            doc_summaries = []
+            for d in all_workspace_docs:
+                txt = extract_text_from_document(d)
+                doc_summaries.append(f"📄 **{d.title}**: {txt[:180]}")
+
+            docs_formatted = "\n\n".join(doc_summaries) if doc_summaries else "No documents found in this workspace yet."
+
             final_response = (
-                f"Hello {user.name}! I am your **NexaMind Agentic AI Copilot**.\n\n"
-                f"I have persistent session memory and 4-stage workspace memory ingestion connected to your **Documents**, **Team Chats**, **Sprint Tasks**, and **Video Call Minutes**.\n\n"
-                f"**Relevant Workspace Memories:**\n"
-                f"{memory_context_str}\n\n"
-                f"Give me any command (e.g., *'Create a task to build auth with status in_progress'*, *'Draft document API_Architecture.md'*, *'What decisions were agreed in yesterday's meeting?'*), and I will take action."
+                f"### 📚 Workspace Documents & Memory Overview\n\n"
+                f"I scanned your workspace and found **{len(all_workspace_docs)} documents**:\n\n"
+                f"{docs_formatted}\n\n"
+                f"**Relevant AI Long-Term Memory:**\n"
+                f"{memory_context_str[:350]}...\n\n"
+                f"You can ask me to read any document in detail, draft new specifications, or create tasks on your Kanban board."
             )
 
-    # 5. Persist to Database (Session & Message)
+    # 7. Persist to Database (Session & Message)
     user_msg = AiMessage(
         session_id=ai_session.id,
         role="user",

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
+import FormattedChatMessage from './FormattedChatMessage';
 
 export default function AiAssistant({
   workspaceId,
@@ -177,12 +178,12 @@ export default function AiAssistant({
     setIsTestingKey(true);
     setKeyTestStatus(null);
     try {
-      const res = await api.testGeminiKey(geminiApiKey.trim());
-      if (res.valid) {
-        setKeyTestStatus({ ok: true, message: `Connected! Model: ${res.model || 'Gemini 2.0 Flash'}` });
+      const res = await api.testGeminiKey(workspaceId, geminiApiKey.trim());
+      if (res.valid || res.ok || res.status === 'success') {
+        setKeyTestStatus({ ok: true, message: `Connected! Model: ${res.model || 'Gemini 3.8 Flash'}` });
         localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
       } else {
-        setKeyTestStatus({ ok: false, message: res.error || 'Invalid API Key' });
+        setKeyTestStatus({ ok: false, message: res.message || res.error || 'Invalid API Key' });
       }
     } catch (err) {
       setKeyTestStatus({ ok: false, message: err.message });
@@ -501,7 +502,11 @@ export default function AiAssistant({
                           : 'bg-slate-50 border border-slate-200 text-slate-900 rounded-tl-none shadow-xs font-normal'
                       }`}
                     >
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      {isUser ? (
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      ) : (
+                        <FormattedChatMessage content={msg.content} isUser={false} />
+                      )}
                     </div>
 
                     {/* Tool Calls Pill / Cards */}

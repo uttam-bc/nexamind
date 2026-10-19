@@ -153,15 +153,15 @@ export default function WorkspaceSettings({
     setIsTestingKey(true);
     setKeyTestResult(null);
     try {
-      const res = await api.testGeminiKey(geminiApiKey.trim());
-      if (res.valid) {
+      const res = await api.testGeminiKey(workspaceId, geminiApiKey.trim());
+      if (res.valid || res.ok || res.status === 'success') {
         setKeyTestResult({
           ok: true,
-          message: `Connected successfully! Model: ${res.model || 'gemini-2.0-flash'}`,
+          message: `Connected successfully! Model: ${res.model || 'gemini-3.8-flash'}`,
         });
         localStorage.setItem('nexamind_gemini_key', geminiApiKey.trim());
       } else {
-        setKeyTestResult({ ok: false, message: res.error || 'Invalid Gemini API key.' });
+        setKeyTestResult({ ok: false, message: res.message || res.error || 'Invalid Gemini API key.' });
       }
     } catch (err) {
       setKeyTestResult({ ok: false, message: err.message });

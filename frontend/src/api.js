@@ -335,11 +335,20 @@ export const api = {
     request(`/workspaces/${wsId}/ai/memory/reindex`, {
       method: 'POST',
     }),
-  testGeminiKey: (wsId, apiKey) =>
-    request(`/workspaces/${wsId}/ai/config/test-gemini`, {
+  testGeminiKey: (arg1, arg2) => {
+    let wsId = arg2 !== undefined ? arg1 : (localStorage.getItem('nexamind_active_workspace') || null);
+    let apiKey = arg2 !== undefined ? arg2 : arg1;
+    if (wsId && wsId.length === 36) {
+      return request(`/workspaces/${wsId}/ai/config/test-gemini`, {
+        method: 'POST',
+        body: JSON.stringify({ api_key: apiKey }),
+      });
+    }
+    return request(`/ai/config/test-gemini`, {
       method: 'POST',
       body: JSON.stringify({ api_key: apiKey }),
-    }),
+    });
+  },
 
   // Calendar & Reminders
   listCalendarEvents: (wsId, eventType) =>

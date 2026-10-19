@@ -66,4 +66,10 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    import os
+    s = Settings()
+    if s.gemini_api_key and "GEMINI_API_KEY" not in os.environ:
+        os.environ["GEMINI_API_KEY"] = s.gemini_api_key
+    if s.groq_api_key and "GROQ_API_KEY" not in os.environ:
+        os.environ["GROQ_API_KEY"] = s.groq_api_key
+    return s

@@ -37,6 +37,7 @@ from app.services.project_service import (
 )
 from app.services.report_service import generate_report
 from app.services.websocket_manager import ws_manager
+from app.services.memory_engine import ingest_document
 
 
 # -------------------------------------------------------------
@@ -164,13 +165,17 @@ async def create_document_tool(
             },
         ),
     )
+    try:
+        await ingest_document(db, doc)
+    except Exception:
+        pass
     await db.commit()
     return {
         "id": str(doc.id),
         "title": doc.title,
         "type": "document",
         "action": "create",
-        "message": f"Document '{doc.title}' created and saved to Supabase.",
+        "message": f"Document '{doc.title}' created and saved to workspace memory.",
     }
 
 
@@ -229,13 +234,17 @@ async def edit_document_tool(
         final_text = new_content_text
 
     target_doc.content = {"text": final_text}
+    try:
+        await ingest_document(db, target_doc)
+    except Exception:
+        pass
     await db.commit()
     return {
         "id": str(target_doc.id),
         "title": target_doc.title,
         "type": "document",
         "action": "edit",
-        "message": f"Document '{target_doc.title}' edited and updated in Supabase.",
+        "message": f"Document '{target_doc.title}' edited and updated in workspace memory.",
         "content_preview": final_text[:300],
     }
 

@@ -24,14 +24,17 @@ import {
   Globe,
   Star,
   Check,
+  Loader2,
 } from 'lucide-react';
+import { api, setAuthToken } from '../api';
 
 export default function LandingPage({
   onLogin,
   onRegister,
-  authLoading,
-  authError,
-  setAuthError,
+  onLoginSuccess,
+  authLoading: propAuthLoading,
+  authError: propAuthError,
+  setAuthError: propSetAuthError,
 }) {
   const [activeNav, setActiveNav] = useState('home'); // 'home' | 'product' | 'about' | 'contact'
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -42,6 +45,8 @@ export default function LandingPage({
     email: '',
     password: '',
   });
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
 
   // Contact form state
   const [contactForm, setContactForm] = useState({
@@ -55,15 +60,69 @@ export default function LandingPage({
   const handleOpenAuth = (mode = 'login') => {
     setAuthMode(mode);
     setShowAuthModal(true);
-    if (setAuthError) setAuthError('');
+    setLocalError('');
+    if (propSetAuthError) propSetAuthError('');
   };
 
-  const handleAuthSubmit = (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    if (authMode === 'register') {
-      onRegister(form.name, form.email, form.password, form.username);
-    } else {
-      onLogin(form.email, form.password);
+    setLocalError('');
+    if (propSetAuthError) propSetAuthError('');
+
+    const email = form.email.trim();
+    const password = form.password;
+    const name = form.name.trim();
+    const username = form.username.trim();
+
+    if (!email || !password) {
+      setLocalError('Please enter both email and password.');
+      return;
+    }
+    if (authMode === 'register' && !name) {
+      setLocalError('Please enter your full name.');
+      return;
+    }
+
+    setLocalLoading(true);
+
+    try {
+      if (authMode === 'register') {
+        let authResult;
+        if (onRegister) {
+          authResult = await onRegister(name, email, password, username);
+        } else {
+          authResult = await api.register(name, email, password, username || undefined);
+        }
+
+        const token = authResult?.access_token;
+        const user = authResult?.user;
+        if (token) {
+          setAuthToken(token);
+          if (onLoginSuccess) {
+            onLoginSuccess(token, user);
+          }
+        }
+      } else {
+        let authResult;
+        if (onLogin) {
+          authResult = await onLogin(email, password);
+        } else {
+          authResult = await api.login(email, password);
+        }
+
+        const token = authResult?.access_token;
+        const user = authResult?.user;
+        if (token) {
+          setAuthToken(token);
+          if (onLoginSuccess) {
+            onLoginSuccess(token, user);
+          }
+        }
+      }
+    } catch (err) {
+      setLocalError(err.message || 'Authentication failed. Please check your credentials.');
+    } finally {
+      setLocalLoading(false);
     }
   };
 
@@ -86,7 +145,7 @@ export default function LandingPage({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen w-full bg-slate-50 text-slate-900 font-sans antialiased selection:bg-indigo-500 selection:text-white overflow-y-auto overflow-x-hidden">
       {/* ------------------------------------------------------------- */}
       {/* 1. TOP NAVIGATION HEADER                                       */}
       {/* ------------------------------------------------------------- */}
@@ -95,19 +154,13 @@ export default function LandingPage({
           {/* Brand Logo */}
           <div
             onClick={() => scrollToSection('home')}
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="flex items-center gap-2 cursor-pointer group"
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-800 bg-clip-text text-transparent">
-                NexaMind
-              </span>
-              <span className="text-[10px] font-mono font-bold text-indigo-600 block -mt-1 tracking-wider uppercase">
-                Agentic 2.0
-              </span>
-            </div>
+            <img
+              src="/logo.png"
+              alt="NexaMind Logo"
+              className="h-8 md:h-9 w-auto object-contain transition-transform group-hover:scale-[1.02]"
+            />
           </div>
 
           {/* Navigation Links */}
@@ -591,9 +644,13 @@ export default function LandingPage({
       {/* ------------------------------------------------------------- */}
       <footer className="bg-slate-900 text-slate-400 py-12 border-t border-slate-800 text-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-indigo-400 font-extrabold text-sm">⚡ NexaMind 2.0</span>
-            <span>— The Agentic AI Workspace</span>
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo-white.png"
+              alt="NexaMind"
+              className="h-6 w-auto object-contain opacity-90"
+            />
+            <span className="text-slate-400 text-xs">— The Agentic AI Workspace</span>
           </div>
           <div className="flex items-center gap-6">
             <button onClick={() => scrollToSection('home')} className="hover:text-white transition">
@@ -631,8 +688,8 @@ export default function LandingPage({
 
             {/* Modal Header */}
             <div className="text-center space-y-1.5">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-indigo-600">
-                <Sparkles className="w-6 h-6" />
+              <div className="flex items-center justify-center mx-auto mb-1">
+                <img src="/logo-mark.png" alt="NexaMind" className="h-11 w-auto object-contain" />
               </div>
               <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">
                 {authMode === 'login' ? 'Sign In to NexaMind' : 'Create Free Account'}
@@ -645,9 +702,9 @@ export default function LandingPage({
             </div>
 
             {/* Error Notice */}
-            {authError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
-                {authError}
+            {(localError || propAuthError) && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-in fade-in">
+                {localError || propAuthError}
               </div>
             )}
 
@@ -720,11 +777,14 @@ export default function LandingPage({
 
               <button
                 type="submit"
-                disabled={authLoading}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2"
+                disabled={localLoading || propAuthLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2 cursor-pointer"
               >
-                {authLoading ? (
-                  <span>Authenticating...</span>
+                {(localLoading || propAuthLoading) ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{authMode === 'register' ? 'Creating Account & Launching...' : 'Authenticating...'}</span>
+                  </>
                 ) : authMode === 'login' ? (
                   <span>Sign In to Workspace</span>
                 ) : (

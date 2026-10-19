@@ -52,7 +52,6 @@ async def transcribe_audio(file_path: str) -> str:
             with open(file_path, "rb") as f:
                 audio_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
             payload = {
                 "contents": [
                     {
@@ -69,14 +68,16 @@ async def transcribe_audio(file_path: str) -> str:
                 ]
             }
             async with httpx.AsyncClient(timeout=60.0) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    result = res.json()
-                    candidates = result.get("candidates", [])
-                    if candidates:
-                        content_parts = candidates[0].get("content", {}).get("parts", [])
-                        if content_parts:
-                            return content_parts[0].get("text", "").strip()
+                for model in ["gemini-3.8-flash", "gemini-flash-latest"]:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key.strip()}"
+                    res = await client.post(url, json=payload)
+                    if res.status_code == 200:
+                        result = res.json()
+                        candidates = result.get("candidates", [])
+                        if candidates:
+                            content_parts = candidates[0].get("content", {}).get("parts", [])
+                            if content_parts:
+                                return content_parts[0].get("text", "").strip()
         except Exception as exc:
             logger.error("Gemini audio transcription exception: %s", exc)
 
@@ -151,7 +152,6 @@ async def summarize_meeting_transcript(transcript: str, title: str = "") -> tupl
     # 2. Try Gemini API for real-time MoM synthesis
     if gemini_key:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
             prompt = (
                 f"Analyze this meeting transcript and produce a formal Minutes of the Meeting (MoM) and action items.\n"
                 f"Meeting: {meeting_name}\n"
@@ -167,14 +167,16 @@ async def summarize_meeting_transcript(transcript: str, title: str = "") -> tupl
                 "generationConfig": {"response_mime_type": "application/json"},
             }
             async with httpx.AsyncClient(timeout=30.0) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    result = res.json()
-                    candidates = result.get("candidates", [])
-                    if candidates:
-                        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                        parsed = json.loads(text)
-                        return parsed.get("summary", ""), parsed.get("action_items", [])
+                for model in ["gemini-3.8-flash", "gemini-flash-latest"]:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key.strip()}"
+                    res = await client.post(url, json=payload)
+                    if res.status_code == 200:
+                        result = res.json()
+                        candidates = result.get("candidates", [])
+                        if candidates:
+                            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            parsed = json.loads(text)
+                            return parsed.get("summary", ""), parsed.get("action_items", [])
         except Exception as exc:
             logger.error("Gemini meeting summarization exception: %s", exc)
 

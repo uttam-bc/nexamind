@@ -19,11 +19,10 @@ export default function AuthPage({
 
       <div className="max-w-md w-full glass-panel p-8 rounded-3xl shadow-2xl space-y-6 relative animate-slide-up">
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center justify-center p-3.5 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-2xl shadow-lg shadow-indigo-600/30 text-white">
-            <Bot className="w-8 h-8" />
+          <div className="flex items-center justify-center mx-auto mb-1">
+            <img src="/logo.png" alt="NexaMind" className="h-10 w-auto object-contain" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight gradient-text">NexaMind</h1>
-          <p className="text-slate-400 text-sm">
+          <p className="text-slate-500 text-xs">
             Agentic AI workspace for high-velocity teams
           </p>
         </div>

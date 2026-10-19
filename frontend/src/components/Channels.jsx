@@ -26,6 +26,7 @@ import {
   AtSign,
 } from 'lucide-react';
 import { api, getAuthToken } from '../api';
+import FormattedChatMessage from './FormattedChatMessage';
 
 const QUICK_REACTIONS = [
   { emoji: '👍', label: 'Like' },
@@ -686,8 +687,8 @@ export default function Channels({
                         </div>
 
                         {/* Message Bubble - CRISP, HIGH CONTRAST */}
-                        <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed whitespace-pre-wrap font-sans font-normal">
-                          {msg.content}
+                        <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed font-sans font-normal">
+                          <FormattedChatMessage content={msg.content} isUser={false} />
                         </div>
 
                         {/* Reaction Badges List */}
@@ -831,7 +832,7 @@ export default function Channels({
               </div>
             </div>
             <div className="text-sm text-slate-900 leading-relaxed bg-white p-3.5 rounded-xl border border-slate-200 font-sans shadow-sm">
-              {threadRootMessage.content}
+              <FormattedChatMessage content={threadRootMessage.content} isUser={false} />
             </div>
           </div>
 
@@ -865,7 +866,7 @@ export default function Channels({
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-slate-900 bg-white p-3 rounded-xl border border-slate-200 shadow-sm leading-relaxed">
-                      {reply.content}
+                      <FormattedChatMessage content={reply.content} isUser={false} />
                     </div>
                   </div>
                 </div>

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
+import FormattedChatMessage from './FormattedChatMessage';
 
 export default function SoloChat({
   workspaceId,
@@ -523,13 +524,17 @@ export default function SoloChat({
 
                           {/* Message Bubble */}
                           <div
-                            className={`p-3.5 px-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                            className={`p-3.5 px-4 rounded-2xl text-sm leading-relaxed ${
                               isOutgoing
-                                ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm font-medium'
+                                ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm font-medium whitespace-pre-wrap'
                                 : 'bg-white border border-slate-200 text-slate-900 rounded-tl-none shadow-xs font-normal'
                             }`}
                           >
-                            {msg.content}
+                            {isOutgoing ? (
+                              msg.content
+                            ) : (
+                              <FormattedChatMessage content={msg.content} isUser={false} />
+                            )}
                           </div>
 
                           {/* Time & Reactions */}
