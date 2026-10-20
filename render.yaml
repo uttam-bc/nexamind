@@ -1,3 +1,5 @@
+# NexaMind on Render: API (Docker) + Static frontend + Postgres
+# Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
     name: nexamind-api
@@ -21,9 +23,12 @@ services:
         generateValue: true
       - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
-      # Comma-separated list of frontend origins, e.g. https://nexamind.vercel.app
+      # Frontend Static Site origin (https://nexamind-web.onrender.com). Override in Dashboard if needed.
       - key: CORS_ORIGINS
-        sync: false
+        fromService:
+          name: nexamind-web
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY
@@ -40,8 +45,24 @@ services:
     #   mountPath: /data
     #   sizeGB: 5
 
+  - type: web
+    name: nexamind-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Baked into the Vite build at deploy time
+      - key: VITE_API_URL
+        fromService:
+          name: nexamind-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+
 databases:
+  # Free Postgres was discontinued; basic-256mb is the smallest paid plan.
+  # Change in the Dashboard if your workspace uses a different plan name.
   - name: nexamind-db
-    plan: free
+    plan: basic-256mb
     databaseName: nexamind
     user: nexamind

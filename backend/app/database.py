@@ -14,6 +14,9 @@ if "postgresql" in settings.database_url:
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
     }
+    # Managed Postgres (e.g. Render) requires TLS
+    if settings.app_env == "production" or "render.com" in settings.database_url:
+        connect_args["ssl"] = True
 
 engine = create_async_engine(
     settings.database_url,
