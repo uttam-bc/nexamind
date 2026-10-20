@@ -1,3 +1,4 @@
+import ssl
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
@@ -8,15 +9,25 @@ from app.config import get_settings
 
 settings = get_settings()
 
-connect_args = {}
-if "postgresql" in settings.database_url:
-    connect_args = {
+
+def postgres_connect_args(database_url: str) -> dict:
+    """Build asyncpg connect_args. Render internal URLs need no SSL; external need TLS."""
+    if "postgresql" not in database_url:
+        return {}
+    args: dict = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
     }
-    # Managed Postgres (e.g. Render) requires TLS
-    if settings.app_env == "production" or "render.com" in settings.database_url:
-        connect_args["ssl"] = True
+    # External Render hostname only — internal (dpg-… / private) stays on the private network.
+    if "render.com" in database_url:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        args["ssl"] = ctx
+    return args
+
+
+connect_args = postgres_connect_args(settings.database_url)
 
 engine = create_async_engine(
     settings.database_url,

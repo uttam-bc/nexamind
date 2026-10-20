@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import get_settings
-from app.database import Base
+from app.database import Base, postgres_connect_args
 import app.models  # noqa: F401 - registers every model on Base.metadata
 
 config = context.config
@@ -19,18 +19,6 @@ if config.config_file_name is not None:
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
 target_metadata = Base.metadata
-
-
-def _connect_args() -> dict:
-    if "postgresql" not in settings.database_url:
-        return {}
-    args: dict = {
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-    }
-    if settings.app_env == "production" or "render.com" in settings.database_url:
-        args["ssl"] = True
-    return args
 
 
 def run_migrations_offline() -> None:
@@ -56,7 +44,7 @@ async def run_async_migrations() -> None:
     connectable = create_async_engine(
         settings.database_url,
         poolclass=pool.NullPool,
-        connect_args=_connect_args(),
+        connect_args=postgres_connect_args(settings.database_url),
     )
 
     async with connectable.connect() as connection:

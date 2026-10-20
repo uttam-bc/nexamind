@@ -1,6 +1,7 @@
 import json
 import logging
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,10 +34,22 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, v: str) -> str:
-        if isinstance(v, str) and v.startswith("postgres://"):
-            v = v.replace("postgres://", "postgresql://", 1)
-        if isinstance(v, str) and v.startswith("postgresql://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if not isinstance(v, str):
+            return v
+        # Render / Heroku-style URLs
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://") :]
+        parsed = urlparse(v)
+        if parsed.scheme in {"postgresql", "postgresql+asyncpg"}:
+            # asyncpg rejects libpq-only query params like sslmode=
+            query = [
+                (k, val)
+                for k, val in parse_qsl(parsed.query, keep_blank_values=True)
+                if k.lower() not in {"sslmode", "ssl", "channel_binding"}
+            ]
+            v = urlunparse(parsed._replace(query=urlencode(query)))
+            if v.startswith("postgresql://"):
+                v = "postgresql+asyncpg://" + v[len("postgresql://") :]
         return v
 
     jwt_secret_key: str = INSECURE_DEFAULT_SECRET
