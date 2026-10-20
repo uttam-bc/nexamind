@@ -60,9 +60,8 @@ services:
           envVarKey: RENDER_EXTERNAL_URL
 
 databases:
-  # Free Postgres was discontinued; basic-256mb is the smallest paid plan.
-  # Change in the Dashboard if your workspace uses a different plan name.
+  # Free Postgres: 1 GB, expires after 30 days (fine for demos / student projects).
   - name: nexamind-db
-    plan: basic-256mb
+    plan: free
     databaseName: nexamind
     user: nexamind
