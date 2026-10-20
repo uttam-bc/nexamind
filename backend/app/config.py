@@ -1,10 +1,11 @@
 import json
 import logging
 from functools import lru_cache
+from typing import Annotated
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,12 @@ class Settings(BaseSettings):
     # Server-wide AI provider keys (optional). Users may also store their own Gemini key.
     gemini_api_key: str | None = None
     groq_api_key: str | None = None
-    gemini_models: list[str] = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash"]
+    # NoDecode: allow plain comma-separated or single URL env values (Render sets a plain URL).
+    gemini_models: Annotated[list[str], NoDecode] = [
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemini-2.5-flash",
+    ]
     gemini_embedding_model: str = "gemini-embedding-001"
     groq_chat_model: str = "llama-3.3-70b-versatile"
     groq_transcription_model: str = "whisper-large-v3-turbo"
@@ -84,7 +90,7 @@ class Settings(BaseSettings):
     rate_limit_auth_per_minute: int = 10
     rate_limit_ai_per_minute: int = 20
 
-    cors_origins: list[str] = [
+    cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
@@ -97,15 +103,20 @@ class Settings(BaseSettings):
     @classmethod
     def parse_list(cls, v: object) -> list[str]:
         if isinstance(v, str):
+            text = v.strip()
+            if not text:
+                return []
             try:
-                parsed = json.loads(v)
+                parsed = json.loads(text)
                 if isinstance(parsed, list):
                     return [str(item).strip() for item in parsed if str(item).strip()]
+                if isinstance(parsed, str) and parsed.strip():
+                    return [parsed.strip()]
             except json.JSONDecodeError:
                 pass
-            return [item.strip() for item in v.split(",") if item.strip()]
+            return [item.strip() for item in text.split(",") if item.strip()]
         if isinstance(v, list):
-            return [str(item).strip() for item in v]
+            return [str(item).strip() for item in v if str(item).strip()]
         raise ValueError("Expected a list or a comma-separated string")
 
     log_level: str = "INFO"
