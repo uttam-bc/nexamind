@@ -77,6 +77,20 @@ class Settings(BaseSettings):
     # Tests turn this off and drive the jobs directly.
     run_background_jobs: bool = True
 
+    # Email / SMTP configuration (e.g. Gmail SMTP, SendGrid, etc.)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str = "noreply@nexamind.com"
+    smtp_from_name: str = "NexaMind"
+    smtp_tls: bool = True
+    smtp_ssl: bool = False
+    require_email_verification: bool = True
+
+    # Google OAuth 2.0 Client ID (from Google Cloud Console)
+    google_client_id: str | None = None
+
     # Uploads
     upload_dir: str = "uploads"
     max_upload_mb: int = 25

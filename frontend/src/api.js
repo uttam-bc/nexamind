@@ -97,11 +97,27 @@ async function request(path, options = {}) {
 
 export const api = {
   // Auth
-  register: (name, email, password, username) =>
+  register: (name, email, password, username, otp) =>
     request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password, username: username || undefined }),
+      body: JSON.stringify({ name, email, password, username: username || undefined, otp: otp || undefined }),
     }),
+  sendOtp: (email, purpose = 'register') =>
+    request('/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, purpose }),
+    }),
+  verifyOtp: (email, otp, purpose = 'register') =>
+    request('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp, purpose }),
+    }),
+  loginWithGoogle: (credential) =>
+    request('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
+    }),
+  getGoogleConfig: () => request('/auth/google/config'),
   login: (email, password) =>
     request('/auth/login', {
       method: 'POST',

@@ -69,3 +69,61 @@ async def test_login_invalid_credentials(client: AsyncClient) -> None:
         json={"email": "carol@example.com", "password": "wrong-password"},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_otp_send_verify_and_register(client: AsyncClient) -> None:
+    email = "david@example.com"
+
+    # 1. Send OTP
+    send_resp = await client.post("/auth/send-otp", json={"email": email, "purpose": "register"})
+    assert send_resp.status_code == 200
+    data = send_resp.json()
+    assert data["email"] == email
+    otp = data.get("dev_code")
+    assert otp is not None
+    assert len(otp) == 6
+
+    # 2. Try invalid OTP
+    bad_resp = await client.post("/auth/verify-otp", json={"email": email, "otp": "000000", "purpose": "register"})
+    assert bad_resp.status_code == 400
+
+    # 3. Verify valid OTP
+    good_resp = await client.post("/auth/verify-otp", json={"email": email, "otp": otp, "purpose": "register"})
+    assert good_resp.status_code == 200
+    assert good_resp.json()["verified"] is True
+
+    # 4. Register with the email
+    reg_resp = await client.post(
+        "/auth/register",
+        json={
+            "email": email,
+            "password": "securepass123",
+            "name": "David",
+        },
+    )
+    assert reg_resp.status_code == 201
+    assert reg_resp.json()["user"]["email"] == email
+
+
+@pytest.mark.asyncio
+async def test_otp_rejects_disposable_email(client: AsyncClient) -> None:
+    resp = await client.post("/auth/send-otp", json={"email": "spammer@mailinator.com", "purpose": "register"})
+    assert resp.status_code == 400
+    assert "disposable" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_google_auth_flow(client: AsyncClient) -> None:
+    mock_credential = "mock_google_:gtest@example.com:Google Tester"
+    resp = await client.post("/auth/google", json={"credential": mock_credential})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user"]["email"] == "gtest@example.com"
+    assert data["user"]["name"] == "Google Tester"
+    assert "access_token" in data
+
+    # Re-authenticating should log in without error
+    resp2 = await client.post("/auth/google", json={"credential": mock_credential})
+    assert resp2.status_code == 200
+    assert resp2.json()["user"]["email"] == "gtest@example.com"

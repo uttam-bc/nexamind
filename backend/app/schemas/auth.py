@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=72)
     name: str = Field(min_length=1, max_length=255)
     username: str | None = Field(default=None, min_length=2, max_length=50)
+    otp: str | None = Field(default=None, max_length=10)
 
     @field_validator("password")
     @classmethod
@@ -32,6 +33,8 @@ class UserResponse(BaseModel):
     email: EmailStr
     name: str
     username: str | None = None
+    is_email_verified: bool = True
+    avatar_url: str | None = None
     created_at: datetime
 
 
@@ -54,3 +57,35 @@ class AuthResponse(BaseModel):
     user: UserResponse
     access_token: str
     token_type: str = "bearer"
+
+
+class SendOtpRequest(BaseModel):
+    email: EmailStr
+    purpose: str = Field(default="register", max_length=50)
+
+
+class SendOtpResponse(BaseModel):
+    message: str
+    email: str
+    expires_in_seconds: int = 600
+    delivery: str = "sent"
+    dev_code: str | None = None
+
+
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=4, max_length=10)
+    purpose: str = Field(default="register", max_length=50)
+
+
+class VerifyOtpResponse(BaseModel):
+    verified: bool
+    message: str
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(min_length=10)
+
+
+class GoogleConfigResponse(BaseModel):
+    client_id: str | None = None

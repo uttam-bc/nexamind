@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Bot,
@@ -25,6 +25,11 @@ import {
   Star,
   Check,
   Loader2,
+  KeyRound,
+  MailCheck,
+  RefreshCw,
+  ArrowLeft,
+  Shield,
 } from 'lucide-react';
 import { api, setAuthToken } from '../api';
 
@@ -48,6 +53,17 @@ export default function LandingPage({
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState('');
 
+  // Email verification (OTP) states
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpCountdown, setOtpCountdown] = useState(0);
+  const [devOtpNotice, setDevOtpNotice] = useState(null);
+
+  // Google OAuth states
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState(null);
+  const [showGoogleHelp, setShowGoogleHelp] = useState(false);
+
   // Contact form state
   const [contactForm, setContactForm] = useState({
     name: '',
@@ -57,11 +73,126 @@ export default function LandingPage({
   });
   const [contactSubmitted, setContactSubmitted] = useState(false);
 
+  // OTP Countdown Timer
+  useEffect(() => {
+    if (otpCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setOtpCountdown((c) => Math.max(0, c - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [otpCountdown]);
+
+  // Load Google Client ID on mount
+  useEffect(() => {
+    api.getGoogleConfig()
+      .then((cfg) => {
+        if (cfg?.client_id) {
+          setGoogleClientId(cfg.client_id);
+          if (window.google?.accounts?.id) {
+            window.google.accounts.id.initialize({
+              client_id: cfg.client_id,
+              callback: (resp) => {
+                if (resp?.credential) {
+                  handleGoogleCredentialResponse(resp.credential);
+                }
+              },
+            });
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleOpenAuth = (mode = 'login') => {
     setAuthMode(mode);
     setShowAuthModal(true);
     setLocalError('');
+    setOtpSent(false);
+    setOtp('');
+    setDevOtpNotice(null);
+    setShowGoogleHelp(false);
     if (propSetAuthError) propSetAuthError('');
+  };
+
+  const handleGoogleCredentialResponse = async (credential) => {
+    setGoogleLoading(true);
+    setLocalError('');
+    if (propSetAuthError) propSetAuthError('');
+
+    try {
+      const authResult = await api.loginWithGoogle(credential);
+      const token = authResult?.access_token;
+      const user = authResult?.user;
+      if (token) {
+        setAuthToken(token);
+        if (onLoginSuccess) {
+          onLoginSuccess(token, user);
+        }
+      }
+    } catch (err) {
+      setLocalError(err.message || 'Google authentication failed');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleClick = () => {
+    if (googleClientId && window.google?.accounts?.id) {
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: (resp) => {
+          if (resp?.credential) {
+            handleGoogleCredentialResponse(resp.credential);
+          }
+        },
+      });
+      window.google.accounts.id.prompt((notification) => {
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          setShowGoogleHelp(true);
+        }
+      });
+    } else {
+      setShowGoogleHelp(true);
+    }
+  };
+
+  const handleSendOtp = async (e) => {
+    if (e) e.preventDefault();
+    setLocalError('');
+    if (propSetAuthError) propSetAuthError('');
+
+    const email = form.email.trim();
+    const name = form.name.trim();
+
+    if (!name) {
+      setLocalError('Please enter your full name first.');
+      return;
+    }
+    if (!email) {
+      setLocalError('Please enter a valid email address.');
+      return;
+    }
+    if (!form.password || form.password.length < 8) {
+      setLocalError('Password must be at least 8 characters long.');
+      return;
+    }
+
+    setLocalLoading(true);
+    try {
+      const res = await api.sendOtp(email, 'register');
+      setOtpSent(true);
+      setOtpCountdown(60);
+      if (res?.dev_code) {
+        setDevOtpNotice('Dev Mode: Verification OTP is ' + res.dev_code);
+        setOtp(res.dev_code);
+      } else {
+        setDevOtpNotice(null);
+      }
+    } catch (err) {
+      setLocalError(err.message || 'Failed to send confirmation code. Please check your email.');
+    } finally {
+      setLocalLoading(false);
+    }
   };
 
   const handleAuthSubmit = async (e) => {
@@ -74,49 +205,62 @@ export default function LandingPage({
     const name = form.name.trim();
     const username = form.username.trim();
 
+    if (authMode === 'register') {
+      if (!otpSent) {
+        await handleSendOtp();
+        return;
+      }
+
+      if (!otp.trim()) {
+        setLocalError('Please enter the 6-digit verification code sent to your email.');
+        return;
+      }
+
+      setLocalLoading(true);
+      try {
+        let authResult;
+        if (onRegister) {
+          authResult = await onRegister(name, email, password, username, otp.trim());
+        } else {
+          authResult = await api.register(name, email, password, username || undefined, otp.trim());
+        }
+
+        const token = authResult?.access_token;
+        const user = authResult?.user;
+        if (token) {
+          setAuthToken(token);
+          if (onLoginSuccess) {
+            onLoginSuccess(token, user);
+          }
+        }
+      } catch (err) {
+        setLocalError(err.message || 'Registration failed. Please check your verification code.');
+      } finally {
+        setLocalLoading(false);
+      }
+      return;
+    }
+
     if (!email || !password) {
       setLocalError('Please enter both email and password.');
       return;
     }
-    if (authMode === 'register' && !name) {
-      setLocalError('Please enter your full name.');
-      return;
-    }
 
     setLocalLoading(true);
-
     try {
-      if (authMode === 'register') {
-        let authResult;
-        if (onRegister) {
-          authResult = await onRegister(name, email, password, username);
-        } else {
-          authResult = await api.register(name, email, password, username || undefined);
-        }
-
-        const token = authResult?.access_token;
-        const user = authResult?.user;
-        if (token) {
-          setAuthToken(token);
-          if (onLoginSuccess) {
-            onLoginSuccess(token, user);
-          }
-        }
+      let authResult;
+      if (onLogin) {
+        authResult = await onLogin(email, password);
       } else {
-        let authResult;
-        if (onLogin) {
-          authResult = await onLogin(email, password);
-        } else {
-          authResult = await api.login(email, password);
-        }
+        authResult = await api.login(email, password);
+      }
 
-        const token = authResult?.access_token;
-        const user = authResult?.user;
-        if (token) {
-          setAuthToken(token);
-          if (onLoginSuccess) {
-            onLoginSuccess(token, user);
-          }
+      const token = authResult?.access_token;
+      const user = authResult?.user;
+      if (token) {
+        setAuthToken(token);
+        if (onLoginSuccess) {
+          onLoginSuccess(token, user);
         }
       }
     } catch (err) {
@@ -677,11 +821,17 @@ export default function LandingPage({
       {/* ------------------------------------------------------------- */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-8 shadow-2xl relative space-y-6">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-8 shadow-2xl relative space-y-5 max-h-[90vh] overflow-y-auto">
             {/* Close Button */}
             <button
-              onClick={() => setShowAuthModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1 rounded-lg"
+              onClick={() => {
+                setShowAuthModal(false);
+                setOtpSent(false);
+                setOtp('');
+                setLocalError('');
+                setShowGoogleHelp(false);
+              }}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1.5 rounded-lg transition hover:bg-slate-100 cursor-pointer"
             >
               ✕
             </button>
@@ -692,110 +842,267 @@ export default function LandingPage({
                 <img src="/logo-mark.png" alt="NexaMind" className="h-11 w-auto object-contain" />
               </div>
               <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                {authMode === 'login' ? 'Sign In to NexaMind' : 'Create Free Account'}
+                {authMode === 'login'
+                  ? 'Sign In to NexaMind'
+                  : otpSent
+                  ? 'Verify Your Email'
+                  : 'Create Free Account'}
               </h3>
               <p className="text-xs text-slate-500 font-sans">
                 {authMode === 'login'
                   ? 'Access your workspaces, persistent memories, and teams'
+                  : otpSent
+                  ? 'Enter the 6-digit confirmation code sent to your inbox'
                   : 'Start your personal and team workspace in seconds'}
               </p>
             </div>
 
+            {/* Google Sign-In Button */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={handleGoogleClick}
+                disabled={googleLoading || localLoading}
+                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs py-3 px-4 rounded-xl border border-slate-300 shadow-sm hover:shadow transition cursor-pointer disabled:opacity-50"
+              >
+                {googleLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+                ) : (
+                  <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                )}
+                <span>{googleLoading ? 'Signing in with Google...' : 'Continue with Google'}</span>
+              </button>
+
+              {/* In-Modal Google OAuth Helper */}
+              {showGoogleHelp && (
+                <div className="p-3.5 bg-indigo-50/80 border border-indigo-200/80 rounded-2xl text-xs space-y-2.5 animate-in fade-in">
+                  <div className="flex items-center justify-between text-indigo-950 font-bold text-[11px]">
+                    <span>Google Sign-In Configuration</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowGoogleHelp(false)}
+                      className="text-indigo-400 hover:text-indigo-700 text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p className="text-indigo-700 text-[11px] leading-relaxed">
+                    {googleClientId
+                      ? 'Select your account from the Google One-Tap prompt, or test with a simulated Google account below:'
+                      : 'Set GOOGLE_CLIENT_ID in your backend .env to link your Google Cloud project. You can also test with a demo account:'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleGoogleCredentialResponse('mock_google_:alex.designer@gmail.com:Alex Mercer')}
+                    disabled={googleLoading}
+                    className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>Sign in with Demo Google Account</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Or Divider */}
+              <div className="flex items-center gap-3 pt-1">
+                <div className="h-px bg-slate-200 flex-1" />
+                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">or with email</span>
+                <div className="h-px bg-slate-200 flex-1" />
+              </div>
+            </div>
+
             {/* Error Notice */}
             {(localError || propAuthError) && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-in fade-in">
-                {localError || propAuthError}
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-in fade-in flex items-start gap-2">
+                <span className="text-rose-500 font-bold flex-shrink-0">⚠</span>
+                <span>{localError || propAuthError}</span>
               </div>
             )}
 
             {/* Form */}
             <form onSubmit={handleAuthSubmit} className="space-y-3.5">
-              {authMode === 'register' && (
-                <>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Full Name</label>
+              {/* Registration: Step 2 (OTP Verification) */}
+              {authMode === 'register' && otpSent ? (
+                <div className="space-y-4 animate-in fade-in duration-200">
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-center space-y-1.5">
+                    <div className="flex items-center justify-center text-indigo-600 mb-1">
+                      <MailCheck className="w-6 h-6" />
+                    </div>
+                    <div className="text-xs font-bold text-slate-900">Check your inbox</div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      We sent a 6-digit confirmation code to{' '}
+                      <span className="font-bold text-indigo-600">{form.email}</span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOtpSent(false);
+                        setOtp('');
+                        setLocalError('');
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold underline mt-1 cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3 h-3" />
+                      <span>Change email or details</span>
+                    </button>
+                  </div>
+
+                  {devOtpNotice && (
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded-xl font-mono text-center">
+                      ⚡ {devOtpNotice}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                      <span>Verification Code (OTP)</span>
+                      <span className="text-[10px] text-slate-400">Valid for 10 min</span>
+                    </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Jason Bourne"
+                      maxLength={6}
+                      placeholder="123456"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-3 text-center text-2xl tracking-[0.35em] font-mono font-bold text-slate-900 outline-none transition"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs px-1">
+                    <span className="text-[11px] text-slate-500">Didn't receive the email?</span>
+                    <button
+                      type="button"
+                      disabled={otpCountdown > 0 || localLoading}
+                      onClick={handleSendOtp}
+                      className="text-xs text-indigo-600 hover:text-indigo-700 disabled:text-slate-400 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${localLoading ? 'animate-spin' : ''}`} />
+                      <span>{otpCountdown > 0 ? `Resend code (${otpCountdown}s)` : 'Resend Code'}</span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={localLoading || propAuthLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  >
+                    {localLoading || propAuthLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Verifying & Setting Up Workspace...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Confirm & Complete Registration</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                /* Registration Step 1 OR Login Form */
+                <>
+                  {authMode === 'register' && (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-700">Full Name</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Jason Bourne"
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
+                          value={form.name}
+                          onChange={(e) => setForm({ ...form, name: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                          <span>Unique Username</span>
+                          <span className="text-[10px] text-slate-400 font-normal">For chat invitations</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-2.5 text-slate-400 font-mono text-xs">@</span>
+                          <input
+                            type="text"
+                            required
+                            placeholder="jason_bourne"
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-xs text-slate-900 outline-none transition font-mono"
+                            value={form.username}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                username: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''),
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                      <span>{authMode === 'login' ? 'Email or @Username' : 'Email Address'}</span>
+                      {authMode === 'register' && (
+                        <span className="text-[10px] text-indigo-600 font-medium">Domain verification active</span>
+                      )}
+                    </label>
+                    <input
+                      type={authMode === 'login' ? 'text' : 'email'}
+                      required
+                      placeholder={authMode === 'login' ? 'jason@gmail.com or @jason_bourne' : 'jason@gmail.com'}
                       className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      value={form.email}
+                      onChange={(e) => setForm({ ...form, email: e.target.value })}
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                      <span>Unique Username</span>
-                      <span className="text-[10px] text-slate-400 font-normal">For chat invitations</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-2.5 text-slate-400 font-mono text-xs">@</span>
-                      <input
-                        type="text"
-                        required
-                        placeholder="jason_bourne"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-xs text-slate-900 outline-none transition font-mono"
-                        value={form.username}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            username: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''),
-                          })
-                        }
-                      />
-                    </div>
+                    <label className="text-xs font-bold text-slate-700">Password</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      minLength={authMode === 'register' ? 8 : undefined}
+                      autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                    />
+                    {authMode === 'register' && (
+                      <p className="text-[11px] text-slate-500">At least 8 characters, with letters and numbers.</p>
+                    )}
                   </div>
+
+                  <button
+                    type="submit"
+                    disabled={localLoading || propAuthLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2 cursor-pointer"
+                  >
+                    {localLoading || propAuthLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>{authMode === 'register' ? 'Verifying Deliverability & Sending Code...' : 'Authenticating...'}</span>
+                      </>
+                    ) : authMode === 'login' ? (
+                      <span>Sign In to Workspace</span>
+                    ) : (
+                      <>
+                        <span>Verify Email & Send Code</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
                 </>
               )}
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">
-                  {authMode === 'login' ? 'Email or @Username' : 'Email Address'}
-                </label>
-                <input
-                  type={authMode === 'login' ? 'text' : 'email'}
-                  required
-                  placeholder={authMode === 'login' ? 'jason@gmail.com or @jason_bourne' : 'jason@gmail.com'}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Password</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  minLength={authMode === 'register' ? 8 : undefined}
-                  autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-                />
-                {authMode === 'register' && (
-                  <p className="text-[11px] text-slate-500">At least 8 characters, with letters and numbers.</p>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={localLoading || propAuthLoading}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2 cursor-pointer"
-              >
-                {(localLoading || propAuthLoading) ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{authMode === 'register' ? 'Creating Account & Launching...' : 'Authenticating...'}</span>
-                  </>
-                ) : authMode === 'login' ? (
-                  <span>Sign In to Workspace</span>
-                ) : (
-                  <span>Create Account & Launch</span>
-                )}
-              </button>
             </form>
 
             {/* Toggle Login / Register */}
@@ -804,10 +1111,13 @@ export default function LandingPage({
                 type="button"
                 onClick={() => {
                   setAuthMode(authMode === 'login' ? 'register' : 'login');
+                  setOtpSent(false);
+                  setOtp('');
                   setLocalError('');
+                  setShowGoogleHelp(false);
                   propSetAuthError?.('');
                 }}
-                className="text-xs text-indigo-600 hover:underline font-semibold"
+                className="text-xs text-indigo-600 hover:underline font-semibold cursor-pointer"
               >
                 {authMode === 'login'
                   ? "Don't have an account? Create one free"

@@ -291,8 +291,8 @@ export default function App() {
         onLogin={async (email, password) => {
           return await api.login(email, password);
         }}
-        onRegister={async (name, email, password, username) => {
-          return await api.register(name, email, password, username);
+        onRegister={async (name, email, password, username, otp) => {
+          return await api.register(name, email, password, username, otp);
         }}
       />
     );
