@@ -84,24 +84,53 @@ export default function LandingPage({
 
   // Load Google Client ID on mount
   useEffect(() => {
+    const envClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (envClientId) {
+      setGoogleClientId(envClientId);
+    }
     api.getGoogleConfig()
       .then((cfg) => {
         if (cfg?.client_id) {
           setGoogleClientId(cfg.client_id);
-          if (window.google?.accounts?.id) {
-            window.google.accounts.id.initialize({
-              client_id: cfg.client_id,
-              callback: (resp) => {
-                if (resp?.credential) {
-                  handleGoogleCredentialResponse(resp.credential);
-                }
-              },
-            });
-          }
         }
       })
       .catch(() => {});
   }, []);
+
+  // Render official Google button when modal opens
+  useEffect(() => {
+    const activeClientId = googleClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!activeClientId) return;
+
+    const setupGoogleBtn = () => {
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.initialize({
+          client_id: activeClientId,
+          callback: (resp) => {
+            if (resp?.credential) {
+              handleGoogleCredentialResponse(resp.credential);
+            }
+          },
+        });
+        const container = document.getElementById('google-btn-container');
+        if (container) {
+          container.innerHTML = '';
+          window.google.accounts.id.renderButton(container, {
+            theme: 'outline',
+            size: 'large',
+            width: 384,
+            text: 'continue_with',
+            shape: 'rectangular',
+          });
+        }
+      }
+    };
+
+    if (showAuthModal) {
+      const t = setTimeout(setupGoogleBtn, 80);
+      return () => clearTimeout(t);
+    }
+  }, [showAuthModal, googleClientId]);
 
   const handleOpenAuth = (mode = 'login') => {
     setAuthMode(mode);
@@ -859,12 +888,13 @@ export default function LandingPage({
 
             {/* Google Sign-In Button */}
             <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                onClick={handleGoogleClick}
-                disabled={googleLoading || localLoading}
-                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs py-3 px-4 rounded-xl border border-slate-300 shadow-sm hover:shadow transition cursor-pointer disabled:opacity-50"
-              >
+              <div id="google-btn-container" className="w-full flex justify-center min-h-[44px]">
+                <button
+                  type="button"
+                  onClick={handleGoogleClick}
+                  disabled={googleLoading || localLoading}
+                  className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs py-3 px-4 rounded-xl border border-slate-300 shadow-sm hover:shadow transition cursor-pointer disabled:opacity-50"
+                >
                 {googleLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
                 ) : (
@@ -876,7 +906,8 @@ export default function LandingPage({
                   </svg>
                 )}
                 <span>{googleLoading ? 'Signing in with Google...' : 'Continue with Google'}</span>
-              </button>
+                </button>
+              </div>
 
               {/* In-Modal Google OAuth Helper */}
               {showGoogleHelp && (
