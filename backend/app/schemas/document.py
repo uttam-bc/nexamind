@@ -42,6 +42,8 @@ class DocumentContent(BaseModel):
 
 
 class DocumentCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str = Field(min_length=1, max_length=255)
     content: DocumentContent | None = None
     parent_id: UUID | None = None
@@ -49,6 +51,8 @@ class DocumentCreate(BaseModel):
 
 
 class DocumentUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str | None = Field(default=None, min_length=1, max_length=255)
     content: DocumentContent | None = None
     parent_id: UUID | None = None

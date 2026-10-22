@@ -123,9 +123,9 @@ export default function ReportSynthesizer({
       {/* Reports Sidebar */}
       <div className="w-full md:w-80 glass-panel p-4 rounded-2xl border border-slate-800/80 flex flex-col h-full bg-slate-900/50">
         <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800/80">
-          <h3 className="font-bold text-xs uppercase tracking-wider text-slate-400">
+          <h1 className="font-bold text-xs uppercase tracking-wider text-slate-400">
             Reports ({reports.length})
-          </h3>
+          </h1>
           <button
             onClick={() => setShowGenerateModal(true)}
             className="btn-primary py-1.5 px-3 text-xs"
@@ -152,7 +152,7 @@ export default function ReportSynthesizer({
                   <FileBarChart className={`w-4 h-4 ${isSelected ? 'text-indigo-400' : 'text-slate-500'}`} />
                   <span className="text-xs font-bold truncate">{rep.title}</span>
                 </div>
-                <div className="text-[10px] text-slate-500 flex justify-between items-center capitalize font-medium">
+                <div className="text-xs text-slate-500 flex justify-between items-center capitalize font-medium">
                   <span>{rep.report_type.replace('_', ' ')}</span>
                   <span>{new Date(rep.created_at).toLocaleDateString()}</span>
                 </div>
@@ -184,7 +184,7 @@ export default function ReportSynthesizer({
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                <button
+                <button aria-label="Create Document from Report"
                   onClick={handleConvertToDoc}
                   disabled={convertingDoc}
                   className="btn-secondary py-1.5 px-3 text-xs"
@@ -194,7 +194,7 @@ export default function ReportSynthesizer({
                   <span>{convertingDoc ? 'Saving Doc...' : 'Save as Doc'}</span>
                 </button>
 
-                <button
+                <button aria-label="Copy Raw Markdown"
                   onClick={copyMarkdown}
                   className="btn-secondary py-1.5 px-3 text-xs"
                   title="Copy Raw Markdown"
@@ -222,7 +222,7 @@ export default function ReportSynthesizer({
 
             {/* Source Citations */}
             <div className="flex flex-wrap gap-2 text-xs bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80">
-              <span className="font-bold text-slate-500 uppercase text-[10px] self-center mr-2">
+              <span className="font-bold text-slate-500 uppercase text-xs self-center mr-2">
                 Source Citations:
               </span>
               <Badge variant="indigo">
@@ -265,10 +265,10 @@ export default function ReportSynthesizer({
       >
         <form onSubmit={handleGenerate} className="space-y-4">
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            <label htmlFor="report-synthesizer-field-1" className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
               Report Title
             </label>
-            <input
+            <input id="report-synthesizer-field-1"
               type="text"
               required
               placeholder="e.g. Q3 Sprint Retrospective & Strategy"
@@ -279,10 +279,10 @@ export default function ReportSynthesizer({
           </div>
 
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            <label htmlFor="report-synthesizer-field-2" className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
               Report Template
             </label>
-            <select
+            <select id="report-synthesizer-field-2"
               className="input-base py-2.5 font-medium"
               value={reportType}
               onChange={(e) => setReportType(e.target.value)}
@@ -296,7 +296,7 @@ export default function ReportSynthesizer({
           </div>
 
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
               Select Target Sessions (Optional)
             </label>
             <div className="max-h-32 overflow-y-auto bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/80 space-y-1.5 text-xs">
@@ -319,10 +319,10 @@ export default function ReportSynthesizer({
           </div>
 
           <div>
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+            <label htmlFor="report-synthesizer-field-3" className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
               Special Instructions
             </label>
-            <textarea
+            <textarea id="report-synthesizer-field-3"
               placeholder="e.g. Focus on risks, blockers, and timelines..."
               className="input-base resize-none h-20"
               value={customPrompt}

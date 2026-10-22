@@ -4,13 +4,13 @@ const TAB_LABELS = {
   calendar: 'Calendar & Schedule',
   ai_agent: 'AI Copilot',
   meetings: 'Meetings & Video',
-  documents: 'Documents',
+  documents: 'Docs · Pages',
   projects: 'Tasks & Kanban',
   code: 'Code Repositories',
   channels: 'Channels',
   settings: 'Settings',
   finance: 'Finance Tracker',
-  files: 'File Manager',
+  files: 'Docs · Files',
   reports: 'Report Synthesizer',
 };
 
@@ -33,6 +33,7 @@ export const SOLO_NAV = [
   { id: 'meetings', label: 'Meetings', icon: 'Video' },
   { id: 'documents', label: 'Documents', icon: 'FileText' },
   { id: 'projects', label: 'Tasks', icon: 'FolderKanban' },
+  { id: 'code', label: 'Code Repos', icon: 'Code2' },
   { id: 'finance', label: 'Finance', icon: 'DollarSign' },
   { id: 'files', label: 'Files', icon: 'FolderOpen' },
   { id: 'reports', label: 'Reports', icon: 'FileBarChart' },

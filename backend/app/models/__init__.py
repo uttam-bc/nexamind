@@ -52,6 +52,11 @@ class User(Base):
     is_email_verified: Mapped[bool] = mapped_column(Boolean, default=True, server_default=func.true(), nullable=False)
     google_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Incremented on logout, password change/reset and deactivation; tokens carry the value they
+    # were issued with, so bumping it revokes every outstanding token for the user.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # Set when the account is deleted. The row is kept (anonymised) so shared content stays intact.
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now,
@@ -217,6 +222,26 @@ class EmailVerification(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now,
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
+class ContactMessage(Base):
+    """Messages sent through the public contact form."""
+
+    __tablename__ = "contact_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    client_ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, server_default=func.false(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now,

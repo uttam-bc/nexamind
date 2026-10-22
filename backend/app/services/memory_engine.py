@@ -46,8 +46,10 @@ def extract_text_from_document(doc: Document) -> str:
 
     parts: list[str] = []
     if isinstance(raw_content, dict):
-        if raw_content.get("text"):
-            parts.append(str(raw_content["text"]).strip())
+        # "text" is what the editor saves; when present it is the whole document. Older
+        # AI-written documents also carried a copy in "blocks", which must not be read twice.
+        if isinstance(raw_content.get("text"), str) and raw_content["text"].strip():
+            return raw_content["text"].strip()
         for block in raw_content.get("blocks") or []:
             if not isinstance(block, dict):
                 continue

@@ -124,6 +124,7 @@ class Message(Base):
         server_default=func.current_timestamp(),
         nullable=False,
     )
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     channel: Mapped["Channel"] = relationship(back_populates="messages")
     sender: Mapped["User | None"] = relationship(foreign_keys=[sender_id])

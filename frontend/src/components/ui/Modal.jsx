@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import { nextDialogId, useDialog } from '../../lib/dialog';
 
-export default function Modal({ open, onClose, title, children, size = 'md', footer }) {
+export default function Modal({ open, onClose, title, children, size = 'md', footer, className = '', panelClassName }) {
+  const ref = useDialog(open, onClose);
+  const [titleId] = useState(() => nextDialogId('modal-title'));
   if (!open) return null;
 
   const sizes = {
@@ -13,20 +16,27 @@ export default function Modal({ open, onClose, title, children, size = 'md', foo
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in ${className}`}
       onClick={onClose}
-      role="dialog"
-      aria-modal="true"
     >
       <div
-        className={`glass-panel rounded-2xl border border-slate-700/80 w-full ${sizes[size]} shadow-2xl animate-slide-up max-h-[90vh] flex flex-col`}
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : 'Dialog'}
+        tabIndex={-1}
+        className={
+          panelClassName ||
+          `glass-panel rounded-2xl border border-slate-700/80 w-full ${sizes[size]} shadow-2xl animate-slide-up max-h-[90vh] flex flex-col outline-none`
+        }
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/80 flex-shrink-0">
-            <h3 className="text-base font-bold text-slate-100">{title}</h3>
-            <button onClick={onClose} className="btn-ghost p-1.5 rounded-lg" aria-label="Close">
-              <X className="w-4 h-4" />
+            <h2 id={titleId} className="text-base font-bold text-slate-100">{title}</h2>
+            <button type="button" onClick={onClose} className="btn-ghost p-1.5 rounded-lg" aria-label="Close dialog">
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
         )}

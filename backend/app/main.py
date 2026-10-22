@@ -8,10 +8,12 @@ from fastapi.responses import JSONResponse
 
 from app import database
 from app.config import get_settings
+from app.monitoring import init_monitoring
 from app.routers import (
     ai_agent,
     auth,
     calendar,
+    contact,
     channels,
     documents,
     files,
@@ -31,6 +33,7 @@ from app.services.websocket_manager import ws_manager
 settings = get_settings()
 
 logging.basicConfig(level=settings.log_level)
+init_monitoring(settings.sentry_dsn, settings.app_env)
 logger = logging.getLogger(__name__)
 # httpx logs full request URLs at INFO; keep provider calls out of the logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -44,6 +47,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         async with database.engine.begin() as conn:
             await conn.run_sync(database.Base.metadata.create_all)
         logger.info("Database tables created (AUTO_CREATE_SCHEMA). Use Alembic migrations in production.")
+
+    if not settings.auto_create_schema:
+        # NX-BUG-008: an out-of-date database otherwise shows up later as confusing 500 errors.
+        try:
+            current, head = await database.schema_revision_status()
+            if current != head:
+                logger.error(
+                    "Database schema is at revision %s but the code expects %s. "
+                    "Run `alembic upgrade head` in backend/ (start_nexamind.bat does this).",
+                    current, head,
+                )
+        except Exception as exc:
+            logger.warning("Could not check the database migration revision: %s", exc)
 
     await ws_manager.start()
     if settings.run_background_jobs:
@@ -88,12 +104,12 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}
 
 
-for module in (auth, workspaces, documents, projects, files, finance, channels, websockets, sessions,
+for module in (auth, contact, workspaces, documents, projects, files, finance, channels, websockets, sessions,
                ai_agent, reports, video, calendar):
     app.include_router(module.router)
 app.include_router(ai_agent.global_ai_router)

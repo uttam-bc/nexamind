@@ -77,37 +77,52 @@ def _send_smtp_sync(to_email: str, subject: str, html_content: str, text_content
 
 
 async def send_email(to_email: str, subject: str, html_content: str, text_content: str) -> bool:
-    """Send an email asynchronously via SMTP.
-    
-    If SMTP is not configured, logs the email details for local testing and returns False.
+    """Send an email via SMTP. Returns True only when the server accepted the message.
+
+    Never logs the subject or body: they can contain verification codes.
     """
-    if not (settings.smtp_host and settings.smtp_user and settings.smtp_password):
-        logger.info(
-            "\n"
-            "======================================================================\n"
-            " [NexaMind Email Service - SMTP Not Configured]\n"
-            " To: %s\n"
-            " Subject: %s\n"
-            " Content preview:\n"
-            " %s\n"
-            " (To send real emails, set SMTP_HOST, SMTP_USER, SMTP_PASSWORD in .env)\n"
-            "======================================================================",
-            to_email,
-            subject,
-            text_content[:300],
-        )
+    if not get_settings().smtp_configured:
+        logger.warning("Email to %s not sent: SMTP is not configured", mask_email(to_email))
         return False
 
     try:
         await asyncio.to_thread(_send_smtp_sync, to_email, subject, html_content, text_content)
-        logger.info("Successfully sent email to %s (Subject: %s)", to_email, subject)
-        return True
-    except Exception as exc:
-        logger.error("Failed to send email to %s: %s", to_email, exc, exc_info=True)
-        # In development, fall back gracefully
-        if settings.is_development:
-            return False
-        raise
+    except Exception as exc:  # SMTP errors must not leak to clients or crash the request
+        logger.error("Email to %s failed: %s", mask_email(to_email), exc.__class__.__name__)
+        return False
+    logger.info("Email sent to %s", mask_email(to_email))
+    return True
+
+
+def mask_email(address: str) -> str:
+    """j***@example.com — enough to debug delivery without logging the full address."""
+    local, _, domain = address.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else "***"
+
+
+async def send_account_exists_notice(to_email: str) -> bool:
+    """Sent instead of a code when someone tries to register an address that already has an account.
+
+    Keeps the API response identical for new and existing addresses (no account enumeration)."""
+    subject = "Someone tried to create a NexaMind account with your email"
+    text = (
+        "Someone (hopefully you) tried to create a new NexaMind account with this email address, "
+        "but you already have one.\n\n"
+        "Sign in instead, or use 'Forgot password' on the sign-in screen to reset your password.\n\n"
+        "If this wasn't you, you can ignore this email."
+    )
+    html = f"<p>{text.replace(chr(10) + chr(10), '</p><p>')}</p>"
+    return await send_email(to_email, subject, html, text)
+
+
+async def send_contact_message(to_email: str, name: str, sender: str, subject: str, message: str) -> bool:
+    import html as html_lib
+
+    mail_subject = f"[NexaMind contact] {subject or 'New message'}"[:200]
+    text = f"From: {name} <{sender}>\n\n{message}"
+    body = f"<p><strong>From:</strong> {html_lib.escape(name)} &lt;{html_lib.escape(sender)}&gt;</p>" \
+           f"<pre style='white-space:pre-wrap'>{html_lib.escape(message)}</pre>"
+    return await send_email(to_email, mail_subject, body, text)
 
 
 async def send_verification_otp(to_email: str, otp_code: str, purpose: str = "register") -> bool:
@@ -166,7 +181,7 @@ async def send_verification_otp(to_email: str, otp_code: str, purpose: str = "re
           </tr>
           <tr>
             <td style="border-top: 1px solid #334155; padding-top: 20px; font-size: 12px; line-height: 18px; color: #64748B; text-align: center;">
-              If you didn't attempt to sign up for NexaMind, you can safely ignore this email.
+              {"If you didn't ask to reset your NexaMind password, you can ignore this email; your password is unchanged." if purpose == "reset_password" else "If you didn't attempt to sign up for NexaMind, you can safely ignore this email."}
             </td>
           </tr>
         </table>

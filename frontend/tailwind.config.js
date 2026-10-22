@@ -4,10 +4,18 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Plus Jakarta Sans', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Geist', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
+        // Previously defined inline for the Tailwind Play CDN in index.html.
+        'engineering-indigo': '#4F46E5',
+        'group-violet': '#8B5CF6',
+        'urgent-rose': '#F43F5E',
+        'success-emerald': '#10B981',
+        'warning-amber': '#F59E0B',
+        'slate-surface': '#F8FAFC',
+        'border-subtle': '#E2E8F0',
         surface: {
           DEFAULT: '#0c1018',
           raised: '#111827',
@@ -24,10 +32,6 @@ export default {
           hover: '#34d399',
           muted: 'rgba(16, 185, 129, 0.12)',
         },
-      },
-      borderRadius: {
-        '2xl': '1rem',
-        '3xl': '1.25rem',
       },
       boxShadow: {
         glow: '0 0 24px rgba(99, 102, 241, 0.18)',

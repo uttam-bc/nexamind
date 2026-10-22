@@ -1,13 +1,15 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
 from app.schemas.workspace import (
+    MemberRoleUpdate,
     WorkspaceCreate,
+    WorkspaceDeleteRequest,
     WorkspaceDetailResponse,
     WorkspaceJoin,
     WorkspaceMemberDetailResponse,
@@ -15,7 +17,11 @@ from app.schemas.workspace import (
     WorkspaceUpdate,
 )
 from app.services.workspace_service import (
+    change_member_role,
     create_team_workspace,
+    delete_workspace,
+    leave_workspace,
+    remove_workspace_member,
     get_workspace_for_user,
     join_workspace_by_code,
     list_user_workspaces,
@@ -30,7 +36,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 @router.get("", response_model=list[WorkspaceResponse])
 async def list_workspaces(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[WorkspaceResponse]:
     workspaces = await list_user_workspaces(db, current_user.id)
     return [WorkspaceResponse.model_validate(workspace) for workspace in workspaces]
@@ -40,7 +46,7 @@ async def list_workspaces(
 async def create_workspace(
     data: WorkspaceCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> WorkspaceResponse:
     workspace = await create_team_workspace(db, current_user, data.name)
     return WorkspaceResponse.model_validate(workspace)
@@ -50,7 +56,7 @@ async def create_workspace(
 async def get_workspace(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> WorkspaceDetailResponse:
     workspace = await get_workspace_for_user(db, workspace_id, current_user.id)
     return WorkspaceDetailResponse.model_validate(workspace)
@@ -61,7 +67,7 @@ async def update_workspace(
     workspace_id: UUID,
     data: WorkspaceUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> WorkspaceResponse:
     workspace = await update_workspace_name(db, workspace_id, current_user.id, data.name)
     return WorkspaceResponse.model_validate(workspace)
@@ -71,7 +77,7 @@ async def update_workspace(
 async def get_workspace_members(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[WorkspaceMemberDetailResponse]:
     members = await list_workspace_members_with_details(db, workspace_id, current_user.id)
     return [WorkspaceMemberDetailResponse.model_validate(m) for m in members]
@@ -81,7 +87,7 @@ async def get_workspace_members(
 async def regenerate_join_code(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> WorkspaceResponse:
     workspace = await regenerate_workspace_join_code(db, workspace_id, current_user.id)
     return WorkspaceResponse.model_validate(workspace)
@@ -91,7 +97,52 @@ async def regenerate_join_code(
 async def join_workspace(
     data: WorkspaceJoin,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> WorkspaceResponse:
     workspace = await join_workspace_by_code(db, current_user, data.join_code)
     return WorkspaceResponse.model_validate(workspace)
+
+
+@router.post("/{workspace_id}/leave", status_code=204)
+async def leave(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    await leave_workspace(db, workspace_id, current_user.id)
+    return Response(status_code=204)
+
+
+@router.delete("/{workspace_id}/members/{user_id}", status_code=204)
+async def remove_member(
+    workspace_id: UUID,
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    await remove_workspace_member(db, workspace_id, current_user.id, user_id)
+    return Response(status_code=204)
+
+
+@router.patch("/{workspace_id}/members/{user_id}", status_code=204)
+async def update_member_role(
+    workspace_id: UUID,
+    user_id: UUID,
+    data: MemberRoleUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    await change_member_role(db, workspace_id, current_user.id, user_id, data.role)
+    return Response(status_code=204)
+
+
+@router.delete("/{workspace_id}", status_code=204)
+async def remove_workspace(
+    workspace_id: UUID,
+    data: WorkspaceDeleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    """Permanently delete a team workspace and everything in it (owners only, name confirmation)."""
+    await delete_workspace(db, workspace_id, current_user.id, data.confirm_name)
+    return Response(status_code=204)

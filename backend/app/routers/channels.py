@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,7 @@ from app.schemas.channel import (
     ChannelResponse,
     ChannelUnreadSummary,
     MessageCreate,
+    MessageEdit,
     MessageResponse,
     ReactionSummary,
     ReactionToggleRequest,
@@ -20,6 +22,9 @@ from app.services.channel_service import (
     add_channel_member,
     create_channel,
     create_or_get_dm_channel,
+    delete_channel,
+    delete_message,
+    edit_message,
     get_channel,
     get_channel_unreads,
     list_channels,
@@ -37,7 +42,7 @@ router = APIRouter(prefix="/workspaces/{workspace_id}/channels", tags=["channels
 async def get_workspace_channels(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ChannelResponse]:
     channels = await list_channels(db, workspace_id, current_user.id)
     return [ChannelResponse.model_validate(c) for c in channels]
@@ -47,7 +52,7 @@ async def get_workspace_channels(
 async def get_unread_channels(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ChannelUnreadSummary]:
     unreads = await get_channel_unreads(db, workspace_id, current_user.id)
     return [ChannelUnreadSummary.model_validate(u) for u in unreads]
@@ -58,7 +63,7 @@ async def create_workspace_channel(
     workspace_id: UUID,
     data: ChannelCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ChannelResponse:
     channel = await create_channel(db, workspace_id, current_user, data)
     if not channel.is_private:
@@ -79,7 +84,7 @@ async def create_or_open_dm(
     workspace_id: UUID,
     data: CreateDmRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ChannelResponse:
     channel = await create_or_get_dm_channel(db, workspace_id, current_user, data.target_username)
     return ChannelResponse.model_validate(channel)
@@ -91,7 +96,7 @@ async def add_private_channel_member(
     channel_id: UUID,
     data: CreateDmRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ChannelResponse:
     channel = await add_channel_member(db, workspace_id, channel_id, current_user, data.target_username)
     return ChannelResponse.model_validate(channel)
@@ -102,7 +107,7 @@ async def get_workspace_channel(
     workspace_id: UUID,
     channel_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ChannelResponse:
     channel = await get_channel(db, workspace_id, channel_id, current_user.id)
     return ChannelResponse.model_validate(channel)
@@ -115,8 +120,9 @@ async def get_channel_messages(
     parent_id: UUID | None = None,
     root_only: bool = False,
     limit: int = Query(100, ge=1, le=500),
+    before: datetime | None = Query(None, description="Return messages older than this timestamp"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[MessageResponse]:
     messages = await list_messages(
         db,
@@ -126,6 +132,7 @@ async def get_channel_messages(
         parent_id=parent_id,
         root_only=root_only,
         limit=limit,
+        before=before,
     )
     return [MessageResponse.model_validate(m) for m in messages]
 
@@ -136,7 +143,7 @@ async def post_channel_message(
     channel_id: UUID,
     data: MessageCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> MessageResponse:
     message = await post_message(db, workspace_id, channel_id, current_user, data)
     msg_response = MessageResponse.model_validate(message)
@@ -151,6 +158,52 @@ async def post_channel_message(
     return msg_response
 
 
+@router.patch("/{channel_id}/messages/{message_id}", response_model=MessageResponse)
+async def edit_channel_message(
+    workspace_id: UUID,
+    channel_id: UUID,
+    message_id: UUID,
+    data: MessageEdit,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> MessageResponse:
+    message = MessageResponse.model_validate(
+        await edit_message(db, workspace_id, channel_id, message_id, current_user.id, data.content)
+    )
+    await ws_manager.broadcast_to_channel(
+        channel_id,
+        {"event": "message_edited", "channel_id": str(channel_id), "data": message.model_dump(mode="json")},
+    )
+    return message
+
+
+@router.delete("/{channel_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_channel_message(
+    workspace_id: UUID,
+    channel_id: UUID,
+    message_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    await delete_message(db, workspace_id, channel_id, message_id, current_user.id)
+    await ws_manager.broadcast_to_channel(
+        channel_id,
+        {"event": "message_deleted", "channel_id": str(channel_id), "message_id": str(message_id)},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_channel(
+    workspace_id: UUID,
+    channel_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    await delete_channel(db, workspace_id, channel_id, current_user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/{channel_id}/messages/{message_id}/reactions", response_model=list[ReactionSummary])
 async def react_to_message(
     workspace_id: UUID,
@@ -158,7 +211,7 @@ async def react_to_message(
     message_id: UUID,
     data: ReactionToggleRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ReactionSummary]:
     reactions = await toggle_reaction(
         db, workspace_id, channel_id, message_id, current_user.id, data.emoji
@@ -181,7 +234,7 @@ async def mark_channel_as_read(
     workspace_id: UUID,
     channel_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     await mark_channel_read(db, workspace_id, channel_id, current_user.id)
     return {"status": "ok"}

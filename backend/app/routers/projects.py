@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Response, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -51,10 +51,12 @@ router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["projects"])
 async def get_tasks(
     workspace_id: UUID,
     status: TaskStatus | None = None,
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[TaskResponse]:
-    tasks = await list_tasks(db, workspace_id, current_user.id, status=status)
+    tasks = await list_tasks(db, workspace_id, current_user.id, status=status, limit=limit, offset=offset)
     return [TaskResponse.model_validate(task) for task in tasks]
 
 
@@ -63,7 +65,7 @@ async def create_workspace_task(
     workspace_id: UUID,
     data: TaskCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TaskResponse:
     task = await create_task(db, workspace_id, current_user, data)
     task_data = TaskResponse.model_validate(task).model_dump(mode="json")
@@ -79,7 +81,7 @@ async def get_workspace_task(
     workspace_id: UUID,
     task_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TaskResponse:
     task = await get_task(db, workspace_id, task_id, current_user.id)
     return TaskResponse.model_validate(task)
@@ -91,7 +93,7 @@ async def update_workspace_task(
     task_id: UUID,
     data: TaskUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TaskResponse:
     task = await update_task(db, workspace_id, task_id, current_user.id, data)
     task_data = TaskResponse.model_validate(task).model_dump(mode="json")
@@ -107,7 +109,7 @@ async def delete_workspace_task(
     workspace_id: UUID,
     task_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await delete_task(db, workspace_id, task_id, current_user.id)
     await ws_manager.broadcast_to_workspace(
@@ -124,7 +126,7 @@ async def delete_workspace_task(
 async def get_repos(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[CodeRepoResponse]:
     repos = await list_repos(db, workspace_id, current_user.id)
     return [CodeRepoResponse.model_validate(repo) for repo in repos]
@@ -135,7 +137,7 @@ async def create_workspace_repo(
     workspace_id: UUID,
     data: CodeRepoCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CodeRepoResponse:
     repo = await create_repo(db, workspace_id, current_user, data)
     return CodeRepoResponse.model_validate(repo)
@@ -146,7 +148,7 @@ async def get_workspace_repo(
     workspace_id: UUID,
     repo_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CodeRepoResponse:
     repo = await get_repo(db, workspace_id, repo_id, current_user.id)
     return CodeRepoResponse.model_validate(repo)
@@ -159,7 +161,7 @@ async def get_repo_commits(
     workspace_id: UUID,
     repo_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[CommitResponse]:
     commits = await list_commits(db, workspace_id, repo_id, current_user.id)
     return [CommitResponse.model_validate(commit) for commit in commits]
@@ -171,7 +173,7 @@ async def create_repo_commit(
     repo_id: UUID,
     data: CommitCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CommitResponse:
     commit = await create_commit(db, workspace_id, repo_id, current_user, data)
     return CommitResponse.model_validate(commit)
@@ -185,7 +187,7 @@ async def get_repo_issues(
     repo_id: UUID,
     status: IssueStatus | None = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[IssueResponse]:
     issues = await list_issues(db, workspace_id, repo_id, current_user.id, status=status)
     return [IssueResponse.model_validate(issue) for issue in issues]
@@ -197,7 +199,7 @@ async def create_repo_issue(
     repo_id: UUID,
     data: IssueCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> IssueResponse:
     issue = await create_issue(db, workspace_id, repo_id, current_user, data)
     return IssueResponse.model_validate(issue)
@@ -210,7 +212,7 @@ async def update_repo_issue(
     issue_id: UUID,
     data: IssueUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> IssueResponse:
     issue = await update_issue(db, workspace_id, repo_id, issue_id, current_user.id, data)
     return IssueResponse.model_validate(issue)
@@ -223,7 +225,7 @@ async def get_repo_files(
     workspace_id: UUID,
     repo_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[RepoFileResponse]:
     files = await list_repo_files(db, workspace_id, repo_id, current_user.id)
     return [RepoFileResponse.model_validate(f) for f in files]
@@ -235,7 +237,7 @@ async def create_or_save_repo_file(
     repo_id: UUID,
     data: RepoFileCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> RepoFileResponse:
     file_record = await save_repo_file(db, workspace_id, repo_id, current_user, data)
     return RepoFileResponse.model_validate(file_record)
@@ -247,7 +249,7 @@ async def delete_repo_file_endpoint(
     repo_id: UUID,
     file_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await delete_repo_file(db, workspace_id, repo_id, file_id, current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

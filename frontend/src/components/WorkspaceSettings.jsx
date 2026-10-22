@@ -18,18 +18,30 @@ import {
   Database,
   ArrowRight,
   Hash,
+  UserCog,
+  LogOut,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../api';
 import GeminiKeySettings from './GeminiKeySettings';
+import AccountSettings from './AccountSettings';
 import FeatureHeader from './FeatureHeader';
+import { notify, confirmDialog } from '../context/ToastContext';
 
 export default function WorkspaceSettings({
   workspace,
   user,
   onRefreshWorkspace,
   onBack,
+  onUserUpdated,
+  onTokenChanged,
+  onAccountDeleted,
+  onLeftWorkspace,
 }) {
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'members' | 'ai' | 'access'
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'members' | 'ai' | 'access' | 'account'
+  const [memberBusy, setMemberBusy] = useState(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [workspaceError, setWorkspaceError] = useState('');
   const [members, setMembers] = useState([]);
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState(workspace?.name || '');
@@ -82,7 +94,7 @@ export default function WorkspaceSettings({
       setIsEditingName(false);
       await onRefreshWorkspace();
     } catch (err) {
-      alert(`Update failed: ${err.message}`);
+      notify(`Update failed: ${err.message}`, 'error');
     } finally {
       setSavingName(false);
     }
@@ -90,9 +102,7 @@ export default function WorkspaceSettings({
 
   const handleRegenerateCode = async () => {
     if (
-      !confirm(
-        'The previous join code will immediately become invalid. Teams currently trying to join will need the new code. Continue?'
-      )
+      !(await confirmDialog('The previous join code will immediately become invalid. Teams currently trying to join will need the new code.', { title: 'Regenerate join code?', confirmLabel: 'Regenerate' }))
     ) {
       return;
     }
@@ -100,9 +110,9 @@ export default function WorkspaceSettings({
     try {
       await api.regenerateJoinCode(workspace.id);
       await onRefreshWorkspace();
-      alert('Join code regenerated successfully!');
+      notify('Join code regenerated successfully!', 'success');
     } catch (err) {
-      alert(err.message);
+      notify(err.message, 'error');
     } finally {
       setRegenerating(false);
     }
@@ -146,12 +156,10 @@ export default function WorkspaceSettings({
     setIsReindexing(true);
     try {
       const res = await api.reindexMemory(workspace.id);
-      alert(
-        `Memory pipeline run complete!\nIngested: ${res.ingested_count} records\nExtracted: ${res.extracted_count} insights\nActive consolidated memories: ${res.consolidated_count}`
-      );
+      notify(`Memory pipeline run complete!\nIngested: ${res.ingested_count} records\nExtracted: ${res.extracted_count} insights\nActive consolidated memories: ${res.consolidated_count}`, 'success');
       loadMemoryStats();
     } catch (err) {
-      alert(`Memory re-indexing failed: ${err.message}`);
+      notify(`Memory re-indexing failed: ${err.message}`, 'error');
     } finally {
       setIsReindexing(false);
     }
@@ -161,6 +169,68 @@ export default function WorkspaceSettings({
     workspace?.owner_id === user?.id ||
     members.find((m) => m.user_id === user?.id)?.role === 'owner' ||
     members.find((m) => m.user_id === user?.id)?.role === 'admin';
+  const myRole = members.find((m) => m.user_id === user?.id)?.role;
+  const isTeam = workspace?.type === 'team';
+
+  const runMemberAction = async (key, action, successMessage) => {
+    setMemberBusy(key);
+    try {
+      await action();
+      if (successMessage) notify(successMessage, 'success');
+      await loadMembers();
+    } catch (err) {
+      notify(err.message, 'error');
+    } finally {
+      setMemberBusy(null);
+    }
+  };
+
+  const handleRoleChange = (member, role) =>
+    runMemberAction(member.user_id, () => api.updateMemberRole(workspace.id, member.user_id, role), `${member.name} is now ${role}.`);
+
+  const handleRemoveMember = async (member) => {
+    const ok = await confirmDialog(`${member.name} will lose access to this workspace and its private channels.`, {
+      title: 'Remove member?',
+      confirmLabel: 'Remove',
+    });
+    if (ok) await runMemberAction(member.user_id, () => api.removeWorkspaceMember(workspace.id, member.user_id), `${member.name} was removed.`);
+  };
+
+  const handleLeave = async () => {
+    const ok = await confirmDialog(`You'll lose access to "${workspace.name}" until someone shares a join code again.`, {
+      title: 'Leave workspace?',
+      confirmLabel: 'Leave',
+    });
+    if (!ok) return;
+    try {
+      await api.leaveWorkspace(workspace.id);
+      notify(`You left ${workspace.name}.`, 'success');
+      onLeftWorkspace?.();
+    } catch (err) {
+      setWorkspaceError(err.message);
+    }
+  };
+
+  const handleDeleteWorkspace = async (e) => {
+    e.preventDefault();
+    setWorkspaceError('');
+    if (deleteConfirmName.trim() !== workspace.name) {
+      setWorkspaceError('Type the workspace name exactly to confirm.');
+      return;
+    }
+    const ok = await confirmDialog('All documents, tasks, channels, files and meetings in this workspace are permanently deleted.', {
+      title: `Delete "${workspace.name}"?`,
+      confirmLabel: 'Delete workspace',
+    });
+    if (!ok) return;
+    try {
+      await api.deleteWorkspace(workspace.id, deleteConfirmName.trim());
+      notify('Workspace deleted.', 'success');
+      onLeftWorkspace?.();
+    } catch (err) {
+      setWorkspaceError(err.message);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col select-none">
@@ -205,7 +275,7 @@ export default function WorkspaceSettings({
           >
             <Users className="w-4 h-4 text-emerald-600" />
             <span>Members & Handles</span>
-            <span className="ml-auto bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded-full text-[10px]">
+            <span className="ml-auto bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded-full text-xs">
               {members.length}
             </span>
           </button>
@@ -220,6 +290,19 @@ export default function WorkspaceSettings({
           >
             <Brain className="w-4 h-4 text-purple-600" />
             <span>AI & Gemini Engine</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('account')}
+            aria-pressed={activeTab === 'account'}
+            className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-bold transition w-full text-left ${
+              activeTab === 'account'
+                ? 'bg-indigo-50 text-indigo-700 shadow-xs'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            }`}
+          >
+            <UserCog className="w-4 h-4 text-slate-700" aria-hidden="true" />
+            <span>My Account</span>
           </button>
 
           {workspace?.type === 'team' && (
@@ -238,7 +321,66 @@ export default function WorkspaceSettings({
         </div>
 
         {/* Content Panel */}
-        <div className="flex-1 bg-white rounded-2xl border border-slate-200 p-6 shadow-xs overflow-y-auto">
+        <div className="flex-1 flex flex-col bg-white rounded-2xl border border-slate-200 p-6 shadow-xs overflow-y-auto">
+          {activeTab === 'account' && (
+            <AccountSettings
+              user={user}
+              onUserUpdated={onUserUpdated}
+              onTokenChanged={onTokenChanged}
+              onAccountDeleted={onAccountDeleted}
+            />
+          )}
+
+          {activeTab === 'overview' && isTeam && (
+            <div className="max-w-3xl mt-8 space-y-4 order-last">
+              {workspaceError && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl">
+                  {workspaceError}
+                </div>
+              )}
+              <section aria-labelledby="ws-leave-heading" className="p-4 rounded-2xl border border-slate-200 space-y-2">
+                <h3 id="ws-leave-heading" className="font-bold text-slate-900">Leave this workspace</h3>
+                <p className="text-sm text-slate-600">
+                  {myRole === 'owner'
+                    ? 'As an owner, make another member an owner before leaving.'
+                    : 'You can rejoin later with a join code.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleLeave}
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-slate-800 border border-slate-300 hover:bg-slate-50 px-3.5 py-2 rounded-xl"
+                >
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
+                  Leave workspace
+                </button>
+              </section>
+              {myRole === 'owner' && (
+                <section aria-labelledby="ws-delete-heading" className="p-4 rounded-2xl border border-rose-200 bg-rose-50/40 space-y-3">
+                  <h3 id="ws-delete-heading" className="font-bold text-rose-800">Delete workspace</h3>
+                  <form onSubmit={handleDeleteWorkspace} className="space-y-2" noValidate>
+                    <label htmlFor="ws-delete-confirm" className="text-sm text-slate-700 block">
+                      Type <strong>{workspace?.name}</strong> to confirm
+                    </label>
+                    <input
+                      id="ws-delete-confirm"
+                      value={deleteConfirmName}
+                      onChange={(e) => setDeleteConfirmName(e.target.value)}
+                      autoComplete="off"
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-2 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 px-3.5 py-2 rounded-xl"
+                    >
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      Delete workspace permanently
+                    </button>
+                  </form>
+                </section>
+              )}
+            </div>
+          )}
+
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <div className="max-w-3xl space-y-6">
@@ -251,12 +393,12 @@ export default function WorkspaceSettings({
 
               <div className="space-y-4">
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block">
+                  <label htmlFor="workspace-settings-field-1" className="text-xs font-bold uppercase tracking-wider text-slate-600 block">
                     Workspace Name
                   </label>
                   {isEditingName ? (
                     <form onSubmit={handleSaveName} className="flex gap-2">
-                      <input
+                      <input id="workspace-settings-field-1"
                         type="text"
                         required
                         autoFocus
@@ -335,12 +477,12 @@ export default function WorkspaceSettings({
 
               {/* Search & Invite Box */}
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <label htmlFor="workspace-settings-field-2" className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <UserPlus className="w-4 h-4 text-indigo-600" />
                   <span>Find User by @Username</span>
                 </label>
                 <div className="relative">
-                  <input
+                  <input id="workspace-settings-field-2"
                     type="text"
                     placeholder="Type @username to search..."
                     value={inviteQuery}
@@ -348,7 +490,7 @@ export default function WorkspaceSettings({
                     className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                   />
                   {isSearchingUsers && (
-                    <span className="absolute right-3 top-2.5 text-[10px] text-slate-400 font-mono animate-pulse">
+                    <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono animate-pulse">
                       searching...
                     </span>
                   )}
@@ -368,7 +510,7 @@ export default function WorkspaceSettings({
                         </div>
                         <button
                           onClick={() => handleCopyInviteDetails(u)}
-                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px] transition"
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-xs transition"
                         >
                           Copy Join Invite
                         </button>
@@ -411,26 +553,55 @@ export default function WorkspaceSettings({
                           <div className="font-bold text-slate-900 flex items-center gap-2">
                             <span>{member.name}</span>
                             {member.username && (
-                              <span className="text-indigo-600 font-mono text-[11px]">
+                              <span className="text-indigo-600 font-mono text-xs">
                                 @{member.username}
                               </span>
                             )}
                             {isCurrent && (
-                              <span className="bg-indigo-100 text-indigo-700 text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                              <span className="bg-indigo-100 text-indigo-700 text-xs px-1.5 py-0.2 rounded-full font-bold">
                                 YOU
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-slate-500">{member.email}</div>
+                          <div className="text-xs text-slate-500">{member.email}</div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <span className="text-[11px] text-slate-400 hidden sm:inline">
+                      <div className="flex items-center gap-3 flex-wrap justify-end">
+                        <span className="text-xs text-slate-500 hidden sm:inline">
                           Joined {new Date(member.created_at).toLocaleDateString()}
                         </span>
+                        {isTeam && myRole === 'owner' && (
+                          <>
+                            <label htmlFor={`role-${member.user_id}`} className="sr-only">
+                              Role for {member.name}
+                            </label>
+                            <select
+                              id={`role-${member.user_id}`}
+                              value={member.role}
+                              disabled={memberBusy === member.user_id}
+                              onChange={(e) => handleRoleChange(member, e.target.value)}
+                              className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white"
+                            >
+                              <option value="owner">Owner</option>
+                              <option value="admin">Admin</option>
+                              <option value="member">Member</option>
+                            </select>
+                          </>
+                        )}
+                        {isTeam && !isCurrent && (myRole === 'owner' || (myRole === 'admin' && member.role === 'member')) && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMember(member)}
+                            disabled={memberBusy === member.user_id}
+                            className="text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg"
+                            aria-label={`Remove ${member.name} from workspace`}
+                          >
+                            Remove
+                          </button>
+                        )}
                         <span
-                          className={`px-2.5 py-1 rounded-full font-bold uppercase text-[10px] ${
+                          className={`px-2.5 py-1 rounded-full font-bold uppercase text-xs ${
                             member.role === 'owner'
                               ? 'bg-amber-100 text-amber-800'
                               : member.role === 'admin'
@@ -475,19 +646,19 @@ export default function WorkspaceSettings({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
                   <div className="p-3 bg-white rounded-xl border border-slate-200">
                     <div className="font-bold text-indigo-600">1. Ingestion</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Docs, Chats, Tasks, Meetings</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Docs, Chats, Tasks, Meetings</div>
                   </div>
                   <div className="p-3 bg-white rounded-xl border border-slate-200">
                     <div className="font-bold text-purple-600">2. Extraction</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Key Facts & Decisions</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Key Facts & Decisions</div>
                   </div>
                   <div className="p-3 bg-white rounded-xl border border-slate-200">
                     <div className="font-bold text-emerald-600">3. Consolidation</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Importance & Dedup</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Importance & Dedup</div>
                   </div>
                   <div className="p-3 bg-white rounded-xl border border-slate-200">
                     <div className="font-bold text-blue-600">4. Storage</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Episodic AI Retrieval</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Episodic AI Retrieval</div>
                   </div>
                 </div>
 

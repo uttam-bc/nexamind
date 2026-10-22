@@ -11,6 +11,12 @@ os.environ.update({
     "RATE_LIMIT_ENABLED": "false",
     "RUN_BACKGROUND_JOBS": "false",
     "AUTO_CREATE_SCHEMA": "false",
+    # Fixtures register users directly; OTP flows are tested with verification switched on.
+    "REQUIRE_EMAIL_VERIFICATION": "false",
+    # Dev auth returns OTP codes in responses and accepts mock Google credentials (test only).
+    "ENABLE_DEV_AUTH": "true",
+    "SMTP_HOST": "",
+    "GOOGLE_CLIENT_ID": "",
     "UPLOAD_DIR": os.path.join(os.path.dirname(__file__), ".test_uploads"),
 })
 
@@ -25,6 +31,7 @@ import app.database as app_db
 from app.database import Base, enable_sqlite_foreign_keys, get_db
 from app.main import app
 from app.security import rate_limiter
+from app.services import llm_client
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -74,6 +81,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture(autouse=True)
 def _reset_rate_limits() -> None:
     rate_limiter.reset()
+    llm_client.reset_model_health()
 
 
 @pytest_asyncio.fixture

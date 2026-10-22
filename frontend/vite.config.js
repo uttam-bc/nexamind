@@ -14,6 +14,11 @@ export default defineConfig({
         ws: true,
       },
       '/health': 'http://127.0.0.1:8000',
+      '/contact': 'http://127.0.0.1:8000',
     },
+  },
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.{js,jsx}'],
   },
 });

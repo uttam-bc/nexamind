@@ -24,9 +24,14 @@ import {
   ArrowLeft,
   UserPlus,
   AtSign,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { api, openSocket } from '../api';
 import FormattedChatMessage from './FormattedChatMessage';
+import { notify, confirmDialog } from '../context/ToastContext';
+
+const PAGE_SIZE = 100;
 
 const QUICK_REACTIONS = [
   { emoji: '👍', label: 'Like' },
@@ -65,6 +70,10 @@ export default function Channels({
   const [newChannelDesc, setNewChannelDesc] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [activeHoverMessageId, setActiveHoverMessageId] = useState(null);
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editText, setEditText] = useState('');
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   // DM / Invite by Username Modal
   const [showDmModal, setShowDmModal] = useState(false);
@@ -137,8 +146,9 @@ export default function Channels({
 
   const loadMessagesAndConnectWS = async (channelId) => {
     try {
-      const msgs = await api.listMessages(workspaceId, channelId, null, true);
+      const msgs = await api.listMessages(workspaceId, channelId, null, true, { limit: PAGE_SIZE });
       setMessages(msgs || []);
+      setHasOlder((msgs || []).length === PAGE_SIZE);
     } catch (err) {
       console.warn('Error fetching channel messages', err);
     }
@@ -173,6 +183,15 @@ export default function Channels({
                 return [...prev, incoming];
               });
             }
+          } else if (payload.event === 'message_edited' && payload.data) {
+            const updated = payload.data;
+            const apply = (list) => list.map((m) => (m.id === updated.id ? { ...m, ...updated } : m));
+            setMessages(apply);
+            setThreadReplies(apply);
+          } else if (payload.event === 'message_deleted' && payload.message_id) {
+            const drop = (list) => list.filter((m) => m.id !== payload.message_id);
+            setMessages(drop);
+            setThreadReplies(drop);
           } else if (payload.event === 'reaction_updated' && payload.data) {
             const { message_id, reactions } = payload.data;
             setMessages((prev) =>
@@ -212,7 +231,7 @@ export default function Channels({
         return [...prev, created];
       });
     } catch (err) {
-      alert(`Send failed: ${err.message}`);
+      notify(`Send failed: ${err.message}`, 'error');
     } finally {
       setIsSending(false);
     }
@@ -242,7 +261,7 @@ export default function Channels({
         )
       );
     } catch (err) {
-      alert(`Thread reply failed: ${err.message}`);
+      notify(`Thread reply failed: ${err.message}`, 'error');
     } finally {
       setIsThreadSending(false);
     }
@@ -255,6 +274,74 @@ export default function Channels({
       setThreadReplies(replies || []);
     } catch (err) {
       console.warn('Could not load replies', err);
+    }
+  };
+
+  const loadOlderMessages = async () => {
+    if (!activeChannel || messages.length === 0 || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const older = await api.listMessages(workspaceId, activeChannel.id, null, true, {
+        before: messages[0].created_at,
+        limit: PAGE_SIZE,
+      });
+      setMessages((prev) => [...(older || []).filter((m) => !prev.some((p) => p.id === m.id)), ...prev]);
+      setHasOlder((older || []).length === PAGE_SIZE);
+    } catch (err) {
+      notify(`Could not load older messages: ${err.message}`, 'error');
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  const startEditing = (msg) => {
+    setEditingMessageId(msg.id);
+    setEditText(msg.content);
+  };
+
+  const saveEdit = async (msg) => {
+    if (!editText.trim()) {
+      notify('A message cannot be empty. Delete it instead.', 'error');
+      return;
+    }
+    try {
+      const updated = await api.editMessage(workspaceId, activeChannel.id, msg.id, editText.trim());
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, ...updated } : m)));
+      setEditingMessageId(null);
+    } catch (err) {
+      notify(`Could not edit the message: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteMessage = async (msg) => {
+    const ok = await confirmDialog('The message and its thread replies will be removed for everyone.', {
+      title: 'Delete message?',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      await api.deleteMessage(workspaceId, activeChannel.id, msg.id);
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      if (threadRootMessage?.id === msg.id) setThreadRootMessage(null);
+    } catch (err) {
+      notify(`Could not delete the message: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteChannel = async () => {
+    if (!activeChannel) return;
+    const ok = await confirmDialog(`#${getChannelDisplayName(activeChannel)} and all of its messages will be deleted for everyone.`, {
+      title: 'Delete channel?',
+      confirmLabel: 'Delete channel',
+    });
+    if (!ok) return;
+    try {
+      await api.deleteChannel(workspaceId, activeChannel.id);
+      setActiveChannel(null);
+      if (onRefreshChannels) await onRefreshChannels();
+      notify('Channel deleted.', 'success');
+    } catch (err) {
+      notify(`Could not delete the channel: ${err.message}`, 'error');
     }
   };
 
@@ -303,7 +390,7 @@ export default function Channels({
       if (onRefreshChannels) await onRefreshChannels();
       setActiveChannel(created);
     } catch (err) {
-      alert(`Create channel error: ${err.message}`);
+      notify(`Create channel error: ${err.message}`, 'error');
     }
   };
 
@@ -373,7 +460,7 @@ export default function Channels({
         <div className="p-3.5 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onBack && (
-              <button
+              <button aria-label="Back to Dashboard"
                 onClick={onBack}
                 className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition"
                 title="Back to Dashboard"
@@ -383,9 +470,9 @@ export default function Channels({
             )}
             <div className="flex items-center gap-2">
               <MessageSquare className="w-5 h-5 text-indigo-600" />
-              <h2 className="font-extrabold text-sm text-slate-900 tracking-tight">
+              <h1 className="font-extrabold text-sm text-slate-900 tracking-tight">
                 Chats & Channels
-              </h2>
+              </h1>
             </div>
           </div>
 
@@ -411,7 +498,7 @@ export default function Channels({
         <div className="p-3 border-b border-slate-200">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-            <input
+            <input aria-label="Filter channels or @users"
               type="text"
               placeholder="Filter channels or @users..."
               className="w-full bg-slate-100 border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
@@ -425,9 +512,9 @@ export default function Channels({
         <div className="flex-1 overflow-y-auto p-3 space-y-5">
           {/* Main Workspace General Channel */}
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+            <div className="text-xs font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
               <span>Main Channel</span>
-              <span className="bg-indigo-50 text-indigo-700 text-[9px] px-1.5 py-0.5 rounded font-bold">
+              <span className="bg-indigo-50 text-indigo-700 text-xs px-1.5 py-0.5 rounded font-bold">
                 Team
               </span>
             </div>
@@ -446,7 +533,7 @@ export default function Channels({
                   <span className="truncate">general</span>
                 </div>
                 {unreadCounts[generalChannel.id] > 0 && activeChannel?.id !== generalChannel.id && (
-                  <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  <span className="bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                     {unreadCounts[generalChannel.id]}
                   </span>
                 )}
@@ -456,11 +543,11 @@ export default function Channels({
 
           {/* Team Topic Channels */}
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+            <div className="text-xs font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
               <span>Channels ({filteredTeamChannels.length})</span>
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="text-[10px] text-indigo-600 hover:underline font-bold"
+                className="text-xs text-indigo-600 hover:underline font-bold"
               >
                 + Add
               </button>
@@ -490,7 +577,7 @@ export default function Channels({
                       <span className="truncate">{ch.name}</span>
                     </div>
                     {unread > 0 && !isActive && (
-                      <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      <span className="bg-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                         {unread}
                       </span>
                     )}
@@ -502,11 +589,11 @@ export default function Channels({
 
           {/* Direct Messages (DMs) by @username */}
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+            <div className="text-xs font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
               <span>Direct Messages ({filteredDmChannels.length})</span>
               <button
                 onClick={() => setShowDmModal(true)}
-                className="text-[10px] text-indigo-600 hover:underline font-bold flex items-center gap-0.5"
+                className="text-xs text-indigo-600 hover:underline font-bold flex items-center gap-0.5"
               >
                 <Plus className="w-3 h-3" /> New DM
               </button>
@@ -540,7 +627,7 @@ export default function Channels({
                         <span className="truncate">{getChannelDisplayName(ch)}</span>
                       </div>
                       {unread > 0 && !isActive && (
-                        <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        <span className="bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                           {unread}
                         </span>
                       )}
@@ -555,17 +642,17 @@ export default function Channels({
         {/* User Presence Footer */}
         <div className="p-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
           <div className="flex items-center gap-2 truncate">
-            <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-[10px]">
+            <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
               {user?.name ? user.name.slice(0, 2).toUpperCase() : 'ME'}
             </div>
             <div className="min-w-0">
               <span className="font-bold text-slate-900 block truncate">{user?.name}</span>
-              <span className="text-[10px] font-mono text-indigo-600 block truncate">
+              <span className="text-xs font-mono text-indigo-600 block truncate">
                 @{user?.username || 'user'}
               </span>
             </div>
           </div>
-          <span className="text-[10px] font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+          <span className="text-xs font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
             online
           </span>
         </div>
@@ -593,7 +680,7 @@ export default function Channels({
                   <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                     <span>{getChannelDisplayName(activeChannel)}</span>
                     {activeChannel.name === 'general' && (
-                      <span className="text-[10px] font-mono bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
+                      <span className="text-xs font-mono bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
                         Workspace General
                       </span>
                     )}
@@ -608,6 +695,15 @@ export default function Channels({
               </div>
 
               <div className="flex items-center gap-2">
+                {!activeChannel.is_direct && activeChannel.created_by === user?.id && activeChannel.name !== 'general' && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteChannel}
+                    className="text-xs font-bold text-rose-700 hover:bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl transition"
+                  >
+                    Delete channel
+                  </button>
+                )}
                 <button
                   onClick={() => setShowDmModal(true)}
                   className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5"
@@ -639,7 +735,20 @@ export default function Channels({
                   </div>
                 </div>
               ) : (
-                messages.map((msg) => {
+                <>
+                {hasOlder && (
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={loadOlderMessages}
+                      disabled={loadingOlder}
+                      className="text-xs font-semibold text-indigo-700 hover:underline disabled:text-slate-500"
+                    >
+                      {loadingOlder ? 'Loading…' : 'Load older messages'}
+                    </button>
+                  </div>
+                )}
+                {messages.map((msg) => {
                   const isHovered = activeHoverMessageId === msg.id;
                   const replyCount = msg.reply_count || 0;
                   const isOwn = msg.sender_id === user?.id;
@@ -671,7 +780,7 @@ export default function Channels({
                             {msg.sender_name || 'Teammate'}
                           </span>
                           {msg.sender_username && (
-                            <span className="text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                            <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
                               @{msg.sender_username}
                             </span>
                           )}
@@ -684,9 +793,44 @@ export default function Channels({
                         </div>
 
                         {/* Message Bubble - CRISP, HIGH CONTRAST */}
-                        <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed font-sans font-normal">
-                          <FormattedChatMessage content={msg.content} isUser={false} />
-                        </div>
+                        {editingMessageId === msg.id ? (
+                          <form
+                            className="mt-1.5 max-w-3xl space-y-2"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              saveEdit(msg);
+                            }}
+                          >
+                            <label htmlFor={`edit-${msg.id}`} className="sr-only">Edit message</label>
+                            <textarea
+                              id={`edit-${msg.id}`}
+                              autoFocus
+                              rows={3}
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  e.stopPropagation();
+                                  setEditingMessageId(null);
+                                }
+                              }}
+                              className="w-full bg-white border border-indigo-400 rounded-2xl p-3 text-sm text-slate-900"
+                            />
+                            <div className="flex gap-2">
+                              <button type="submit" className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg">
+                                Save
+                              </button>
+                              <button type="button" onClick={() => setEditingMessageId(null)} className="text-xs font-semibold text-slate-700 border border-slate-300 px-3 py-1.5 rounded-lg">
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed font-sans font-normal">
+                            <FormattedChatMessage content={msg.content} isUser={false} />
+                            {msg.edited_at && <span className="block mt-1 text-xs text-slate-500">(edited)</span>}
+                          </div>
+                        )}
 
                         {/* Reaction Badges List */}
                         {msg.reactions && msg.reactions.length > 0 && (
@@ -731,9 +875,13 @@ export default function Channels({
                         </div>
                       </div>
 
-                      {/* Hover Action Bar (Reactions + Reply) */}
-                      {isHovered && (
-                        <div className="absolute right-4 -top-3 bg-white border border-slate-200 rounded-xl px-2 py-1 shadow-lg flex items-center gap-1 z-10 animate-in fade-in zoom-in-95">
+                      {/* Action Bar (Reactions, Reply, Edit, Delete): on hover or keyboard focus */}
+                      {editingMessageId !== msg.id && (
+                        <div
+                          className={`absolute right-4 -top-3 bg-white border border-slate-200 rounded-xl px-2 py-1 shadow-lg flex items-center gap-1 z-10 ${
+                            isHovered ? 'opacity-100' : 'opacity-0 focus-within:opacity-100'
+                          }`}
+                        >
                           {QUICK_REACTIONS.map((re) => (
                             <button
                               key={re.emoji}
@@ -747,16 +895,38 @@ export default function Channels({
                           <div className="w-[1px] h-3.5 bg-slate-200 mx-0.5" />
                           <button
                             title="Reply in thread"
+                            aria-label="Reply in thread"
                             onClick={() => handleOpenThread(msg)}
                             className="p-1 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
                           >
-                            <Reply className="w-3.5 h-3.5" />
+                            <Reply className="w-3.5 h-3.5" aria-hidden="true" />
                           </button>
+                          {isOwn && (
+                            <>
+                              <button
+                                title="Edit message"
+                                aria-label="Edit message"
+                                onClick={() => startEditing(msg)}
+                                className="p-1 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                              >
+                                <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                              <button
+                                title="Delete message"
+                                aria-label="Delete message"
+                                onClick={() => handleDeleteMessage(msg)}
+                                className="p-1 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
                   );
-                })
+                })}
+                </>
               )}
               <div ref={messagesEndRef} />
             </div>
@@ -766,7 +936,7 @@ export default function Channels({
               onSubmit={handleSendMessage}
               className="p-4 border-t border-slate-200 bg-white flex items-center gap-3"
             >
-              <input
+              <input aria-label="Message text"
                 type="text"
                 placeholder={`Type message in #${getChannelDisplayName(activeChannel)}...`}
                 className="flex-1 bg-slate-50 border-2 border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl px-5 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none transition shadow-sm font-sans"
@@ -822,7 +992,7 @@ export default function Channels({
                   {threadRootMessage.sender_name || 'Teammate'}
                 </span>
                 {threadRootMessage.sender_username && (
-                  <span className="text-[10px] font-mono text-indigo-600 ml-1.5">
+                  <span className="text-xs font-mono text-indigo-600 ml-1.5">
                     @{threadRootMessage.sender_username}
                   </span>
                 )}
@@ -842,7 +1012,7 @@ export default function Channels({
             ) : (
               threadReplies.map((reply) => (
                 <div key={reply.id} className="flex gap-2.5">
-                  <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                  <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                     {reply.sender_name ? reply.sender_name.slice(0, 2).toUpperCase() : 'US'}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -851,11 +1021,11 @@ export default function Channels({
                         {reply.sender_name || 'Teammate'}
                       </span>
                       {reply.sender_username && (
-                        <span className="text-[10px] font-mono text-indigo-600">
+                        <span className="text-xs font-mono text-indigo-600">
                           @{reply.sender_username}
                         </span>
                       )}
-                      <span className="text-[10px] text-slate-400 font-mono">
+                      <span className="text-xs text-slate-400 font-mono">
                         {new Date(reply.created_at).toLocaleTimeString([], {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -877,7 +1047,7 @@ export default function Channels({
             onSubmit={handleSendThreadReply}
             className="p-3 border-t border-slate-200 bg-white flex items-center gap-2"
           >
-            <input
+            <input aria-label="Reply to thread"
               type="text"
               placeholder="Reply to thread..."
               className="flex-1 bg-slate-100 border border-slate-200 focus:border-indigo-600 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none transition"
@@ -900,7 +1070,7 @@ export default function Channels({
       {/* ------------------------------------------------------------- */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 max-w-sm w-full space-y-4 shadow-2xl text-slate-900">
+          <div data-modal className="bg-white p-6 rounded-3xl border border-slate-200 max-w-sm w-full space-y-4 shadow-2xl text-slate-900">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-slate-900">Create New Channel</h3>
               <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-slate-700">
@@ -910,12 +1080,12 @@ export default function Channels({
 
             <form onSubmit={handleCreateSubchat} className="space-y-4">
               <div>
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="channels-field-1" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
                   Channel Name
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-slate-400 font-mono text-xs">#</span>
-                  <input
+                  <input id="channels-field-1"
                     type="text"
                     required
                     placeholder="frontend-releases"
@@ -927,10 +1097,10 @@ export default function Channels({
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="channels-field-2" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
                   Description
                 </label>
-                <input
+                <input id="channels-field-2"
                   type="text"
                   placeholder="What is this channel for?"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
@@ -977,7 +1147,7 @@ export default function Channels({
       {/* ------------------------------------------------------------- */}
       {showDmModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 max-w-md w-full space-y-4 shadow-2xl text-slate-900">
+          <div data-modal className="bg-white p-6 rounded-3xl border border-slate-200 max-w-md w-full space-y-4 shadow-2xl text-slate-900">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <AtSign className="w-5 h-5 text-indigo-600" />
@@ -1003,7 +1173,7 @@ export default function Channels({
             {/* Input with @ Prefix */}
             <div className="relative">
               <span className="absolute left-3.5 top-2.5 text-indigo-600 font-mono text-sm font-bold">@</span>
-              <input
+              <input aria-label="type username e.g. jason_bourne"
                 type="text"
                 autoFocus
                 placeholder="type username e.g. jason_bourne..."
@@ -1036,7 +1206,7 @@ export default function Channels({
                         <span className="font-bold text-xs text-slate-900 group-hover:text-indigo-600 transition block">
                           {u.name}
                         </span>
-                        <span className="text-[10px] font-mono text-indigo-600">
+                        <span className="text-xs font-mono text-indigo-600">
                           @{u.username || 'user'}
                         </span>
                       </div>

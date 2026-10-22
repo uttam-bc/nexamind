@@ -8,7 +8,7 @@ from app.models import FinanceTransaction, User
 from app.models.finance import TransactionType
 from app.schemas.finance import TransactionCreate, TransactionUpdate
 from app.services.auth_service import AuthError
-from app.services.workspace_service import get_workspace_membership
+from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
 
 async def list_transactions(
@@ -17,6 +17,8 @@ async def list_transactions(
     user_id: UUID,
     transaction_type: TransactionType | None = None,
     category: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[FinanceTransaction]:
     await _require_workspace_access(db, workspace_id, user_id)
     query = select(FinanceTransaction).where(FinanceTransaction.workspace_id == workspace_id)
@@ -25,6 +27,7 @@ async def list_transactions(
     if category is not None:
         query = query.where(FinanceTransaction.category == category)
     query = query.order_by(FinanceTransaction.date.desc(), FinanceTransaction.created_at.desc())
+    query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -101,6 +104,7 @@ async def delete_transaction(
     user_id: UUID,
 ) -> None:
     tx = await get_transaction(db, workspace_id, transaction_id, user_id)
+    await require_author_or_manager(db, tx.workspace_id, user_id, tx.created_by)
     await db.delete(tx)
     await db.flush()
 

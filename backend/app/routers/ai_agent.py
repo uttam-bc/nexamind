@@ -98,7 +98,7 @@ async def chat_with_agent(
     workspace_id: UUID,
     request: AgentChatRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AgentChatResponse:
     await _require_member(db, workspace_id, current_user)
     result = await run_agent(
@@ -115,7 +115,7 @@ async def chat_with_agent(
 async def list_chat_sessions(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[SessionSummary]:
     await _require_member(db, workspace_id, current_user)
     message_counts = (
@@ -145,7 +145,7 @@ async def list_chat_sessions(
 async def create_chat_session(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionSummary:
     await _require_member(db, workspace_id, current_user)
     session = AiSession(workspace_id=workspace_id, user_id=current_user.id, title="New chat")
@@ -166,7 +166,7 @@ async def get_session_messages(
     workspace_id: UUID,
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[MessageDetail]:
     await _require_member(db, workspace_id, current_user)
     session = await _own_session(db, workspace_id, session_id, current_user)
@@ -191,7 +191,7 @@ async def delete_chat_session(
     workspace_id: UUID,
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await _require_member(db, workspace_id, current_user)
     session = await _own_session(db, workspace_id, session_id, current_user)
@@ -207,7 +207,7 @@ async def delete_chat_session(
 async def get_memory_pipeline_stats(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     await _require_member(db, workspace_id, current_user)
     return await get_workspace_memory_stats(db, workspace_id)
@@ -217,7 +217,7 @@ async def get_memory_pipeline_stats(
 async def trigger_memory_reindex(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     await _require_member(db, workspace_id, current_user)
     return await run_full_workspace_ingestion(db, workspace_id, gemini_key=llm_client.resolve_gemini_key(current_user))
@@ -261,7 +261,7 @@ async def get_ai_config(current_user: User = Depends(get_current_user)) -> AiCon
 async def save_gemini_key(
     request: GeminiKeyRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AiConfigResponse:
     key = (request.api_key or "").strip()
     if not key:
@@ -277,7 +277,7 @@ async def save_gemini_key(
 @global_ai_router.delete("/config/gemini-key", response_model=AiConfigResponse)
 async def delete_gemini_key(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AiConfigResponse:
     current_user.gemini_api_key_encrypted = None
     await db.flush()
@@ -300,7 +300,7 @@ async def test_gemini_key(
     workspace_id: UUID,
     request: GeminiKeyRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     await _require_member(db, workspace_id, current_user)
     return await test_gemini_key_global(request, current_user)

@@ -152,7 +152,7 @@ export default function FormattedChatMessage({ content, isUser = false, classNam
 
       {/* Copy button on hover for AI assistant answers */}
       {!isUser && content.length > 30 && (
-        <button
+        <button aria-label="Copy raw text"
           onClick={handleCopyRaw}
           title="Copy raw text"
           className="absolute -top-2 -right-2 opacity-0 group-hover/msg:opacity-100 transition-opacity p-1.5 rounded-lg bg-white border border-slate-200 shadow-sm text-slate-500 hover:text-slate-900 hover:bg-slate-50"

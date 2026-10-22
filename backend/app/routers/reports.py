@@ -23,7 +23,7 @@ async def get_workspace_reports(
     report_type: ReportType | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[ReportResponse]:
     reports = await list_reports(db, workspace_id, current_user.id, report_type=report_type, limit=limit)
     return [ReportResponse.model_validate(r) for r in reports]
@@ -34,7 +34,7 @@ async def generate_workspace_report(
     workspace_id: UUID,
     data: ReportGenerateRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ReportResponse:
     report = await generate_report(db, workspace_id, current_user, data)
     return ReportResponse.model_validate(report)
@@ -45,7 +45,7 @@ async def get_workspace_report(
     workspace_id: UUID,
     report_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> ReportResponse:
     report = await get_report(db, workspace_id, report_id, current_user.id)
     return ReportResponse.model_validate(report)
@@ -56,7 +56,7 @@ async def delete_workspace_report(
     workspace_id: UUID,
     report_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await delete_report(db, workspace_id, report_id, current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

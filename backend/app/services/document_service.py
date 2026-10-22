@@ -3,10 +3,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Document, User
+from app.models import Document, FileRecord, User
 from app.schemas.document import DocumentContent, DocumentCreate, DocumentUpdate
 from app.services.auth_service import AuthError
-from app.services.workspace_service import get_workspace_membership
+from app.services.upload_utils import delete_stored_file
+from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
 DEFAULT_DOCUMENT_CONTENT = {"blocks": []}
 
@@ -15,12 +16,16 @@ async def list_documents(
     db: AsyncSession,
     workspace_id: UUID,
     user_id: UUID,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Document]:
     await _require_workspace_access(db, workspace_id, user_id)
     result = await db.execute(
         select(Document)
         .where(Document.workspace_id == workspace_id)
         .order_by(Document.updated_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.scalars().all())
 
@@ -117,8 +122,24 @@ async def delete_document(
     user_id: UUID,
 ) -> None:
     document = await get_document(db, workspace_id, document_id, user_id)
+    await require_author_or_manager(db, document.workspace_id, user_id, document.created_by)
+
+    # Sub-pages go with the page; so do the original uploads linked to any of them.
+    subtree = [document.id]
+    frontier = [document.id]
+    while frontier:
+        children = (await db.execute(select(Document.id).where(Document.parent_id.in_(frontier)))).scalars().all()
+        frontier = [c for c in children if c not in subtree]
+        subtree.extend(frontier)
+    originals = (await db.execute(select(FileRecord).where(FileRecord.document_id.in_(subtree)))).scalars().all()
+    stored_paths = [f.file_path for f in originals]
+    for record in originals:
+        await db.delete(record)
+    await db.flush()  # before the page, so the database cascade has nothing left to remove
     await db.delete(document)
     await db.flush()
+    for path in stored_paths:
+        delete_stored_file(path)
 
 
 async def search_documents(

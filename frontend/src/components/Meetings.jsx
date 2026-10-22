@@ -37,13 +37,18 @@ import {
 } from 'lucide-react';
 import { api, openSocket } from '../api';
 import FeatureHeader from './FeatureHeader';
+import { notify, confirmDialog } from '../context/ToastContext';
 
-const ICE_SERVERS = {
+// Fallback until the server's list (which adds TURN relays when configured) has loaded.
+const DEFAULT_ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
   ],
 };
+// Room status polling: frequent enough to show who's in a call, without a request per second.
+const ROOM_POLL_IN_CALL_MS = 5000;
+const ROOM_POLL_IDLE_MS = 15000;
 
 export default function Meetings({
   workspaceId,
@@ -114,6 +119,7 @@ export default function Meetings({
   const [showAddAction, setShowAddAction] = useState(false);
 
   // References
+  const iceConfigRef = useRef(DEFAULT_ICE_SERVERS);
   const localVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -146,9 +152,27 @@ export default function Meetings({
 
   useEffect(() => {
     fetchActiveRooms();
-    const interval = setInterval(fetchActiveRooms, 1000);
+    const interval = setInterval(() => {
+      if (document.visibilityState !== 'hidden') fetchActiveRooms();
+    }, activeRoom ? ROOM_POLL_IN_CALL_MS : ROOM_POLL_IDLE_MS);
     return () => clearInterval(interval);
   }, [workspaceId, activeRoom]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    api
+      .getIceServers(workspaceId)
+      .then((cfg) => {
+        if (!cancelled && Array.isArray(cfg?.iceServers) && cfg.iceServers.length > 0) {
+          iceConfigRef.current = { iceServers: cfg.iceServers };
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
   // In-call timer
   useEffect(() => {
@@ -171,7 +195,7 @@ export default function Meetings({
       return peerConnectionsRef.current[peerId];
     }
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(iceConfigRef.current);
     peerConnectionsRef.current[peerId] = pc;
 
     if (localStreamRef.current) {
@@ -572,7 +596,7 @@ export default function Meetings({
         if (onRefreshDocuments) onRefreshDocuments();
       }, 2000);
     } catch (err) {
-      alert(`Upload processing error: ${err.message}`);
+      notify(`Upload processing error: ${err.message}`, 'error');
       setIsUploadingAudio(false);
       setUploadProgress('');
     }
@@ -580,7 +604,7 @@ export default function Meetings({
 
   // 5. Action: Delete a Past Meeting Session
   const handleDeleteSession = async (sessionId) => {
-    if (!window.confirm('Are you sure you want to permanently delete this meeting session and its transcript/MoM?')) {
+    if (!(await confirmDialog('This permanently deletes the meeting session, its transcript and minutes.', { title: 'Delete meeting?', confirmLabel: 'Delete' }))) {
       return;
     }
     setIsDeletingSession(true);
@@ -593,7 +617,7 @@ export default function Meetings({
       }
       if (onRefreshSessions) onRefreshSessions();
     } catch (err) {
-      alert(`Failed to delete meeting: ${err.message}`);
+      notify(`Failed to delete meeting: ${err.message}`, 'error');
     } finally {
       setIsDeletingSession(false);
     }
@@ -609,7 +633,7 @@ export default function Meetings({
       }
       if (onRefreshSessions) onRefreshSessions();
     } catch (err) {
-      alert(`Failed to regenerate minutes: ${err.message}`);
+      notify(`Failed to regenerate minutes: ${err.message}`, 'error');
     } finally {
       setIsRegeneratingMom(false);
     }
@@ -756,15 +780,16 @@ export default function Meetings({
       const momContent = `# Minutes of Meeting: ${activeRoom?.name || 'Team Sync'}\n\n**Date:** ${new Date().toLocaleDateString()}\n**Participants:** ${participants.map((p) => p.name).join(', ')}\n**Duration:** ${formatDuration(callDuration)}\n\n## 📝 Live Meeting Discussion\n${transcriptText || 'Live discussion notes captured during session.'}\n\n## ✅ Action Items & Commitments\n${actionText || '* No action items recorded.'}\n\n---\n*Synthesized autonomously by NexaMind Copilot*`;
 
       if (workspaceId) {
-        await api.createDocument(workspaceId, {
-          title: `MoM: ${activeRoom?.name || 'Live Meeting'} (${new Date().toLocaleDateString()})`,
-          content: momContent,
-        });
+        await api.createDocument(
+          workspaceId,
+          `MoM: ${activeRoom?.name || 'Live Meeting'} (${new Date().toLocaleDateString()})`,
+          { text: momContent }
+        );
       }
-      alert('AI Synthesis Complete: Real Meeting Minutes (MoM) saved to Documents.');
+      notify('AI Synthesis Complete: Real Meeting Minutes (MoM) saved to Documents.', 'success');
       if (onRefreshDocuments) onRefreshDocuments();
     } catch (err) {
-      alert(`MoM error: ${err.message}`);
+      notify(`MoM error: ${err.message}`, 'error');
     }
   };
 
@@ -819,7 +844,7 @@ export default function Meetings({
                 </div>
                 <div>
                   <p className="font-bold text-xs">You are currently in your Solo Workspace ({workspace?.name || 'Personal Account'})</p>
-                  <p className="text-[11px] text-amber-800">Team video calls take place in your Team Group Workspace. Switch to "{teamWorkspace.name}" to connect with your team.</p>
+                  <p className="text-xs text-amber-800">Team video calls take place in your Team Group Workspace. Switch to "{teamWorkspace.name}" to connect with your team.</p>
                 </div>
               </div>
               <button
@@ -841,7 +866,7 @@ export default function Meetings({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="bg-rose-500 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="bg-rose-500 text-white text-xs font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
                       LIVE NOW
                     </span>
@@ -891,7 +916,7 @@ export default function Meetings({
 
               <div className="space-y-2 pt-2">
                 {!ongoingWorkspaceMeeting && (
-                  <input
+                  <input aria-label="Meeting title (e.g. Sprint Sync)"
                     type="text"
                     placeholder="Meeting title (e.g. Sprint Sync)..."
                     className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
@@ -925,7 +950,7 @@ export default function Meetings({
               </div>
 
               <form onSubmit={handleJoinWithCode} className="space-y-2 pt-2">
-                <input
+                <input aria-label="Enter code (e.g. ROOM-1234)"
                   type="text"
                   placeholder="Enter code (e.g. ROOM-1234)..."
                   className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#8B5CF6] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
@@ -974,7 +999,7 @@ export default function Meetings({
                   <span>{isUploadingAudio ? 'Processing Audio...' : 'Upload Audio File'}</span>
                 </button>
                 {uploadProgress && (
-                  <p className="text-[11px] font-mono text-slate-500 mt-1.5 text-center truncate">
+                  <p className="text-xs font-mono text-slate-500 mt-1.5 text-center truncate">
                     {uploadProgress}
                   </p>
                 )}
@@ -1010,17 +1035,17 @@ export default function Meetings({
                         <h4 className="font-bold text-xs text-[#191C1E] group-hover:text-[#4F46E5] transition truncate">
                           {s.title}
                         </h4>
-                        <span className="text-[10px] font-mono text-slate-400">
+                        <span className="text-xs font-mono text-slate-400">
                           {s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500 line-clamp-1 max-w-xl">
+                      <p className="text-xs text-slate-500 line-clamp-1 max-w-xl">
                         {s.ai_summary || s.transcript || 'Click to view full transcript & generated MoM.'}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-1 rounded font-bold flex items-center gap-1">
+                      <span className="text-xs font-mono text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-1 rounded font-bold flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                         <span>MoM Ready</span>
                       </span>
@@ -1043,7 +1068,7 @@ export default function Meetings({
                 <div className="p-8 text-center text-slate-400 text-xs space-y-2">
                   <FileText className="w-8 h-8 text-slate-300 mx-auto" />
                   <p>No meeting sessions recorded yet.</p>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-xs text-slate-500">
                     Start a video call or upload an audio file to generate automated minutes.
                   </p>
                 </div>
@@ -1056,12 +1081,12 @@ export default function Meetings({
           {/* ------------------------------------------------------------- */}
           {selectedPastMeeting && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-scale-up">
+              <div data-modal className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-scale-up">
                 {/* Modal Header */}
                 <div className="p-5 md:p-6 border-b border-[#E2E8F0] flex items-start justify-between bg-gradient-to-r from-slate-50 to-indigo-50/30">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono font-bold bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded">
+                      <span className="text-xs font-mono font-bold bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded">
                         Recorded Session
                       </span>
                       <span className="text-xs font-mono text-slate-400">
@@ -1075,7 +1100,7 @@ export default function Meetings({
 
                   <div className="flex items-center gap-2">
                     {/* Copy Content Button */}
-                    <button
+                    <button aria-label="Copy to Clipboard"
                       onClick={handleCopyPastMeetingContent}
                       className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-600 hover:text-indigo-600 hover:border-indigo-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                       title="Copy to Clipboard"
@@ -1194,7 +1219,7 @@ export default function Meetings({
                               className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#F43F5E] rounded-xl p-3.5 shadow-sm flex items-start justify-between gap-3"
                             >
                               <div>
-                                <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-[10px] font-mono font-bold px-2 py-0.5 rounded">
+                                <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-xs font-mono font-bold px-2 py-0.5 rounded">
                                   Action Item
                                 </span>
                                 <p className="text-xs font-semibold text-[#191C1E] mt-1.5">
@@ -1204,7 +1229,7 @@ export default function Meetings({
 
                               <button
                                 onClick={() => handleSyncAction({ id: `item-${idx}`, text: typeof item === 'string' ? item : item.text || item.title })}
-                                className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 shrink-0"
+                                className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1 shrink-0"
                               >
                                 <CalendarPlus className="w-3.5 h-3.5" />
                                 <span>Sync to Cal</span>
@@ -1250,9 +1275,9 @@ export default function Meetings({
             <div className="h-14 px-6 border-b border-slate-800/80 bg-[#12151C] flex items-center justify-between flex-shrink-0 z-10">
               <div className="flex items-center gap-3">
                 <div className="w-2.5 h-2.5 rounded-full bg-[#F43F5E] animate-pulse"></div>
-                <h1 className="text-base md:text-lg font-bold text-white tracking-tight">
+                <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
                   {activeRoom.name || 'Live Video Meeting'}
-                </h1>
+                </h2>
                 <span className="text-xs font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
                   {formatDuration(callDuration)}
                 </span>
@@ -1372,7 +1397,7 @@ export default function Meetings({
                                 </div>
                                 <div className="text-center">
                                   <h3 className="font-bold text-base text-white">{p.name}</h3>
-                                  <span className="text-[11px] bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
+                                  <span className="text-xs bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
                                     Connected Live
                                   </span>
                                 </div>
@@ -1408,7 +1433,7 @@ export default function Meetings({
                       </div>
                       <div>
                         <p className="font-bold text-white">Waiting for other team members to join...</p>
-                        <p className="text-slate-400 text-[11px]">Share your workspace join code so your real team members can join this call.</p>
+                        <p className="text-slate-400 text-xs">Share your workspace join code so your real team members can join this call.</p>
                       </div>
                     </div>
 
@@ -1541,7 +1566,7 @@ export default function Meetings({
                     ) : (
                       inCallChat.map((m, i) => (
                         <div key={i} className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1">
-                          <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                          <div className="flex justify-between text-xs text-slate-400 font-mono">
                             <span className="font-bold text-indigo-400">{m.sender}</span>
                             <span>{m.time}</span>
                           </div>
@@ -1551,7 +1576,7 @@ export default function Meetings({
                     )}
                   </div>
                   <form onSubmit={handleSendChat} className="flex gap-1.5 pt-2 border-t border-slate-800">
-                    <input
+                    <input aria-label="Send a message"
                       type="text"
                       placeholder="Send a message..."
                       className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
@@ -1568,12 +1593,12 @@ export default function Meetings({
                   {participants.map((p) => (
                     <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-[10px]">
+                        <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xs">
                           {p.name.slice(0, 2).toUpperCase()}
                         </div>
                         <div>
                           <div className="font-bold text-white">{p.name} {(user?.id && String(p.id) === String(user.id)) || p.name === currentUserName ? '(You)' : ''}</div>
-                          <div className="text-[10px] text-slate-400">{p.role || 'Member'}</div>
+                          <div className="text-xs text-slate-400">{p.role || 'Member'}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 text-slate-400">
@@ -1606,14 +1631,14 @@ export default function Meetings({
               <div>
                 <h3 className="text-xs font-mono uppercase font-bold text-slate-500 mb-3 tracking-wider flex items-center justify-between">
                   <span>Live Transcript</span>
-                  <span className="text-[10px] text-slate-400 font-normal">Real Speech Capture</span>
+                  <span className="text-xs text-slate-400 font-normal">Real Speech Capture</span>
                 </h3>
 
                 {liveTranscript.length === 0 && !currentCaption ? (
                   <div className="p-4 bg-white border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs space-y-2">
                     <Mic className="w-6 h-6 text-[#4F46E5] mx-auto animate-pulse" />
                     <p className="font-semibold text-slate-700">Copilot is listening...</p>
-                    <p className="text-[11px]">Speak into your microphone and words will be transcribed here and synced to all participants live.</p>
+                    <p className="text-xs">Speak into your microphone and words will be transcribed here and synced to all participants live.</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -1627,7 +1652,7 @@ export default function Meetings({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline gap-2">
                             <span className="font-bold text-[#191C1E] text-xs">{entry.speaker}</span>
-                            <span className="text-[10px] font-mono text-slate-400">{entry.time}</span>
+                            <span className="text-xs font-mono text-slate-400">{entry.time}</span>
                           </div>
                           <p className="text-slate-700 text-xs mt-1 leading-relaxed">{entry.text}</p>
                         </div>
@@ -1662,7 +1687,7 @@ export default function Meetings({
                   </h3>
                   <button
                     onClick={() => setShowAddAction(!showAddAction)}
-                    className="text-[11px] font-bold text-[#4F46E5] hover:underline flex items-center gap-1"
+                    className="text-xs font-bold text-[#4F46E5] hover:underline flex items-center gap-1"
                   >
                     <Plus className="w-3 h-3" /> Add Item
                   </button>
@@ -1670,7 +1695,7 @@ export default function Meetings({
 
                 {showAddAction && (
                   <form onSubmit={handleAddActionItem} className="mb-3 flex gap-1.5">
-                    <input
+                    <input aria-label="Follow up on database migration"
                       type="text"
                       autoFocus
                       placeholder="e.g. Follow up on database migration..."
@@ -1699,10 +1724,10 @@ export default function Meetings({
                           className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#F43F5E] rounded-xl p-3.5 shadow-sm"
                         >
                           <div className="flex items-start justify-between mb-1.5">
-                            <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-[10px] font-mono font-bold px-2 py-0.5 rounded">
+                            <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-xs font-mono font-bold px-2 py-0.5 rounded">
                               Action Item
                             </span>
-                            <span className="text-[10px] font-mono text-slate-400">{action.timeframe}</span>
+                            <span className="text-xs font-mono text-slate-400">{action.timeframe}</span>
                           </div>
 
                           <p className="text-xs font-semibold text-[#191C1E] mb-2 leading-snug">
@@ -1710,13 +1735,13 @@ export default function Meetings({
                           </p>
 
                           <div className="flex items-center justify-between pt-2 border-t border-[#E2E8F0]">
-                            <span className="text-[11px] text-slate-500 flex items-center gap-1 font-mono">
+                            <span className="text-xs text-slate-500 flex items-center gap-1 font-mono">
                               <User className="w-3 h-3 text-slate-400" /> {action.assignee}
                             </span>
 
                             <button
                               onClick={() => handleSyncAction(action)}
-                              className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] transition-colors px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1"
+                              className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] transition-colors px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1"
                             >
                               {isSynced ? (
                                 <>

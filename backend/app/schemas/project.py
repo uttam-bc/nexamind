@@ -7,6 +7,8 @@ from app.models.project import IssueStatus, TaskPriority, TaskStatus
 
 
 class TaskCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     status: TaskStatus = TaskStatus.TODO
@@ -17,6 +19,8 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     status: TaskStatus | None = None
@@ -44,6 +48,8 @@ class TaskResponse(BaseModel):
 
 
 class CodeRepoCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
 
@@ -61,6 +67,8 @@ class CodeRepoResponse(BaseModel):
 
 
 class CommitCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     message: str = Field(..., min_length=1)
     hash: str | None = None
 
@@ -77,12 +85,16 @@ class CommitResponse(BaseModel):
 
 
 class IssueCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     status: IssueStatus = IssueStatus.OPEN
 
 
 class IssueUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     status: IssueStatus | None = None

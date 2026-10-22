@@ -30,10 +30,12 @@ router = APIRouter(prefix="/workspaces/{workspace_id}/calendar", tags=["calendar
 async def get_workspace_calendar_events(
     workspace_id: UUID,
     event_type: CalendarEventType | None = Query(None),
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[CalendarEventResponse]:
-    events = await list_calendar_events(db, workspace_id, current_user.id, event_type=event_type)
+    events = await list_calendar_events(db, workspace_id, current_user.id, event_type=event_type, limit=limit, offset=offset)
     return [CalendarEventResponse.model_validate(e) for e in events]
 
 
@@ -42,7 +44,7 @@ async def create_workspace_calendar_event(
     workspace_id: UUID,
     data: CalendarEventCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CalendarEventResponse:
     event = await create_calendar_event(db, workspace_id, current_user, data)
     event_data = CalendarEventResponse.model_validate(event).model_dump(mode="json")
@@ -58,7 +60,7 @@ async def get_workspace_calendar_event_detail(
     workspace_id: UUID,
     event_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CalendarEventResponse:
     event = await get_calendar_event(db, workspace_id, event_id, current_user.id)
     return CalendarEventResponse.model_validate(event)
@@ -70,7 +72,7 @@ async def update_workspace_calendar_event_detail(
     event_id: UUID,
     data: CalendarEventUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> CalendarEventResponse:
     event = await update_calendar_event(db, workspace_id, event_id, current_user.id, data)
     event_data = CalendarEventResponse.model_validate(event).model_dump(mode="json")
@@ -86,7 +88,7 @@ async def delete_workspace_calendar_event_detail(
     workspace_id: UUID,
     event_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await delete_calendar_event(db, workspace_id, event_id, current_user.id)
     await ws_manager.broadcast_to_workspace(
@@ -100,7 +102,7 @@ async def delete_workspace_calendar_event_detail(
 async def detect_reminders(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> DetectedRemindersResponse:
     items = await detect_ai_reminders_from_context(db, workspace_id, current_user.id)
     return DetectedRemindersResponse(reminders=items, count=len(items))

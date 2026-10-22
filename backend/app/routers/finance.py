@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Response, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -30,10 +30,12 @@ async def get_transactions(
     workspace_id: UUID,
     type: TransactionType | None = None,
     category: str | None = None,
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[TransactionResponse]:
-    transactions = await list_transactions(db, workspace_id, current_user.id, transaction_type=type, category=category)
+    transactions = await list_transactions(db, workspace_id, current_user.id, transaction_type=type, category=category, limit=limit, offset=offset)
     return [TransactionResponse.model_validate(tx) for tx in transactions]
 
 
@@ -42,7 +44,7 @@ async def create_workspace_transaction(
     workspace_id: UUID,
     data: TransactionCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TransactionResponse:
     tx = await create_transaction(db, workspace_id, current_user, data)
     return TransactionResponse.model_validate(tx)
@@ -53,7 +55,7 @@ async def get_workspace_transaction(
     workspace_id: UUID,
     transaction_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TransactionResponse:
     tx = await get_transaction(db, workspace_id, transaction_id, current_user.id)
     return TransactionResponse.model_validate(tx)
@@ -65,7 +67,7 @@ async def update_workspace_transaction(
     transaction_id: UUID,
     data: TransactionUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> TransactionResponse:
     tx = await update_transaction(db, workspace_id, transaction_id, current_user.id, data)
     return TransactionResponse.model_validate(tx)
@@ -76,7 +78,7 @@ async def delete_workspace_transaction(
     workspace_id: UUID,
     transaction_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await delete_transaction(db, workspace_id, transaction_id, current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -87,7 +89,7 @@ async def delete_workspace_transaction(
 async def get_workspace_runway(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> RunwaySummaryResponse:
     summary = await calculate_runway(db, workspace_id, current_user.id)
     return RunwaySummaryResponse(**summary)

@@ -73,3 +73,20 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+async def schema_revision_status() -> tuple[str | None, str | None]:
+    """(current revision in the database, newest revision in alembic/versions)."""
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    async with engine.connect() as conn:
+        current = await conn.run_sync(lambda sync_conn: MigrationContext.configure(sync_conn).get_current_revision())
+    return current, head

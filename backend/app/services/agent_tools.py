@@ -1,6 +1,8 @@
 """Workspace actions the AI copilot can take. Each tool runs with the caller's own permissions."""
 
+import math
 import json
+from pathlib import Path
 from datetime import date as date_type
 from datetime import datetime
 from uuid import UUID
@@ -12,6 +14,7 @@ from app.models import (
     Channel,
     CodeRepo,
     Document,
+    FileRecord,
     FinanceTransaction,
     ReportType,
     SessionRecord,
@@ -23,7 +26,7 @@ from app.models.finance import TransactionType
 from app.models.project import TaskPriority, TaskStatus
 from app.schemas.channel import ChannelCreate, MessageCreate
 from app.schemas.document import DocumentCreate
-from app.schemas.finance import TransactionCreate
+from app.schemas.finance import MAX_AMOUNT, TransactionCreate
 from app.schemas.project import CodeRepoCreate, CommitCreate, IssueCreate, TaskCreate, TaskUpdate
 from app.schemas.report import ReportGenerateRequest
 from app.services.auth_service import escape_like
@@ -126,17 +129,25 @@ async def search_documents_tool(
 
 
 async def _find_document(db: AsyncSession, workspace_id: UUID, doc_query: str) -> Document | None:
-    docs = (await db.execute(select(Document).where(Document.workspace_id == workspace_id))).scalars().all()
-    query = doc_query.strip().lower()
-    for predicate in (
-        lambda d: str(d.id) == doc_query.strip(),
-        lambda d: d.title.lower() == query,
-        lambda d: query in d.title.lower(),
-    ):
-        match = next((d for d in docs if predicate(d)), None)
-        if match:
-            return match
-    return None
+    """Match by id, exact title, then a title containing the query. Ambiguous matches are refused."""
+    docs = (await db.execute(
+        select(Document).where(Document.workspace_id == workspace_id).order_by(Document.updated_at.desc())
+    )).scalars().all()
+    raw = doc_query.strip()
+    query = raw.lower()
+    if not query:
+        return None
+    by_id = next((d for d in docs if str(d.id) == raw), None)
+    if by_id:
+        return by_id
+    exact = [d for d in docs if d.title.strip().lower() == query]
+    if len(exact) == 1:
+        return exact[0]
+    candidates = exact or [d for d in docs if query in d.title.lower()]
+    if len(candidates) > 1:
+        options = "; ".join(f"'{d.title}' (id {d.id})" for d in candidates[:8])
+        raise ToolError(f"Several documents match '{doc_query}': {options}. Ask the user which one, or pass the id.")
+    return candidates[0] if candidates else None
 
 
 async def create_document_tool(
@@ -149,16 +160,17 @@ async def create_document_tool(
     title = title.strip()
     if not title:
         raise ToolError("A document title is required")
-    blocks = [{"id": "1", "type": "heading", "level": 1, "text": title}]
-    for index, paragraph in enumerate(p for p in content_text.split("\n\n") if p.strip()):
-        blocks.append({"id": str(index + 2), "type": "paragraph", "text": paragraph.strip()})
+    # Same shape the editor saves, so the page opens, previews and edits normally.
     doc = await create_document(
         db, workspace_id, user,
-        DocumentCreate(title=title[:255], content={"text": content_text, "blocks": blocks}),
+        DocumentCreate(title=title[:255], content={"text": content_text.strip()}),
     )
     await db.commit()
     schedule_document_ingestion(doc.id, delay=0)
     return {"id": str(doc.id), "title": doc.title, "action": "create", "message": f"Created document '{doc.title}'."}
+
+
+EDIT_MODES = {"append", "prepend", "replace", "replace_text"}
 
 
 async def edit_document_tool(
@@ -168,32 +180,56 @@ async def edit_document_tool(
     doc_query: str,
     new_content_text: str,
     mode: str = "append",
+    find_text: str | None = None,
 ) -> dict:
-    """Append to or replace the text of a document in the current workspace."""
-    if not new_content_text.strip():
-        raise ToolError("No text was given to add to the document")
+    """Change a document in the current workspace.
+
+    append / prepend add text; replace swaps the whole body; replace_text swaps every occurrence of
+    `find_text` with `new_content_text` (targeted fixes without rewriting the page).
+    """
+    mode = (mode or "append").strip().lower()
+    if mode not in EDIT_MODES:
+        raise ToolError(f"Unknown edit mode '{mode}'. Use one of: {', '.join(sorted(EDIT_MODES))}")
+    if mode != "replace_text" and not new_content_text.strip():
+        raise ToolError("No text was given to put in the document")
     doc = await _find_document(db, workspace_id, doc_query)
     if doc is None:
         raise ToolError(f"No document matching '{doc_query}' in this workspace")
 
     current_text = extract_text_from_document(doc)
-    final_text = f"{current_text}\n\n{new_content_text}".strip() if mode != "replace" else new_content_text.strip()
-    content = dict(doc.content) if isinstance(doc.content, dict) else {}
-    blocks = list(content.get("blocks") or [])
-    if mode == "replace":
-        blocks = [{"id": "1", "type": "paragraph", "text": final_text}]
+    occurrences = 0
+    if mode == "replace_text":
+        if not find_text:
+            raise ToolError("replace_text needs find_text: the exact text to replace")
+        occurrences = current_text.count(find_text)
+        if occurrences == 0:
+            raise ToolError(
+                f"'{find_text[:80]}' was not found in '{doc.title}'. Read the document first and copy the text exactly."
+            )
+        final_text = current_text.replace(find_text, new_content_text)
+    elif mode == "replace":
+        final_text = new_content_text.strip()
+    elif mode == "prepend":
+        final_text = (new_content_text.strip() + "\n\n" + current_text).strip()
     else:
-        blocks.append({"id": str(len(blocks) + 1), "type": "paragraph", "text": new_content_text.strip()})
-    content.update({"text": final_text, "blocks": blocks})
+        final_text = (current_text + "\n\n" + new_content_text.strip()).strip()
+
+    content = dict(doc.content) if isinstance(doc.content, dict) else {}
+    content.pop("blocks", None)  # "text" is now the single source of the document body
+    content["text"] = final_text
     doc.content = content
     doc.updated_at = datetime.now()
     await db.commit()
     schedule_document_ingestion(doc.id, delay=0)
+    detail = ""
+    if mode == "replace_text":
+        detail = f" ({occurrences} replacement{'s' if occurrences != 1 else ''})"
     return {
         "id": str(doc.id),
         "title": doc.title,
         "action": "edit",
-        "message": f"Updated document '{doc.title}'.",
+        "mode": mode,
+        "message": f"Updated document '{doc.title}'{detail}.",
         "content_preview": final_text[:300],
     }
 
@@ -353,6 +389,31 @@ async def update_task_status_tool(
 # Code repositories
 # -------------------------------------------------------------------------------------------
 
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+async def list_files_tool(db: AsyncSession, workspace_id: UUID, query: str = "", images_only: bool = False) -> list[dict]:
+    """Uploaded files (newest first). Images can be placed in a page with ![alt](file:<id>)."""
+    files = (await db.execute(
+        select(FileRecord).where(FileRecord.workspace_id == workspace_id).order_by(FileRecord.created_at.desc())
+    )).scalars().all()
+    needle = query.strip().lower()
+    items = []
+    for f in files:
+        is_image = f.filename.lower().endswith(IMAGE_EXTENSIONS)
+        if (images_only and not is_image) or (needle and needle not in f.filename.lower()):
+            continue
+        item = {"id": str(f.id), "filename": f.filename, "is_image": is_image, "size_bytes": f.file_size}
+        if is_image:
+            item["markdown"] = f"![{Path(f.filename).stem}](file:{f.id})"
+        if f.document_id:
+            item["page_id"] = str(f.document_id)  # original upload of this page
+        items.append(item)
+        if len(items) >= 50:
+            break
+    return items
+
+
 async def list_repos_tool(db: AsyncSession, workspace_id: UUID) -> list[dict]:
     repos = (await db.execute(select(CodeRepo).where(CodeRepo.workspace_id == workspace_id))).scalars().all()
     return [{"id": str(r.id), "name": r.name, "description": r.description} for r in repos]
@@ -424,6 +485,8 @@ async def create_transaction_tool(
         raise ToolError("The amount must be a number") from exc
     if value <= 0:
         raise ToolError("The amount must be greater than zero")
+    if not math.isfinite(value) or value > MAX_AMOUNT:
+        raise ToolError(f"The amount must be at most {MAX_AMOUNT:,.0f}")
     if not category.strip():
         raise ToolError("A category is required")
     tx_type = TransactionType.INCOME if type.lower() in {"income", "revenue"} else TransactionType.EXPENSE
@@ -606,10 +669,13 @@ AVAILABLE_TOOLS = [
     _fn("create_document", "Create a new document in the current workspace.",
         {"title": STRING, "content_text": {**STRING, "description": "Document body (plain text or Markdown)"}},
         ["title"]),
-    _fn("edit_document", "Append to or replace the text of an existing document.",
-        {"doc_query": {**STRING, "description": "Document title or id"},
-         "new_content_text": STRING,
-         "mode": {"type": "string", "enum": ["append", "replace"]}},
+    _fn("edit_document",
+        "Change an existing document. Read it with get_document first. Use mode 'replace_text' with find_text "
+        "for targeted fixes, 'append'/'prepend' to add text, or 'replace' to rewrite the whole body (Markdown).",
+        {"doc_query": {**STRING, "description": "Document id (preferred) or exact title"},
+         "new_content_text": {**STRING, "description": "Text to add, the new body, or the replacement for find_text"},
+         "mode": {"type": "string", "enum": ["append", "prepend", "replace", "replace_text"]},
+         "find_text": {**STRING, "description": "replace_text only: the exact existing text to replace"}},
         ["doc_query", "new_content_text"]),
     _fn("search_sessions", "Search meeting recordings: summaries, transcripts, and action items. Empty query lists recent meetings.",
         {"query": STRING}),
@@ -623,6 +689,11 @@ AVAILABLE_TOOLS = [
     _fn("update_task_status", "Move a task to another Kanban column. Use list_tasks to find the id.",
         {"task_id": STRING, "status": {"type": "string", "enum": ["todo", "in_progress", "review", "done"]}},
         ["task_id", "status"]),
+    _fn("list_files",
+        "List uploaded files (images, PDFs, Word files…). Image results include ready-to-use Markdown "
+        "(![alt](file:<id>)) for placing the image in a document with edit_document.",
+        {"query": {**STRING, "description": "Filename keyword (optional)"},
+         "images_only": {"type": "boolean"}}),
     _fn("list_repos", "List code repositories in the workspace."),
     _fn("create_repo", "Create a code repository.", {"name": STRING, "description": STRING}, ["name"]),
     _fn("create_commit", "Log a commit to a repository. Use list_repos to find the id.",

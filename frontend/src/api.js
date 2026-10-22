@@ -36,7 +36,21 @@ export function setSavedWorkspaceId(id) {
   }
 }
 
-async function request(path, options = {}) {
+// Identical GETs issued at the same moment (React StrictMode double effects, two components
+// loading the same list) share one network request.
+const inFlightGets = new Map();
+
+function request(path, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  if (method !== 'GET') return sendRequest(path, options);
+  const key = `${getAuthToken() || ''} ${path}`;
+  if (inFlightGets.has(key)) return inFlightGets.get(key);
+  const promise = sendRequest(path, options).finally(() => inFlightGets.delete(key));
+  inFlightGets.set(key, promise);
+  return promise;
+}
+
+async function sendRequest(path, options = {}) {
   const token = getAuthToken();
   const headers = {
     ...(options.headers || {}),
@@ -124,7 +138,28 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   getMe: () => request('/auth/me'),
+  updateMe: (data) => request('/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteAccount: (password) => request('/auth/me', { method: 'DELETE', body: JSON.stringify({ password }) }),
+  // Revokes every token for this account on the server, not just the local copy.
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  changePassword: (currentPassword, newPassword) =>
+    request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+  resetPassword: (email, otp, newPassword) =>
+    request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp, new_password: newPassword }),
+    }),
   searchUsers: (query = '') => request(`/auth/users/search?q=${encodeURIComponent(query)}`),
+
+  // Public contact form (stored server-side, forwarded by e-mail when configured)
+  sendContactMessage: ({ name, email, subject, message, website }) =>
+    request('/contact', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, subject: subject || undefined, message, website: website || undefined }),
+    }),
 
   // Workspaces
   listWorkspaces: () => request('/workspaces'),
@@ -139,6 +174,12 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
   getWorkspaceMembers: (wsId) => request(`/workspaces/${wsId}/members`),
+  leaveWorkspace: (wsId) => request(`/workspaces/${wsId}/leave`, { method: 'POST' }),
+  removeWorkspaceMember: (wsId, userId) => request(`/workspaces/${wsId}/members/${userId}`, { method: 'DELETE' }),
+  updateMemberRole: (wsId, userId, role) =>
+    request(`/workspaces/${wsId}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  deleteWorkspace: (wsId, confirmName) =>
+    request(`/workspaces/${wsId}`, { method: 'DELETE', body: JSON.stringify({ confirm_name: confirmName }) }),
   regenerateJoinCode: (wsId) =>
     request(`/workspaces/${wsId}/regenerate-code`, {
       method: 'POST',
@@ -238,10 +279,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ target_username: targetUsername }),
     }),
-  listMessages: (wsId, channelId, parentId = null, rootOnly = false) => {
+  listMessages: (wsId, channelId, parentId = null, rootOnly = false, { before, limit } = {}) => {
     let url = `/workspaces/${wsId}/channels/${channelId}/messages?`;
     if (parentId) url += `parent_id=${parentId}&`;
     if (rootOnly) url += `root_only=true&`;
+    if (before) url += `before=${encodeURIComponent(before)}&`;
+    if (limit) url += `limit=${limit}&`;
     return request(url);
   },
   postMessage: (wsId, channelId, data) => {
@@ -251,6 +294,14 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  editMessage: (wsId, channelId, messageId, content) =>
+    request(`/workspaces/${wsId}/channels/${channelId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
+  deleteMessage: (wsId, channelId, messageId) =>
+    request(`/workspaces/${wsId}/channels/${channelId}/messages/${messageId}`, { method: 'DELETE' }),
+  deleteChannel: (wsId, channelId) => request(`/workspaces/${wsId}/channels/${channelId}`, { method: 'DELETE' }),
   toggleReaction: (wsId, channelId, messageId, emoji) =>
     request(`/workspaces/${wsId}/channels/${channelId}/messages/${messageId}/reactions`, {
       method: 'POST',
@@ -267,6 +318,13 @@ export const api = {
 
   // Files
   listFiles: (wsId) => request(`/workspaces/${wsId}/files`),
+  // Word/PDF/Markdown/text files are converted to document text on the server.
+  importDocument: (wsId, file, parentId = null) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (parentId) formData.append('parent_id', parentId);
+    return request(`/workspaces/${wsId}/documents/import`, { method: 'POST', body: formData });
+  },
   uploadFile: (wsId, formData) =>
     request(`/workspaces/${wsId}/files`, {
       method: 'POST',
@@ -281,6 +339,31 @@ export const api = {
     const link = document.createElement('a');
     link.href = url;
     link.download = filename || 'download';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+  getFilePreview: (wsId, fileId) => request(`/workspaces/${wsId}/files/${fileId}/preview`),
+  // The raw bytes as a Blob with a type we choose, so the browser never treats an upload as HTML.
+  fetchFileBlob: async (wsId, fileId, type) => {
+    const res = await fetch(`${API_BASE}/workspaces/${wsId}/files/${fileId}/download`, {
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+    });
+    if (!res.ok) throw new Error(`Could not load the file (HTTP ${res.status})`);
+    return new Blob([await res.arrayBuffer()], { type });
+  },
+  fileToDocument: (wsId, fileId) => request(`/workspaces/${wsId}/files/${fileId}/to-document`, { method: 'POST' }),
+  // The page as it is now, as Word (.docx) or Markdown.
+  exportDocument: async (wsId, docId, format = 'docx', title = 'document') => {
+    const res = await fetch(`${API_BASE}/workspaces/${wsId}/documents/${docId}/export?format=${format}`, {
+      headers: { Authorization: `Bearer ${getAuthToken()}` },
+    });
+    if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${(title || 'document').replace(/[\\/:*?"<>|]+/g, '_')}.${format}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -312,6 +395,12 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+  uploadSessionFile: (wsId, file, title) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (title) formData.append('title', title);
+    return request(`/workspaces/${wsId}/sessions/upload`, { method: 'POST', body: formData });
+  },
   uploadSession: (wsId, formData) =>
     request(`/workspaces/${wsId}/sessions/upload`, {
       method: 'POST',
@@ -339,6 +428,7 @@ export const api = {
     }),
   listVideoRooms: (wsId) => request(`/workspaces/${wsId}/video/rooms`),
   listActiveVideoRooms: (wsId) => request(`/workspaces/${wsId}/video/rooms`),
+  getIceServers: (wsId) => request(`/workspaces/${wsId}/video/ice-servers`),
   joinVideoRoom: (wsId, roomId) =>
     request(`/workspaces/${wsId}/video/rooms/${roomId}/join`, {
       method: 'POST',

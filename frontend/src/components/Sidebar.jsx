@@ -62,7 +62,8 @@ export default function Sidebar({
 
   const activityRailItems = [
     { id: 'dashboard', label: 'Activity', icon: LayoutDashboard },
-    { id: 'documents', label: 'Docs', icon: FileText, badge: documents.length > 0 ? documents.length : null },
+    // Docs holds both pages and uploaded files.
+    { id: 'documents', label: 'Docs', icon: FileText, badge: documents.length > 0 ? documents.length : null, also: ['files'] },
     {
       id: isSolo ? 'solo_chat' : 'channels',
       label: isSolo ? 'Chat' : 'Channels',
@@ -86,7 +87,7 @@ export default function Sidebar({
   return (
     <div className="hidden md:flex h-full select-none shrink-0">
       {/* 1. MICROSOFT TEAMS ACTIVITY RAIL (56px) */}
-      <aside className="w-14 bg-[#1E1B4B] text-slate-300 flex flex-col items-center py-3 justify-between border-r border-[#312E81] z-20">
+      <aside className="w-[4.5rem] bg-[#1E1B4B] text-slate-300 flex flex-col items-center py-3 justify-between border-r border-[#312E81] z-20">
         {/* Top: Current Workspace Icon */}
         <div className="flex flex-col items-center gap-4 w-full">
           <button
@@ -101,23 +102,24 @@ export default function Sidebar({
           <div className="w-8 h-[1px] bg-[#312E81]" />
 
           {/* Activity Rail Navigation Icons */}
-          <div className="flex flex-col items-center gap-1.5 w-full">
+          <nav aria-label="Sections" className="flex flex-col items-center gap-1.5 w-full overflow-y-auto max-h-[calc(100vh-15rem)]">
             {activityRailItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive = activeTab === item.id || (item.also || []).includes(activeTab);
               return (
                 <button
                   key={item.id}
                   onClick={() => onTabChange(item.id)}
                   title={item.label}
-                  className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center relative transition-all duration-150 ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`w-16 h-12 rounded-xl flex flex-col items-center justify-center relative transition-all duration-150 ${
                     isActive
                       ? 'bg-[#4F46E5] text-white shadow-lg shadow-indigo-950 font-bold'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-[#312E81]/60'
                   }`}
                 >
                   <Icon className={`w-5 h-5 ${item.accent && !isActive ? 'text-amber-400' : ''}`} />
-                  <span className="text-[9px] font-medium leading-none mt-0.5 scale-90">{item.label}</span>
+                  <span className="text-xs font-medium leading-none mt-1">{item.label}</span>
 
                   {/* Active Indicator Bar */}
                   {isActive && (
@@ -131,7 +133,7 @@ export default function Sidebar({
                 </button>
               );
             })}
-          </div>
+          </nav>
         </div>
 
         {/* Bottom Rail Actions: Settings & Presence Avatar */}
@@ -139,6 +141,7 @@ export default function Sidebar({
           <button
             onClick={() => onTabChange('finance')}
             title="Finance"
+            aria-label="Finance"
             className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
               activeTab === 'finance'
                 ? 'bg-[#4F46E5] text-white'
@@ -151,6 +154,7 @@ export default function Sidebar({
           <button
             onClick={() => onTabChange('settings')}
             title="Settings"
+            aria-label="Settings"
             className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
               activeTab === 'settings'
                 ? 'bg-[#4F46E5] text-white'
@@ -231,7 +235,7 @@ export default function Sidebar({
                   <h2 className="text-xs font-bold text-slate-900 truncate tracking-tight">
                     {currentWorkspace?.name || (isSolo ? 'Solo Space' : 'Team Hub')}
                   </h2>
-                  <p className="text-[10px] text-slate-500 font-mono capitalize">
+                  <p className="text-xs text-slate-500 font-mono capitalize">
                     {isSolo ? 'Personal' : 'Team'} Space
                   </p>
                 </div>
@@ -241,7 +245,7 @@ export default function Sidebar({
               {/* Workspace Switcher Menu */}
               {showWsDropdown && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#E2E8F0] rounded-xl p-2 shadow-2xl z-50 space-y-1.5">
-                  <div className="text-[10px] font-mono font-bold uppercase text-slate-400 px-2 py-0.5">
+                  <div className="text-xs font-mono font-bold uppercase text-slate-400 px-2 py-0.5">
                     Workspaces
                   </div>
                   <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -260,7 +264,7 @@ export default function Sidebar({
                       >
                         <span className="truncate">{ws.name}</span>
                         <span
-                          className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded ${
+                          className={`text-xs font-mono uppercase px-1.5 py-0.5 rounded ${
                             ws.type === 'personal'
                               ? 'bg-sky-100 text-sky-700'
                               : 'bg-purple-100 text-purple-700'
@@ -278,7 +282,7 @@ export default function Sidebar({
                         setShowWsDropdown(false);
                         onOpenCreateWs();
                       }}
-                      className="flex-1 text-center py-1 text-[11px] font-bold text-[#4F46E5] hover:bg-indigo-50 rounded-lg transition"
+                      className="flex-1 text-center py-1 text-xs font-bold text-[#4F46E5] hover:bg-indigo-50 rounded-lg transition"
                     >
                       + Create Group
                     </button>
@@ -287,7 +291,7 @@ export default function Sidebar({
                         setShowWsDropdown(false);
                         onOpenJoinWs();
                       }}
-                      className="flex-1 text-center py-1 text-[11px] font-bold text-slate-700 hover:bg-[#F2F4F6] rounded-lg transition"
+                      className="flex-1 text-center py-1 text-xs font-bold text-slate-700 hover:bg-[#F2F4F6] rounded-lg transition"
                     >
                       Join Code
                     </button>
@@ -299,7 +303,7 @@ export default function Sidebar({
             {/* Contextual Quick Actions for Active Tab */}
             {activeTab === 'documents' && (
               <div className="mb-3 space-y-1.5">
-                <div className="flex items-center justify-between px-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <div className="flex items-center justify-between px-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <span>Notion Pages</span>
                   <button
                     onClick={() => onTabChange('documents')}
@@ -321,7 +325,7 @@ export default function Sidebar({
                     </button>
                   ))}
                   {documents.length === 0 && (
-                    <div className="text-[11px] text-slate-400 px-2 py-1 italic">No pages yet</div>
+                    <div className="text-xs text-slate-400 px-2 py-1 italic">No pages yet</div>
                   )}
                 </div>
               </div>
@@ -329,7 +333,7 @@ export default function Sidebar({
 
             {activeTab === 'channels' && (
               <div className="mb-3 space-y-1.5">
-                <div className="flex items-center justify-between px-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <div className="flex items-center justify-between px-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <span>Channels</span>
                   <button
                     onClick={() => onTabChange('channels')}
@@ -351,7 +355,7 @@ export default function Sidebar({
                         <span className="truncate">{chan.name}</span>
                       </div>
                       {unreadCounts[chan.id] > 0 && (
-                        <span className="bg-rose-500 text-white font-bold text-[9px] px-1.5 py-0.2 rounded-full">
+                        <span className="bg-rose-500 text-white font-bold text-xs px-1.5 py-0.2 rounded-full">
                           {unreadCounts[chan.id]}
                         </span>
                       )}
@@ -363,7 +367,7 @@ export default function Sidebar({
 
             {activeTab === 'solo_chat' && (
               <div className="mb-3 space-y-1.5">
-                <div className="flex items-center justify-between px-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <div className="flex items-center justify-between px-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <span>Direct Chats</span>
                   <button
                     onClick={() => onTabChange('solo_chat')}
@@ -389,7 +393,7 @@ export default function Sidebar({
                       </button>
                     ))}
                   {channels.filter((c) => c.is_direct).length === 0 && (
-                    <div className="text-[11px] text-slate-400 px-2 py-1 italic">No direct chats yet</div>
+                    <div className="text-xs text-slate-400 px-2 py-1 italic">No direct chats yet</div>
                   )}
                 </div>
               </div>
@@ -414,7 +418,7 @@ export default function Sidebar({
             <div className="p-1 bg-[#ECEEF0] rounded-xl flex items-center gap-1">
               <button
                 onClick={() => handleToggleMode('personal')}
-                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[11px] font-bold transition ${
+                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-xs font-bold transition ${
                   isSolo ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -422,7 +426,7 @@ export default function Sidebar({
               </button>
               <button
                 onClick={() => handleToggleMode('team')}
-                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[11px] font-bold transition ${
+                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-xs font-bold transition ${
                   !isSolo ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -432,7 +436,7 @@ export default function Sidebar({
 
             <button
               onClick={() => setIsPanelExpanded(false)}
-              className="w-full flex items-center justify-center gap-1.5 py-1 text-slate-400 hover:text-slate-700 text-[11px] transition"
+              className="w-full flex items-center justify-center gap-1.5 py-1 text-slate-400 hover:text-slate-700 text-xs transition"
               title="Collapse Panel"
             >
               <ChevronsLeft className="w-3.5 h-3.5" />

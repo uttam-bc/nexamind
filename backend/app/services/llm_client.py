@@ -7,6 +7,7 @@ so callers can fall back to offline behaviour.
 
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -18,7 +19,27 @@ logger = logging.getLogger(__name__)
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
+DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=45.0, write=30.0, pool=10.0)
+
+# Models that just failed with overload (429/5xx) or a timeout are skipped for a while, so the next
+# call goes straight to a model that is working instead of waiting on the same failure again.
+MODEL_COOLDOWN_SECONDS = 60.0
+_model_unavailable_until: dict[str, float] = {}
+
+
+def _available_models(models: list[str]) -> list[str]:
+    now = time.monotonic()
+    healthy = [m for m in models if _model_unavailable_until.get(m, 0.0) <= now]
+    # If every model is cooling down, try them all rather than failing without asking.
+    return healthy or list(models)
+
+
+def _mark_unavailable(model: str) -> None:
+    _model_unavailable_until[model] = time.monotonic() + MODEL_COOLDOWN_SECONDS
+
+
+def reset_model_health() -> None:
+    _model_unavailable_until.clear()
 # Successful Gemini responses per model, for diagnostics and evaluation reports.
 MODEL_USAGE: dict[str, int] = {}
 
@@ -71,11 +92,12 @@ async def gemini_generate(
 
     headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for model in get_settings().gemini_models:
+        for model in _available_models(get_settings().gemini_models):
             try:
                 res = await client.post(f"{GEMINI_BASE_URL}/models/{model}:generateContent", json=payload, headers=headers)
             except httpx.HTTPError as exc:
                 logger.warning("Gemini %s request failed: %s", model, exc.__class__.__name__)
+                _mark_unavailable(model)
                 continue
             if res.status_code == 200:
                 candidates = res.json().get("candidates") or []
@@ -88,6 +110,8 @@ async def gemini_generate(
             body = _redact(res.text[:300], api_key)
             if res.status_code in (401, 403) or (res.status_code == 400 and "API_KEY" in body):
                 raise LlmKeyError("Gemini rejected the API key")
+            if res.status_code == 429 or res.status_code >= 500:
+                _mark_unavailable(model)
             logger.warning("Gemini %s returned HTTP %d: %s", model, res.status_code, body)
     return None
 

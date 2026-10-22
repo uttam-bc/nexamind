@@ -77,8 +77,16 @@ def test_production_refuses_default_or_short_jwt_secret() -> None:
         Settings(app_env="production", jwt_secret_key="change-me-to-a-long-random-secret", _env_file=None)
     with pytest.raises(ValidationError):
         Settings(app_env="production", jwt_secret_key="too-short", _env_file=None)
-    ok = Settings(app_env="production", jwt_secret_key="x" * 40, _env_file=None)
-    assert ok.debug is False and ok.auto_create_schema is False
+    # The test process sets ENABLE_DEV_AUTH=true; production must be configured without it.
+    ok = Settings(app_env="production", jwt_secret_key="x" * 40, enable_dev_auth=False, _env_file=None)
+    assert ok.debug is False and ok.auto_create_schema is False and ok.dev_auth_active is False
+
+
+def test_production_refuses_dev_auth_and_debug() -> None:
+    with pytest.raises(ValidationError):
+        Settings(app_env="production", jwt_secret_key="x" * 40, enable_dev_auth=True, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(app_env="production", jwt_secret_key="x" * 40, enable_dev_auth=False, debug=True, _env_file=None)
 
 
 def test_secret_encryption_roundtrip() -> None:

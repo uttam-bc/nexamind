@@ -17,6 +17,8 @@ import {
   Check,
   Quote,
   Upload,
+  Loader2,
+  Image as ImageIcon,
   Eye,
   Edit3,
   Columns,
@@ -34,6 +36,8 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
+import { notify, confirmDialog } from '../context/ToastContext';
+import MarkdownDocument from './MarkdownDocument';
 
 const EMOJI_PICKER_OPTIONS = [
   '📄', '📝', '💡', '🚀', '🛠️', '📌', '🎯', '📊',
@@ -133,7 +137,7 @@ Explain the architectural rationale and key design trade-offs.
   },
 ];
 
-export default function Documents({ workspaceId, documents = [], onRefreshDocuments, onBack }) {
+export default function Documents({ workspaceId, documents = [], onRefreshDocuments, onBack, openDocId, onOpenedDoc }) {
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [docTitle, setDocTitle] = useState('');
   const [docContent, setDocContent] = useState('');
@@ -157,14 +161,22 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
 
   // Direct Notion Editor Mode
   // Default is 'direct' (write directly in preview session)
-  const [viewMode, setViewMode] = useState('direct'); // 'direct' | 'split' | 'code'
+  const [viewMode, setViewMode] = useState('direct'); // 'preview' | 'direct' | 'split' | 'code'
+  const [isImporting, setIsImporting] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const imageInputRef = useRef(null);
   const [isZenMode, setIsZenMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
-  const [copiedCodeIdx, setCopiedCodeIdx] = useState(null);
 
   const fileInputRef = useRef(null);
+  // What was last loaded from (or saved to) the server for the open document. Autosave only
+  // writes when the editor differs from it, so opening a page never overwrites it.
+  const loadedDocRef = useRef({ id: null, text: '', title: '', icon: '📄', updatedAt: null });
+  const selectRequestRef = useRef(0);
+  const pendingSelectRef = useRef(false); // a page is being fetched for display
+  const [isLoadingDoc, setIsLoadingDoc] = useState(false);
   const directTextareaRef = useRef(null);
   const rawTextareaRef = useRef(null);
 
@@ -175,17 +187,34 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     }
   }, [workspaceId, documents]);
 
+  // Opened from the Files tab: show that page.
+  useEffect(() => {
+    if (!openDocId || !documents?.length) return;
+    const target = documents.find((d) => d.id === openDocId);
+    if (target) handleSelectDoc(target);
+    onOpenedDoc?.();
+  }, [openDocId, documents]);
+
   // Keep selectedDoc synchronized with documents list
   useEffect(() => {
     if (documents && documents.length > 0) {
+      if (openDocId && documents.some((d) => d.id === openDocId)) return; // handled above
       if (!selectedDoc || !documents.some((d) => d.id === selectedDoc.id)) {
         handleSelectDoc(documents[0]);
       } else {
         const current = documents.find((d) => d.id === selectedDoc.id);
-        if (current && (current.title !== docTitle || (current.icon || '📄') !== docIcon)) {
-          setDocTitle(current.title || 'Untitled Document');
-          setDocIcon(current.icon || '📄');
-          setDocParentId(current.parent_id || null);
+        const loaded = loadedDocRef.current;
+        const dirty = docContent !== loaded.text || docTitle !== loaded.title || docIcon !== loaded.icon;
+        // Changed elsewhere (another member, or the AI copilot) and nothing unsaved here: reload it.
+        // Never while another page is being opened, or the reload would override the user's click.
+        if (
+          current &&
+          !pendingSelectRef.current &&
+          current.updated_at !== loaded.updatedAt &&
+          !dirty &&
+          loaded.id === current.id
+        ) {
+          handleSelectDoc(current, { keepView: true });
         }
       }
     } else {
@@ -197,16 +226,41 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     }
   }, [documents]);
 
-  const handleSelectDoc = (doc) => {
+  const handleSelectDoc = async (doc, { keepView = false } = {}) => {
     if (!doc) return;
-    setSelectedDoc(doc);
-    setDocTitle(doc.title || 'Untitled Document');
-    setDocIcon(doc.icon || '📄');
-    setDocParentId(doc.parent_id || null);
+    const requestId = ++selectRequestRef.current;
+    pendingSelectRef.current = true;
+    let full = doc;
+    // List and tree items don't carry content; fetch the whole document before showing it.
+    if (!('content' in doc)) {
+      setIsLoadingDoc(true);
+      try {
+        full = await api.getDocument(workspaceId, doc.id);
+      } catch (err) {
+        if (requestId === selectRequestRef.current) {
+          pendingSelectRef.current = false;
+          setIsLoadingDoc(false);
+          notify(`Could not open "${doc.title}": ${err.message}`, 'error');
+        }
+        return;
+      }
+    }
+    if (requestId !== selectRequestRef.current) return; // a newer selection won
 
-    const raw = parseDocContent(doc.content);
+    const raw = parseDocContent(full.content);
+    const title = full.title || 'Untitled Document';
+    const icon = full.icon || '📄';
+    loadedDocRef.current = { id: full.id, text: raw, title, icon, updatedAt: full.updated_at };
+    setSelectedDoc(full);
+    setDocTitle(title);
+    setDocIcon(icon);
+    setDocParentId(full.parent_id || null);
     setDocContent(raw);
-    setLastSaved(new Date());
+    // Existing pages open as a readable preview; empty pages open ready to type.
+    if (!keepView) setViewMode(raw.trim() ? 'preview' : 'direct');
+    setLastSaved(full.updated_at ? new Date(full.updated_at) : null);
+    setIsLoadingDoc(false);
+    pendingSelectRef.current = false;
   };
 
   const loadDocumentTree = async () => {
@@ -278,27 +332,47 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     return '';
   };
 
-  // Auto-save debounce effect
+  const hasUnsavedChanges = () => {
+    const loaded = loadedDocRef.current;
+    return (
+      !!selectedDoc &&
+      loaded.id === selectedDoc.id &&
+      (docContent !== loaded.text || docTitle !== loaded.title || docIcon !== loaded.icon)
+    );
+  };
+
+  const rememberSaved = (saved) => {
+    loadedDocRef.current = {
+      id: saved?.id || selectedDoc.id,
+      text: docContent,
+      title: docTitle.trim() || 'Untitled Document',
+      icon: docIcon,
+      updatedAt: saved?.updated_at || loadedDocRef.current.updatedAt,
+    };
+  };
+
+  // Auto-save debounce effect: only real edits to a fully loaded document are written.
   useEffect(() => {
-    if (!selectedDoc) return;
+    if (!selectedDoc || isLoadingDoc || !hasUnsavedChanges()) return;
     const timer = setTimeout(() => {
       handleSilentSave();
     }, 1200);
     return () => clearTimeout(timer);
-  }, [docContent, docTitle, docIcon]);
+  }, [docContent, docTitle, docIcon, isLoadingDoc]);
 
   const handleSilentSave = async () => {
-    if (!selectedDoc || !docTitle.trim()) return;
+    if (!selectedDoc || !docTitle.trim() || !hasUnsavedChanges()) return;
     try {
-      await api.updateDocument(workspaceId, selectedDoc.id, {
+      const saved = await api.updateDocument(workspaceId, selectedDoc.id, {
         title: docTitle.trim(),
         content: { text: docContent },
         icon: docIcon,
       });
+      rememberSaved(saved);
       setLastSaved(new Date());
       if (onRefreshDocuments) onRefreshDocuments();
     } catch (err) {
-      // background silent save
+      notify(`Autosave failed: ${err.message}`, 'error');
     }
   };
 
@@ -306,16 +380,17 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     if (!selectedDoc) return;
     setIsSaving(true);
     try {
-      await api.updateDocument(workspaceId, selectedDoc.id, {
+      const saved = await api.updateDocument(workspaceId, selectedDoc.id, {
         title: docTitle.trim() || 'Untitled Document',
         content: { text: docContent },
         icon: docIcon,
       });
+      rememberSaved(saved);
       setLastSaved(new Date());
       if (onRefreshDocuments) await onRefreshDocuments();
       loadDocumentTree();
     } catch (err) {
-      alert(`Save error: ${err.message}`);
+      notify(`Save error: ${err.message}`, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -345,7 +420,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       const created = await api.createDocument(
         workspaceId,
         title.trim() || 'Untitled Document',
-        { text: initialContent || `# ${title}\n\nStart writing directly here...` },
+        { text: initialContent || '' },
         parentId,
         icon
       );
@@ -357,7 +432,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       setNewDocTitle('');
       setCreateParentId(null);
     } catch (err) {
-      alert(`Could not create document: ${err.message}`);
+      notify(`Could not create document: ${err.message}`, 'error');
     }
   };
 
@@ -381,6 +456,51 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
         content: { text: updated },
         icon: docIcon,
       }).catch((e) => console.warn('Toggle save failed', e));
+    }
+  };
+
+  // Put text at the cursor (or at the end when no editor is open) and switch to editing.
+  const insertAtCursor = (snippet) => {
+    const targetRef = viewMode === 'code' ? rawTextareaRef : directTextareaRef;
+    const el = targetRef.current;
+    if (!el) {
+      setDocContent((prev) => `${prev.replace(/\s*$/, '')}\n\n${snippet}\n`);
+      setViewMode('direct');
+      return;
+    }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const before = docContent.substring(0, start);
+    const lead = before && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+    const updated = `${before}${lead}${snippet}\n${docContent.substring(end)}`;
+    setDocContent(updated);
+    const caret = before.length + lead.length + snippet.length + 1;
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    }, 50);
+  };
+
+  const handleInsertImage = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedDoc) return;
+    if (!/^image\/(png|jpeg|gif|webp|bmp)$/.test(file.type)) {
+      notify('Choose a PNG, JPEG, GIF, WebP or BMP image.', 'error');
+      return;
+    }
+    setIsUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const stored = await api.uploadFile(workspaceId, formData);
+      const alt = file.name.replace(/\.[^.]+$/, '').replace(/[\[\]]/g, '');
+      insertAtCursor(`![${alt}](file:${stored.id})`);
+      notify('Image added. It is saved with the page.', 'success');
+    } catch (err) {
+      notify(`Could not add the image: ${err.message}`, 'error');
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -452,27 +572,20 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
+    setIsImporting(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const textContent = event.target.result;
-        const baseName = file.name.replace(/\.[^/.]+$/, '');
-        const created = await api.createDocument(
-          workspaceId,
-          baseName,
-          { text: typeof textContent === 'string' ? textContent : '' },
-          null,
-          '📄'
-        );
-        if (onRefreshDocuments) await onRefreshDocuments();
-        await loadDocumentTree();
-        handleSelectDoc(created);
-      };
-      reader.readAsText(file);
+      // The server extracts real content (Word headings/lists/tables, PDF text) instead of
+      // reading binary files as text.
+      const created = await api.importDocument(workspaceId, file);
+      if (onRefreshDocuments) await onRefreshDocuments();
+      await loadDocumentTree();
+      handleSelectDoc(created);
+      setViewMode('preview');
+      notify(`Imported "${created.title}".`, 'success');
     } catch (err) {
-      alert(`Upload error: ${err.message}`);
+      notify(`Could not import ${file.name}: ${err.message}`, 'error');
     } finally {
+      setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -594,177 +707,14 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
   };
 
   // Render markdown blocks with interactive checkboxes, styled headers, and callouts
-  const renderFormattedBlocks = (markdownText) => {
-    if (!markdownText) {
-      return (
-        <div className="text-slate-400 italic py-12 text-center">
-          Document is empty. Click into the canvas below or use the formatting bar above to begin writing.
-        </div>
-      );
-    }
-
-    const lines = markdownText.split('\n');
-    let inCodeBlock = false;
-    let codeBuffer = [];
-    let codeLang = '';
-    const renderedElements = [];
-
-    lines.forEach((line, idx) => {
-      if (line.trim().startsWith('```')) {
-        if (!inCodeBlock) {
-          inCodeBlock = true;
-          codeLang = line.trim().replace('```', '') || 'code';
-          codeBuffer = [];
-        } else {
-          inCodeBlock = false;
-          const codeString = codeBuffer.join('\n');
-          const codeBlockIdx = idx;
-          renderedElements.push(
-            <div
-              key={`code-${codeBlockIdx}`}
-              className="my-3 rounded-2xl bg-slate-900 border border-slate-800 text-slate-100 overflow-hidden shadow-md font-mono text-xs"
-            >
-              <div className="flex items-center justify-between px-4 py-2 bg-slate-950/70 border-b border-slate-800 text-[11px] text-slate-400">
-                <span className="uppercase tracking-wider font-bold">{codeLang}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(codeString);
-                    setCopiedCodeIdx(codeBlockIdx);
-                    setTimeout(() => setCopiedCodeIdx(null), 2000);
-                  }}
-                  className="flex items-center gap-1 hover:text-white transition"
-                >
-                  {copiedCodeIdx === codeBlockIdx ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <pre className="p-4 overflow-x-auto leading-relaxed">{codeString}</pre>
-            </div>
-          );
-        }
-        return;
-      }
-
-      if (inCodeBlock) {
-        codeBuffer.push(line);
-        return;
-      }
-
-      // Headings
-      if (line.startsWith('# ')) {
-        renderedElements.push(
-          <h1 key={idx} className="text-2xl font-black text-slate-900 mt-6 mb-2 tracking-tight">
-            {line.replace('# ', '')}
-          </h1>
-        );
-      } else if (line.startsWith('## ')) {
-        renderedElements.push(
-          <h2 key={idx} className="text-xl font-bold text-slate-900 mt-5 mb-2 tracking-tight border-b border-slate-200 pb-1.5">
-            {line.replace('## ', '')}
-          </h2>
-        );
-      } else if (line.startsWith('### ')) {
-        renderedElements.push(
-          <h3 key={idx} className="text-base font-bold text-slate-900 mt-4 mb-1">
-            {line.replace('### ', '')}
-          </h3>
-        );
-      }
-      // Interactive Task Checkboxes
-      else if (line.trim().startsWith('- [ ]') || line.trim().startsWith('- [x]')) {
-        const isChecked = line.trim().startsWith('- [x]');
-        const text = line.replace(/- \[[ x]\]\s*/, '');
-        renderedElements.push(
-          <div
-            key={idx}
-            onClick={() => handleToggleCheckbox(idx)}
-            className="flex items-start gap-2.5 py-1 px-2 rounded-xl hover:bg-indigo-50/70 transition cursor-pointer group"
-          >
-            <input
-              type="checkbox"
-              checked={isChecked}
-              onChange={() => handleToggleCheckbox(idx)}
-              className="mt-1 rounded border-slate-300 text-indigo-600 focus:ring-0 cursor-pointer w-4 h-4"
-            />
-            <span
-              className={`text-sm leading-relaxed ${
-                isChecked ? 'line-through text-slate-400' : 'text-slate-800 font-medium'
-              }`}
-            >
-              {text}
-            </span>
-          </div>
-        );
-      }
-      // Notion Callout block
-      else if (line.trim().startsWith('> 💡') || line.trim().startsWith('> Note:')) {
-        renderedElements.push(
-          <div
-            key={idx}
-            className="my-3 p-3.5 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 flex items-start gap-3 shadow-sm text-sm"
-          >
-            <Lightbulb className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="leading-relaxed font-sans">{line.replace(/^>\s*(💡|Note:)?\s*/, '')}</div>
-          </div>
-        );
-      }
-      // Blockquote
-      else if (line.trim().startsWith('> ')) {
-        renderedElements.push(
-          <blockquote
-            key={idx}
-            className="my-2 pl-4 border-l-4 border-indigo-500 text-slate-600 italic text-sm py-1"
-          >
-            {line.replace('> ', '')}
-          </blockquote>
-        );
-      }
-      // Bullet list
-      else if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-        renderedElements.push(
-          <li key={idx} className="ml-5 list-disc text-slate-800 text-sm py-0.5 leading-relaxed">
-            {line.replace(/^[-*]\s*/, '')}
-          </li>
-        );
-      }
-      // Numbered list
-      else if (/^\d+\.\s/.test(line.trim())) {
-        renderedElements.push(
-          <li key={idx} className="ml-5 list-decimal text-slate-800 text-sm py-0.5 leading-relaxed">
-            {line.replace(/^\d+\.\s*/, '')}
-          </li>
-        );
-      }
-      // Horizontal Rule
-      else if (line.trim() === '---' || line.trim() === '***') {
-        renderedElements.push(<hr key={idx} className="my-5 border-t border-slate-200" />);
-      }
-      // Spacer
-      else if (!line.trim()) {
-        renderedElements.push(<div key={idx} className="h-2" />);
-      }
-      // Paragraph
-      else {
-        renderedElements.push(
-          <p key={idx} className="text-slate-800 text-sm leading-relaxed">
-            {line}
-          </p>
-        );
-      }
-    });
-
-    return <div className="space-y-1">{renderedElements}</div>;
-  };
+  const renderFormattedBlocks = (markdownText) => (
+    <MarkdownDocument
+      text={markdownText}
+      workspaceId={workspaceId}
+      onToggleCheckbox={handleToggleCheckbox}
+      emptyText="Document is empty. Choose Edit to start writing."
+    />
+  );
 
   return (
     <div className={`h-full flex flex-col select-none ${isZenMode ? 'fixed inset-0 z-50 bg-white p-6' : ''}`}>
@@ -799,7 +749,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       <input
         ref={fileInputRef}
         type="file"
-        accept=".txt,.md,.markdown,.json,.csv,.doc,.docx"
+        accept=".docx,.pdf,.md,.markdown,.txt,.csv,.json"
         className="hidden"
         onChange={handleFileUpload}
       />
@@ -820,10 +770,12 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  title="Upload document file (.txt, .md, .docx)"
-                  className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition"
+                  disabled={isImporting}
+                  title="Import a document (.docx, .pdf, .md, .txt)"
+                  aria-label="Import a document"
+                  className="p-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 rounded-xl border border-slate-200 transition"
                 >
-                  <Upload className="w-3.5 h-3.5" />
+                  {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Upload className="w-3.5 h-3.5" aria-hidden="true" />}
                 </button>
                 <button
                   onClick={() => {
@@ -843,7 +795,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             {/* Real-time Document Search Input */}
             <div className="relative mb-3">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
+              <input aria-label="Search pages or content"
                 type="text"
                 placeholder="Search pages or content..."
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
@@ -851,7 +803,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
               {isSearching && (
-                <span className="absolute right-3 top-2.5 text-[10px] text-slate-400 font-mono animate-pulse">
+                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono animate-pulse">
                   ...
                 </span>
               )}
@@ -866,7 +818,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 <Sparkles className="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-12 transition" />
                 <span className="font-bold">Notion Templates</span>
               </div>
-              <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-mono font-bold">
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-mono font-bold">
                 3 Specs
               </span>
             </button>
@@ -875,7 +827,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             <div className="flex-1 overflow-y-auto space-y-1 pr-1">
               {searchResults !== null ? (
                 <div className="space-y-1">
-                  <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 flex items-center justify-between">
+                  <div className="text-xs uppercase font-bold text-slate-400 px-2 py-1 flex items-center justify-between">
                     <span>Search Results ({searchResults.length})</span>
                     <button
                       onClick={() => setSearchQuery('')}
@@ -904,7 +856,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                           <span className="truncate">{res.title}</span>
                         </div>
                         {res.match_snippet && (
-                          <p className="text-[11px] text-slate-500 font-mono line-clamp-2 bg-white/70 p-1.5 rounded border border-slate-200">
+                          <p className="text-xs text-slate-500 font-mono line-clamp-2 bg-white/70 p-1.5 rounded border border-slate-200">
                             {res.match_snippet}
                           </p>
                         )}
@@ -973,9 +925,23 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               {/* View Mode & Export Tools */}
               <div className="flex items-center gap-2">
                 {/* Mode Selector */}
-                <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1 text-xs">
+                <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1 text-xs" role="group" aria-label="View mode">
+                  <button
+                    onClick={() => setViewMode('preview')}
+                    aria-pressed={viewMode === 'preview'}
+                    className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                      viewMode === 'preview'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Preview the formatted document"
+                  >
+                    <Eye className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Preview</span>
+                  </button>
                   <button
                     onClick={() => setViewMode('direct')}
+                    aria-pressed={viewMode === 'direct'}
                     className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
                       viewMode === 'direct'
                         ? 'bg-indigo-600 text-white shadow-sm'
@@ -983,8 +949,8 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                     }`}
                     title="Direct-Write Canvas (Write directly in formatted page)"
                   >
-                    <Wand2 className="w-3.5 h-3.5" />
-                    <span>Direct Write</span>
+                    <Wand2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Edit</span>
                   </button>
                   <button
                     onClick={() => setViewMode('split')}
@@ -1043,17 +1009,22 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 {/* Delete Doc */}
                 <button
                   onClick={async () => {
-                    if (confirm(`Delete page "${docTitle}" and its hierarchy?`)) {
+                    const ok = await confirmDialog(`Delete page "${docTitle}" and its sub-pages?`, { confirmLabel: 'Delete' });
+                    if (!ok) return;
+                    try {
                       await api.deleteDocument(workspaceId, selectedDoc.id);
                       if (onRefreshDocuments) await onRefreshDocuments();
                       await loadDocumentTree();
                       setSelectedDoc(null);
+                    } catch (err) {
+                      notify(`Could not delete document: ${err.message}`, 'error');
                     }
                   }}
                   className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-slate-200 transition"
                   title="Delete Document"
+                  aria-label="Delete document"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -1089,7 +1060,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </div>
 
               {/* Title Input */}
-              <input
+              <input aria-label="Document title"
                 type="text"
                 className="text-2xl sm:text-3xl font-extrabold bg-transparent text-slate-900 focus:outline-none flex-1 placeholder-slate-300 tracking-tight"
                 value={docTitle}
@@ -1165,11 +1136,29 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 <Minus className="w-3.5 h-3.5" />
                 <span>Divider</span>
               </button>
+              <button
+                onClick={() => imageInputRef.current?.click()}
+                disabled={isUploadingImage}
+                className="px-2 py-1 hover:bg-slate-200 disabled:opacity-60 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
+                title="Insert an image"
+              >
+                {isUploadingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <ImageIcon className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />}
+                <span>Image</span>
+              </button>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={handleInsertImage}
+              />
 
               {/* Slash Command Dropdown Popover */}
               {showSlashMenu && (
                 <div className="absolute left-4 top-10 bg-white border border-slate-200 p-2 rounded-2xl shadow-2xl z-40 w-56 space-y-1 animate-in fade-in zoom-in-95">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
                     Basic Blocks
                   </div>
                   <button
@@ -1225,7 +1214,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
 
             {/* Document Statistics Footer */}
-            <div className="flex items-center justify-between text-[11px] text-slate-500 px-6 py-2 border-b border-slate-100 font-mono bg-slate-50/40">
+            <div className="flex items-center justify-between text-xs text-slate-500 px-6 py-2 border-b border-slate-100 font-mono bg-slate-50/40">
               <div className="flex items-center gap-3">
                 <span>{wordCount} words</span>
                 <span>•</span>
@@ -1245,6 +1234,31 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
 
             {/* 3. Document Workspace Canvas: Direct-Write in Preview (Item 13) */}
             <div className="flex-1 overflow-hidden p-4 sm:p-6 flex gap-4 min-h-0 bg-slate-50/30">
+              {/* PREVIEW MODE: the document as a formatted, read-only page */}
+              {viewMode === 'preview' && (
+                <article
+                  aria-label={`Preview of ${docTitle || 'document'}`}
+                  className="flex-1 h-full overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-xs"
+                >
+                  <div className="max-w-3xl mx-auto px-6 sm:px-10 py-8">
+                    {docContent.trim() ? (
+                      renderFormattedBlocks(docContent)
+                    ) : (
+                      <div className="text-center py-16 space-y-3">
+                        <p className="text-sm text-slate-600">This page is empty.</p>
+                        <button
+                          type="button"
+                          onClick={() => setViewMode('direct')}
+                          className="text-sm font-semibold text-indigo-700 hover:underline"
+                        >
+                          Start writing
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              )}
+
               {/* PRIMARY MODE: Direct Notion Canvas */}
               {viewMode === 'direct' && (
                 <div className="flex-1 h-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1254,37 +1268,46 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                       <Wand2 className="w-3.5 h-3.5 text-indigo-600" />
                       Write and preview simultaneously — type directly into the canvas below
                     </span>
-                    <span className="text-[11px] text-slate-400 font-mono">
+                    <span className="text-xs text-slate-400 font-mono">
                       Markdown shortcuts rendered live
                     </span>
                   </div>
 
-                  {/* Dual Integrated Canvas: Top Formatted Interactive Blocks, Bottom Direct-Write Surface */}
+                  {/* Editor first, then a read-only formatted preview below it */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                    {/* Live Rendered Formatted Preview with interactive checkboxes */}
-                    <div className="p-4 bg-slate-50/60 rounded-2xl border border-slate-200/80">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
-                        <span>Live Formatted Preview (Click checkboxes to toggle)</span>
-                        <span className="text-emerald-600 font-medium">Interactive</span>
-                      </div>
-                      {renderFormattedBlocks(docContent)}
-                    </div>
-
-                    {/* Direct-Write Surface */}
                     <div className="space-y-2">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                        <span>Direct-Write Canvas (Edits reflect instantly in live blocks above)</span>
-                        <span className="text-indigo-600 font-medium">Type here</span>
-                      </div>
+                      <label htmlFor="doc-direct-editor" className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
+                        <span>Write</span>
+                        <span className="text-slate-500 font-medium normal-case">Markdown: # heading, - [ ] checklist, &gt; callout</span>
+                      </label>
                       <textarea
+                        id="doc-direct-editor"
                         ref={directTextareaRef}
                         value={docContent}
                         onChange={(e) => setDocContent(e.target.value)}
-                        placeholder="Write your document directly here... Use # for headings, - [ ] for checklists, > for callouts..."
+                        placeholder="Start writing… Use # for headings, - [ ] for checklists, > for callouts"
                         rows={12}
-                        className="w-full bg-white border border-slate-200 rounded-2xl p-5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 font-sans leading-relaxed resize-y shadow-xs"
+                        className="w-full bg-white border border-slate-300 rounded-2xl p-5 text-sm text-slate-900 focus:border-indigo-600 font-sans leading-relaxed resize-y shadow-xs"
                       />
                     </div>
+
+                    <section aria-label="Formatted preview" className="p-4 bg-slate-50/60 rounded-2xl border border-slate-200/80">
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3 flex items-center justify-between">
+                        <span>Preview (read-only)</span>
+                        <span className="text-slate-500 font-medium normal-case">Checkboxes can be toggled here</span>
+                      </div>
+                      <div
+                        onClick={(e) => {
+                          if (!e.target.closest('input, button, a')) directTextareaRef.current?.focus();
+                        }}
+                      >
+                        {docContent.trim() ? (
+                          renderFormattedBlocks(docContent)
+                        ) : (
+                          <p className="text-sm text-slate-500 italic">Nothing to preview yet.</p>
+                        )}
+                      </div>
+                    </section>
                   </div>
                 </div>
               )}
@@ -1296,7 +1319,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                     <div className="p-3 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-700">
                       Direct-Write Canvas
                     </div>
-                    <textarea
+                    <textarea aria-label="Document content"
                       ref={directTextareaRef}
                       value={docContent}
                       onChange={(e) => setDocContent(e.target.value)}
@@ -1320,7 +1343,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                     <span>Raw Markdown Content</span>
                     <span>UTF-8</span>
                   </div>
-                  <textarea
+                  <textarea aria-label="Raw markdown content"
                     ref={rawTextareaRef}
                     value={docContent}
                     onChange={(e) => setDocContent(e.target.value)}
@@ -1355,10 +1378,11 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 px-4 py-2.5 rounded-2xl text-xs font-bold border border-slate-800 transition active:scale-95"
+                disabled={isImporting}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-slate-200 px-4 py-2.5 rounded-2xl text-xs font-bold border border-slate-800 transition active:scale-95"
               >
-                <Upload className="w-4 h-4 text-indigo-400" />
-                <span>Upload File</span>
+                <Upload className="w-4 h-4 text-indigo-400" aria-hidden="true" />
+                <span>{isImporting ? 'Importing…' : 'Import Word, PDF or Markdown'}</span>
               </button>
             </div>
           </div>
@@ -1368,7 +1392,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       {/* New Page Creation Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+          <div data-modal className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <h3 className="font-extrabold text-lg text-slate-900">
                 {createParentId ? 'Create Nested Sub-page' : 'Create New Notion Page'}
@@ -1405,10 +1429,10 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                <label htmlFor="documents-field-1" className="text-xs font-bold text-slate-700 block mb-1.5">
                   Page Title
                 </label>
-                <input
+                <input id="documents-field-1"
                   type="text"
                   placeholder="e.g. Technical Architecture RFC"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600"
@@ -1447,7 +1471,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       {/* Starter Templates Modal */}
       {showTemplatesModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-xl shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+          <div data-modal className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-xl shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-indigo-600" />

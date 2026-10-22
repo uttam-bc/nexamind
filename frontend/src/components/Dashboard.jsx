@@ -83,7 +83,7 @@ export default function Dashboard({
 
           <button
             onClick={() => onNavigateTab('channels')}
-            className="text-[11px] font-bold text-[#4F46E5] hover:underline px-2"
+            className="text-xs font-bold text-[#4F46E5] hover:underline px-2"
           >
             Open Channels &rarr;
           </button>
@@ -96,16 +96,16 @@ export default function Dashboard({
         <div className="lg:col-span-2 bg-gradient-to-br from-white to-slate-50 border border-[#E2E8F0] rounded-xl p-6 shadow-sm relative overflow-hidden group">
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-2">
-              <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded bg-indigo-100 text-indigo-700">
+              <span className="px-2 py-0.5 text-xs font-mono font-bold uppercase rounded bg-indigo-100 text-indigo-700">
                 AI Morning Brief
               </span>
               <span className="text-xs text-slate-400 font-mono">
                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
               </span>
             </div>
-            <h2 className="text-2xl lg:text-3xl font-extrabold text-[#191C1E] mb-2 tracking-tight">
+            <h1 className="text-2xl lg:text-3xl font-extrabold text-[#191C1E] mb-2 tracking-tight">
               Welcome back, {user?.name || 'Explorer'}.
-            </h2>
+            </h1>
             <p className="text-sm text-slate-600 mb-5 max-w-2xl leading-relaxed">
               You have <strong>{openTasks.length} open tasks</strong> across sprint boards,{' '}
               <strong>{documents.length} Notion-style knowledge documents</strong>, and{' '}
@@ -246,7 +246,7 @@ export default function Dashboard({
                   <span className="text-base shrink-0">{doc.icon || '📄'}</span>
                   <div className="min-w-0">
                     <h4 className="text-xs font-bold text-slate-900 truncate">{doc.title}</h4>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-xs text-slate-400">
                       Updated {new Date(doc.updated_at || Date.now()).toLocaleDateString()}
                     </p>
                   </div>
@@ -290,12 +290,12 @@ export default function Dashboard({
                   <Hash className="w-4 h-4 text-slate-400" />
                   <div>
                     <h4 className="text-xs font-bold text-slate-900">{chan.name}</h4>
-                    <p className="text-[11px] text-slate-500 truncate max-w-xs">
+                    <p className="text-xs text-slate-500 truncate max-w-xs">
                       {chan.description || 'General team discussion & announcements'}
                     </p>
                   </div>
                 </div>
-                <span className="text-[10px] font-mono uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                <span className="text-xs font-mono uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
                   {chan.is_private ? 'Private' : 'Public'}
                 </span>
               </div>

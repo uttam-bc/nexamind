@@ -5,18 +5,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.finance import TransactionType
 
+# Keeps totals finite: sums of capped values can't overflow a float.
+MAX_AMOUNT = 1_000_000_000_000
+
 
 class TransactionCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     type: TransactionType
-    amount: float = Field(..., gt=0)
+    amount: float = Field(..., gt=0, le=MAX_AMOUNT, allow_inf_nan=False)
     category: str = Field(..., min_length=1, max_length=128)
     date: datetime
     description: str | None = None
 
 
 class TransactionUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     type: TransactionType | None = None
-    amount: float | None = Field(default=None, gt=0)
+    amount: float | None = Field(default=None, gt=0, le=MAX_AMOUNT, allow_inf_nan=False)
     category: str | None = Field(default=None, min_length=1, max_length=128)
     date: datetime | None = None
     description: str | None = None

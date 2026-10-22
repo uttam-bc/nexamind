@@ -64,7 +64,7 @@ export default function CreateGroupModal({
 
   return (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
-      <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative space-y-6">
+      <div data-modal className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative space-y-6">
         <button
           onClick={handleClose}
           className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1 rounded-lg"
@@ -94,8 +94,8 @@ export default function CreateGroupModal({
 
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Group / Workspace Name</label>
-                <input
+                <label htmlFor="create-group-modal-field-1" className="text-xs font-bold text-slate-700">Group / Workspace Name</label>
+                <input id="create-group-modal-field-1"
                   type="text"
                   required
                   autoFocus
@@ -106,7 +106,7 @@ export default function CreateGroupModal({
                 />
               </div>
 
-              <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-2xl text-[11px] text-indigo-900 space-y-1 leading-relaxed">
+              <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-2xl text-xs text-indigo-900 space-y-1 leading-relaxed">
                 <p className="font-bold flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-indigo-600" />
                   <span>Instant Join Code Generated</span>
@@ -152,7 +152,7 @@ export default function CreateGroupModal({
 
             {/* Prominent Join Code Display Card */}
             <div className="p-5 bg-gradient-to-br from-indigo-50 to-violet-50 border-2 border-dashed border-indigo-300 rounded-2xl space-y-3">
-              <div className="text-[11px] font-mono uppercase tracking-wider font-bold text-indigo-700">
+              <div className="text-xs font-mono uppercase tracking-wider font-bold text-indigo-700">
                 TEAM JOIN CODE
               </div>
               <div className="text-3xl font-black font-mono tracking-widest text-slate-900 select-all">
@@ -177,7 +177,7 @@ export default function CreateGroupModal({
               </button>
             </div>
 
-            <p className="text-[11px] text-slate-500 font-sans">
+            <p className="text-xs text-slate-500 font-sans">
               Teammates can click <strong>Join Group</strong> in their sidebar and paste this code to join in one click.
             </p>
 

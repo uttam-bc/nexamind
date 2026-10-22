@@ -10,7 +10,7 @@ from app.services import llm_client
 from app.services.auth_service import AuthError
 from app.services.finance_service import calculate_runway
 from app.services.websocket_manager import ws_manager
-from app.services.workspace_service import get_workspace_membership
+from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +136,7 @@ async def delete_report(
     user_id: UUID,
 ) -> None:
     report = await get_report(db, workspace_id, report_id, user_id)
+    await require_author_or_manager(db, report.workspace_id, user_id, report.created_by)
     await db.delete(report)
     await db.flush()
 

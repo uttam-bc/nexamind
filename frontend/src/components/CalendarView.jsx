@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
+import { notify } from '../context/ToastContext';
+import { forgetReminder, getDetectedReminders } from '../lib/reminders';
 
 export default function CalendarView({
   workspaceId,
@@ -33,33 +35,9 @@ export default function CalendarView({
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Proactive AI Detected Commitments
-  const [insights, setInsights] = useState([
-    {
-      id: 'insight-1',
-      source: 'From #general Channel',
-      icon: MessageSquare,
-      borderColor: 'border-l-[#F59E0B]',
-      badgeColor: 'text-[#F59E0B]',
-      text: 'Team sync on system architecture & database deployment strategy',
-      btnColor: 'bg-[#4F46E5] text-white',
-      btnText: 'Add to Cal',
-      suggestedDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-      suggestedTime: '02:00 PM',
-    },
-    {
-      id: 'insight-2',
-      source: 'From PR Review',
-      icon: FileText,
-      borderColor: 'border-l-[#F43F5E]',
-      badgeColor: 'text-[#F43F5E]',
-      text: 'Security patch & authorization token audit',
-      suggestedDate: new Date().toISOString().split('T')[0],
-      suggestedTime: '04:00 PM',
-      btnColor: 'bg-[#F43F5E] text-white',
-      btnText: 'Add to Cal',
-    },
-  ]);
+  // AI-detected commitments come only from the API (meeting minutes and documents).
+  const [insights, setInsights] = useState([]);
+  const [insightStatus, setInsightStatus] = useState('idle'); // 'idle' | 'loading' | 'ready' | 'error'
 
   const [newEvent, setNewEvent] = useState({
     title: '',
@@ -87,6 +65,35 @@ export default function CalendarView({
 
   useEffect(() => {
     loadEvents();
+  }, [workspaceId]);
+
+  const loadInsights = async (force = false) => {
+    if (!workspaceId) return;
+    setInsightStatus('loading');
+    try {
+      const reminders = await getDetectedReminders(workspaceId, { force });
+      setInsights(
+        reminders.map((r) => ({
+          id: r.id,
+          source: `${r.source_type === 'meeting_mom' ? 'Meeting' : 'Document'}: ${r.source_name}`,
+          text: r.title,
+          snippet: r.context_snippet,
+          suggestedDate: r.suggested_date,
+          suggestedTime: r.suggested_time,
+          eventType: r.event_type,
+          priority: r.priority,
+        }))
+      );
+      setInsightStatus('ready');
+    } catch (err) {
+      setInsights([]);
+      setInsightStatus('error');
+    }
+  };
+
+  useEffect(() => {
+    setInsights([]);
+    loadInsights();
   }, [workspaceId]);
 
   // Month navigation
@@ -126,7 +133,7 @@ export default function CalendarView({
       });
       await loadEvents();
     } catch (err) {
-      alert(`Event creation error: ${err.message}`);
+      notify(`Event creation error: ${err.message}`, 'error');
     }
   };
 
@@ -138,18 +145,21 @@ export default function CalendarView({
           description: `Auto-scheduled from: ${insight.source}`,
           event_date: insight.suggestedDate,
           event_time: insight.suggestedTime,
-          event_type: 'meeting',
-          priority: 'high',
+          event_type: insight.eventType || 'meeting',
+          priority: insight.priority || 'medium',
         });
       }
+      forgetReminder(workspaceId, insight.id);
       setInsights((prev) => prev.filter((i) => i.id !== insight.id));
       await loadEvents();
+      notify('Added to your calendar.', 'success');
     } catch (e) {
-      console.warn('Schedule insight error:', e);
+      notify(`Could not add the event: ${e.message}`, 'error');
     }
   };
 
   const handleDismissInsight = (id) => {
+    forgetReminder(workspaceId, id);
     setInsights((prev) => prev.filter((i) => i.id !== id));
   };
 
@@ -221,14 +231,14 @@ export default function CalendarView({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl lg:text-2xl font-bold text-[#191C1E] tracking-tight">
+                <h2 className="text-xl lg:text-2xl font-bold text-[#191C1E] tracking-tight">
                   {monthNames[month]} {year}
-                </h1>
+                </h2>
                 <div className="flex items-center gap-1 bg-[#F2F4F6] rounded-lg p-1 border border-[#E2E8F0]">
-                  <button onClick={prevMonth} className="p-1 hover:bg-white rounded transition text-slate-600">
+                  <button onClick={prevMonth} aria-label="Previous month" className="p-1 hover:bg-white rounded transition text-slate-600">
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <button onClick={nextMonth} className="p-1 hover:bg-white rounded transition text-slate-600">
+                  <button onClick={nextMonth} aria-label="Next month" className="p-1 hover:bg-white rounded transition text-slate-600">
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -307,7 +317,29 @@ export default function CalendarView({
                 return (
                   <div
                     key={`curr-${dayNum}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    aria-label={`${monthNames[month]} ${dayNum}, ${year}${isToday ? ' (today)' : ''}: ${
+                      dayEvents.length === 0 ? 'no events' : `${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}`
+                    }`}
                     onClick={() => setSelectedDay(dayNum)}
+                    onKeyDown={(e) => {
+                      // Enter/Space select; arrow keys move between days (WCAG 2.1.1).
+                      const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedDay(dayNum);
+                      } else if (moves[e.key]) {
+                        e.preventDefault();
+                        const next = Math.min(daysInMonth, Math.max(1, dayNum + moves[e.key]));
+                        setSelectedDay(next);
+                        e.currentTarget.parentElement
+                          ?.querySelector(`[data-day="${next}"]`)
+                          ?.focus();
+                      }
+                    }}
+                    data-day={dayNum}
                     className={`bg-white p-2 flex flex-col justify-between transition group hover:bg-[#F8FAFC] cursor-pointer min-h-[90px] ${
                       isSelected ? 'ring-2 ring-[#4F46E5] ring-inset bg-indigo-50/20' : ''
                     }`}
@@ -325,7 +357,7 @@ export default function CalendarView({
                         {dayNum}
                       </span>
                       {dayEvents.length > 0 && (
-                        <span className="text-[10px] font-mono font-bold text-slate-400">
+                        <span className="text-xs font-mono font-bold text-slate-400">
                           {dayEvents.length}
                         </span>
                       )}
@@ -336,7 +368,7 @@ export default function CalendarView({
                       {dayEvents.slice(0, 2).map((ev) => (
                         <div
                           key={ev.id}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium truncate shadow-xs ${getTypeStyle(
+                          className={`px-1.5 py-0.5 rounded text-xs font-medium truncate shadow-xs ${getTypeStyle(
                             ev.event_type || ev.type
                           )}`}
                         >
@@ -344,7 +376,7 @@ export default function CalendarView({
                         </div>
                       ))}
                       {dayEvents.length > 2 && (
-                        <span className="text-[9px] font-bold text-slate-400 pl-1 block">
+                        <span className="text-xs font-bold text-slate-400 pl-1 block">
                           +{dayEvents.length - 2} more
                         </span>
                       )}
@@ -394,7 +426,7 @@ export default function CalendarView({
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-xs">{ev.title}</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/60">
+                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-white/60">
                           {ev.event_type || 'Event'}
                         </span>
                       </div>
@@ -426,33 +458,52 @@ export default function CalendarView({
               <Sparkles className="w-4 h-4 text-[#8B5CF6] animate-pulse" />
               <span>AI Detected Commitments</span>
             </h2>
-            <span className="text-[10px] font-mono bg-purple-50 text-[#8B5CF6] px-2 py-0.5 rounded font-bold">
-              {insights.length} Detected
+            <span className="text-xs font-mono bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-bold">
+              {insightStatus === 'ready' ? `${insights.length} Detected` : '—'}
             </span>
           </div>
 
-          <p className="text-xs text-slate-500 leading-relaxed">
-            NexaMind Copilot analyzes team chats and PR discussions to automatically surface action items.
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Dates and commitments found in this workspace's meeting minutes and documents.
+            </p>
+            <button
+              type="button"
+              onClick={() => loadInsights(true)}
+              disabled={insightStatus === 'loading'}
+              className="text-xs font-semibold text-indigo-700 hover:underline disabled:text-slate-400 flex-shrink-0"
+            >
+              {insightStatus === 'loading' ? 'Scanning…' : 'Rescan'}
+            </button>
+          </div>
 
           <div className="space-y-3">
-            {insights.length === 0 ? (
-              <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs italic">
-                All action items scheduled!
+            {insightStatus === 'loading' && insights.length === 0 ? (
+              <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center text-slate-600 text-xs" role="status">
+                Looking for commitments…
+              </div>
+            ) : insightStatus === 'error' ? (
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-center text-rose-700 text-xs" role="alert">
+                Couldn't check for commitments. Try Rescan.
+              </div>
+            ) : insights.length === 0 ? (
+              <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center text-slate-600 text-xs">
+                Nothing to schedule right now. Commitments with dates in meeting minutes or documents will appear here.
               </div>
             ) : (
               insights.map((insight) => (
                 <div
                   key={insight.id}
-                  className={`bg-white border border-[#E2E8F0] border-l-4 rounded-xl p-3.5 shadow-xs space-y-2.5 ${insight.borderColor}`}
+                  className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#8B5CF6] rounded-xl p-3.5 shadow-xs space-y-2.5"
                 >
-                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-400">
                     <span>{insight.source}</span>
                     <button
                       onClick={() => handleDismissInsight(insight.id)}
-                      className="hover:text-slate-600"
+                      className="hover:text-slate-700"
+                      aria-label={`Dismiss suggestion: ${insight.text}`}
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-3.5 h-3.5" aria-hidden="true" />
                     </button>
                   </div>
 
@@ -461,9 +512,9 @@ export default function CalendarView({
                   </p>
 
                   <div className="flex items-center justify-between pt-1 border-t border-[#E2E8F0]">
-                    <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                    <span className="text-xs font-mono text-slate-500 flex items-center gap-1">
                       <Clock className="w-3 h-3 text-slate-400" />
-                      <span>{insight.suggestedTime}</span>
+                      <span>{[insight.suggestedDate, insight.suggestedTime].filter(Boolean).join(' · ')}</span>
                     </span>
 
                     <button
@@ -484,7 +535,7 @@ export default function CalendarView({
       {/* Add Event Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+          <div data-modal className="bg-white border border-[#E2E8F0] rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-[#191C1E]">Schedule New Event</h3>
               <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -494,8 +545,8 @@ export default function CalendarView({
 
             <form onSubmit={handleAddEvent} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Event Title *</label>
-                <input
+                <label htmlFor="calendar-view-field-1" className="block text-xs font-semibold text-slate-700 mb-1">Event Title *</label>
+                <input id="calendar-view-field-1"
                   type="text"
                   required
                   placeholder="e.g. Sprint 42 Planning & Sync"
@@ -507,8 +558,8 @@ export default function CalendarView({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Date</label>
-                  <input
+                  <label htmlFor="calendar-view-field-2" className="block text-xs font-semibold text-slate-700 mb-1">Date</label>
+                  <input id="calendar-view-field-2"
                     type="date"
                     required
                     className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none font-mono"
@@ -517,8 +568,8 @@ export default function CalendarView({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Time</label>
-                  <input
+                  <label htmlFor="calendar-view-field-3" className="block text-xs font-semibold text-slate-700 mb-1">Time</label>
+                  <input id="calendar-view-field-3"
                     type="text"
                     placeholder="10:00 AM"
                     className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none font-mono"
@@ -530,8 +581,8 @@ export default function CalendarView({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Event Type</label>
-                  <select
+                  <label htmlFor="calendar-view-field-4" className="block text-xs font-semibold text-slate-700 mb-1">Event Type</label>
+                  <select id="calendar-view-field-4"
                     className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
                     value={newEvent.event_type}
                     onChange={(e) => setNewEvent({ ...newEvent, event_type: e.target.value })}
@@ -543,8 +594,8 @@ export default function CalendarView({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Priority</label>
-                  <select
+                  <label htmlFor="calendar-view-field-5" className="block text-xs font-semibold text-slate-700 mb-1">Priority</label>
+                  <select id="calendar-view-field-5"
                     className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
                     value={newEvent.priority}
                     onChange={(e) => setNewEvent({ ...newEvent, priority: e.target.value })}

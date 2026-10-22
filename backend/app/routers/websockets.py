@@ -12,7 +12,7 @@ from app.dependencies import get_current_user
 from app.models import User
 from app.schemas.channel import MessageCreate, MessageResponse
 from app.security import rate_limiter
-from app.services.auth_service import AuthError, decode_access_token, get_user_by_id
+from app.services.auth_service import AuthError, get_user_for_token
 from app.services.channel_service import get_channel, post_message
 from app.services.websocket_manager import ws_manager
 from app.services.workspace_service import get_workspace_membership
@@ -67,15 +67,10 @@ async def _authenticate(websocket: WebSocket, query_token: str | None) -> User |
         return None
 
     try:
-        user_id = UUID(decode_access_token(token))
-    except (AuthError, ValueError):
+        async with database.AsyncSessionLocal() as db:
+            user = await get_user_for_token(db, token)
+    except AuthError:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
-        return None
-
-    async with database.AsyncSessionLocal() as db:
-        user = await get_user_by_id(db, user_id)
-    if not user:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="User not found")
         return None
     return user
 
@@ -151,7 +146,7 @@ async def channel_websocket(
 async def get_presence(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[dict]:
     membership = await get_workspace_membership(db, workspace_id, current_user.id)
     if not membership:

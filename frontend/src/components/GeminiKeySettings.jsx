@@ -92,7 +92,7 @@ export default function GeminiKeySettings({ onChange, compact = false }) {
       </div>
       <p className="text-xs text-slate-600">{config ? activeSource : 'Checking AI configuration…'}</p>
 
-      <input
+      <input aria-label="Gemini API key"
         type="password"
         autoComplete="off"
         placeholder={config?.has_personal_key ? 'Paste a new key to replace yours' : 'AIza…'}
@@ -100,7 +100,7 @@ export default function GeminiKeySettings({ onChange, compact = false }) {
         onChange={(e) => setKeyInput(e.target.value)}
         className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 font-mono"
       />
-      <p className="text-[11px] text-slate-500">
+      <p className="text-xs text-slate-500">
         Stored encrypted on the server and never sent back to the browser. Get a key at aistudio.google.com.
       </p>
 

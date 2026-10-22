@@ -88,8 +88,51 @@ class Settings(BaseSettings):
     smtp_ssl: bool = False
     require_email_verification: bool = True
 
-    # Google OAuth 2.0 Client ID (from Google Cloud Console)
+    # Google OAuth 2.0 Client ID (from Google Cloud Console). Google sign-in is disabled when unset.
     google_client_id: str | None = None
+
+    # Local-only shortcuts: return OTP codes in API responses and accept `mock_google_:` credentials.
+    # Refused at startup outside development/test so it can never reach production.
+    enable_dev_auth: bool = False
+
+    # How to find the real client IP behind proxies (used for rate limiting).
+    # CLIENT_IP_HEADER names a header a trusted proxy sets and clients cannot forge
+    # (e.g. "cf-connecting-ip" behind Cloudflare). TRUSTED_PROXY_HOPS counts proxies that append
+    # to X-Forwarded-For. With neither, the socket peer address is used.
+    client_ip_header: str | None = None
+    trusted_proxy_hops: int = 0
+
+    # Optional error monitoring (Sentry-compatible DSN). Disabled when unset.
+    sentry_dsn: str | None = None
+
+    # WebRTC ICE servers for meetings, as JSON or comma-separated URLs. TURN credentials are
+    # supplied separately and never committed.
+    webrtc_stun_urls: Annotated[list[str], NoDecode] = [
+        "stun:stun.l.google.com:19302",
+        "stun:stun1.l.google.com:19302",
+    ]
+    webrtc_turn_urls: Annotated[list[str], NoDecode] = []
+    webrtc_turn_username: str | None = None
+    webrtc_turn_credential: str | None = None
+
+    # File storage: "local" (UPLOAD_DIR) or "s3" (any S3-compatible service, e.g. Cloudflare R2).
+    storage_backend: str = "local"
+    s3_bucket: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_region: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+
+    # Where contact-form messages are e-mailed (they are always stored in the database too).
+    contact_inbox_email: str | None = None
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user and self.smtp_password)
+
+    @property
+    def dev_auth_active(self) -> bool:
+        return self.enable_dev_auth and self.is_development
 
     # Uploads
     upload_dir: str = "uploads"
@@ -113,7 +156,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8081",
     ]
 
-    @field_validator("cors_origins", "gemini_models", mode="before")
+    @field_validator("cors_origins", "gemini_models", "webrtc_stun_urls", "webrtc_turn_urls", mode="before")
     @classmethod
     def parse_list(cls, v: object) -> list[str]:
         if isinstance(v, str):
@@ -153,6 +196,17 @@ class Settings(BaseSettings):
             )
         if self.jwt_algorithm not in {"HS256", "HS384", "HS512"}:
             raise ValueError("JWT_ALGORITHM must be one of HS256, HS384, HS512")
+        if not self.is_development:
+            if self.enable_dev_auth:
+                raise ValueError("ENABLE_DEV_AUTH must not be enabled when APP_ENV is not development/test.")
+            if self.debug:
+                raise ValueError("DEBUG must be false when APP_ENV is not development/test.")
+        if self.storage_backend not in {"local", "s3"}:
+            raise ValueError("STORAGE_BACKEND must be 'local' or 's3'")
+        if self.storage_backend == "s3" and not self.s3_bucket:
+            raise ValueError("S3_BUCKET is required when STORAGE_BACKEND=s3")
+        if self.trusted_proxy_hops < 0:
+            raise ValueError("TRUSTED_PROXY_HOPS must be >= 0")
         return self
 
 

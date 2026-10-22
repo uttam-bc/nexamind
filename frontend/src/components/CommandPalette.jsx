@@ -89,10 +89,10 @@ export default function CommandPalette({
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-start justify-center pt-[15vh] p-4 animate-fade-in" onClick={onClose}>
-      <div className="glass-panel w-full max-w-xl rounded-2xl border border-slate-700/80 shadow-2xl overflow-hidden flex flex-col max-h-[min(520px,70vh)] animate-slide-up" onClick={(e) => e.stopPropagation()}>
+      <div data-modal className="glass-panel w-full max-w-xl rounded-2xl border border-slate-700/80 shadow-2xl overflow-hidden flex flex-col max-h-[min(520px,70vh)] animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3.5 border-b border-slate-800/80 gap-3">
           <Search className="w-5 h-5 text-indigo-400 flex-shrink-0" />
-          <input
+          <input aria-label="Search tasks, documents, meetings, channels"
             type="text"
             autoFocus
             placeholder="Search tasks, documents, meetings, channels..."
@@ -101,7 +101,7 @@ export default function CommandPalette({
             onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0); }}
             onKeyDown={handleKeyDown}
           />
-          <kbd className="hidden sm:inline text-[10px] font-mono px-2 py-0.5 text-slate-500 bg-slate-800 rounded border border-slate-700">ESC</kbd>
+          <kbd className="hidden sm:inline text-xs font-mono px-2 py-0.5 text-slate-500 bg-slate-800 rounded border border-slate-700">ESC</kbd>
           <button onClick={onClose} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
@@ -127,7 +127,7 @@ export default function CommandPalette({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[9px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-500">{item.category}</span>
+                  <span className="text-xs uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-500">{item.category}</span>
                   <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
                 </div>
               </button>

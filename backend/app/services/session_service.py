@@ -14,6 +14,7 @@ from app.models import SessionRecord, SessionSource, SessionStatus, User
 from app.schemas.session import SessionCreate, SessionResponse, SessionUpdate
 from app.services.ai_service import summarize_meeting_transcript, transcribe_audio
 from app.config import get_settings
+from app.services import storage
 from app.services.auth_service import AuthError
 from app.services.upload_utils import (
     delete_stored_file,
@@ -24,7 +25,7 @@ from app.services.upload_utils import (
     upload_root,
 )
 from app.services.websocket_manager import ws_manager
-from app.services.workspace_service import get_workspace_membership
+from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
 logger = logging.getLogger(__name__)
 # Background pipelines in flight; holding references keeps tasks from being garbage collected.
@@ -109,6 +110,9 @@ async def upload_session_file(
         upload_root() / "sessions" / str(workspace_id) / f"{file_uuid}{safe_extension(original_filename, '.webm')}"
     )
     file_size = await save_upload(file, target_path, get_settings().max_recording_mb * 1024 * 1024)
+    stored_path = await storage.persist_upload(
+        target_path, f"sessions/{workspace_id}/{target_path.name}", content_type=mime_type
+    )
 
     session_title = (title or "").strip()[:255] or f"Meeting Recording - {os.path.splitext(original_filename)[0]}"
 
@@ -117,7 +121,7 @@ async def upload_session_file(
         workspace_id=workspace_id,
         title=session_title,
         source=SessionSource.UPLOAD,
-        file_path=str(target_path),
+        file_path=stored_path,
         file_size=file_size,
         mime_type=mime_type,
         status=SessionStatus.UPLOADING,
@@ -160,6 +164,7 @@ async def delete_session(
     user_id: UUID,
 ) -> None:
     session = await get_session(db, workspace_id, session_id, user_id)
+    await require_author_or_manager(db, session.workspace_id, user_id, session.created_by)
     file_path = session.file_path
     await db.delete(session)
     await db.flush()
@@ -196,7 +201,7 @@ async def process_session_pipeline(
         logger.error("Session %s not found for pipeline processing", session_id)
         return
 
-    if not os.path.exists(file_path):
+    if not await storage.exists(file_path):
         async def _set_missing_file(session: AsyncSession):
             s = (await session.execute(select(SessionRecord).where(SessionRecord.id == session_id))).scalar_one_or_none()
             if s:
@@ -224,7 +229,8 @@ async def process_session_pipeline(
         if d1:
             await _broadcast_session_status(workspace_id, session_id, SessionStatus.TRANSCRIBING, d1)
 
-        transcript = await transcribe_audio(file_path, mime_type or "audio/webm")
+        async with storage.local_copy(file_path) as local_path:
+            transcript = await transcribe_audio(local_path, mime_type or "audio/webm")
 
         # Step 2: Summarizing
         async def _set_summarizing(session: AsyncSession):

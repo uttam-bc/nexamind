@@ -38,6 +38,50 @@ services:
         sync: false
       - key: LOG_LEVEL
         value: INFO
+      # Render's edge is Cloudflare, which overwrites this header; X-Forwarded-For is client-controlled.
+      # Verify on staging that the header reaches the API before relying on it.
+      - key: CLIENT_IP_HEADER
+        value: cf-connecting-ip
+      # Email (OTP codes, password reset). Without SMTP, sign-up and reset fail with a clear 503.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      # Google sign-in is disabled (503) until this is set to the OAuth web client ID.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # Contact-form messages are stored in the database and also e-mailed here when set.
+      - key: CONTACT_INBOX_EMAIL
+        sync: false
+      # Meetings across restrictive NATs need a TURN relay (e.g. a managed TURN service).
+      - key: WEBRTC_TURN_URLS
+        sync: false
+      - key: WEBRTC_TURN_USERNAME
+        sync: false
+      - key: WEBRTC_TURN_CREDENTIAL
+        sync: false
+      # Optional error monitoring.
+      - key: SENTRY_DSN
+        sync: false
+      # Durable uploads: set STORAGE_BACKEND=s3 plus the S3_* variables (e.g. Cloudflare R2).
+      - key: STORAGE_BACKEND
+        value: local
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
     # Uploaded files live on local disk. On a paid plan, attach a persistent disk so they
     # survive deploys:
     # disk:
@@ -51,6 +95,26 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    # The API origin below must match VITE_API_URL; update both if the API service is renamed.
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: https://nexamind-api.onrender.com; connect-src 'self' https://nexamind-api.onrender.com wss://nexamind-api.onrender.com https://accounts.google.com/gsi/; frame-src blob: https://accounts.google.com/gsi/; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(self), microphone=(self), display-capture=(self), geolocation=()"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
     envVars:
       # Baked into the Vite build at deploy time
       - key: VITE_API_URL
@@ -60,7 +124,8 @@ services:
           envVarKey: RENDER_EXTERNAL_URL
 
 databases:
-  # Free Postgres: 1 GB, expires after 30 days (fine for demos / student projects).
+  # Free Postgres: 1 GB, no backups, and Render deletes free databases after their trial period
+  # (see docs/OPERATIONS.md). Upgrade the plan before storing real user data.
   - name: nexamind-db
     plan: free
     databaseName: nexamind

@@ -26,6 +26,7 @@ import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
 import FormattedChatMessage from './FormattedChatMessage';
 import GeminiKeySettings from './GeminiKeySettings';
+import { notify, confirmDialog } from '../context/ToastContext';
 
 export default function AiAssistant({
   workspaceId,
@@ -103,7 +104,7 @@ export default function AiAssistant({
   const selectSession = async (sessionId) => {
     setActiveSessionId(sessionId);
     try {
-      const history = await api.getAiSessionMessages(sessionId);
+      const history = await api.getAiSessionMessages(workspaceId, sessionId);
       if (history && history.length > 0) {
         setMessages(
           history.map((m) => ({
@@ -135,9 +136,9 @@ export default function AiAssistant({
 
   const handleDeleteSession = async (sessionId, e) => {
     e.stopPropagation();
-    if (!confirm('Delete this AI conversation thread?')) return;
+    if (!(await confirmDialog('Delete this AI conversation thread?', { confirmLabel: 'Delete' }))) return;
     try {
-      await api.deleteAiSession(sessionId);
+      await api.deleteAiSession(workspaceId, sessionId);
       const remaining = sessions.filter((s) => s.id !== sessionId);
       setSessions(remaining);
       if (activeSessionId === sessionId) {
@@ -148,7 +149,7 @@ export default function AiAssistant({
         }
       }
     } catch (err) {
-      alert(`Could not delete session: ${err.message}`);
+      notify(`Could not delete session: ${err.message}`, 'error');
     }
   };
 
@@ -156,10 +157,10 @@ export default function AiAssistant({
     setIsReindexing(true);
     try {
       const res = await api.reindexMemory(workspaceId);
-      alert(`Memory consolidation complete! Ingested: ${res.ingested_count}, Extracted: ${res.extracted_count}, Active Memories: ${res.consolidated_count}`);
+      notify(`Memory consolidation complete! Ingested: ${res.ingested_count}, Extracted: ${res.extracted_count}, Active Memories: ${res.consolidated_count}`, 'success');
       loadMemoryStats();
     } catch (err) {
-      alert(`Re-index error: ${err.message}`);
+      notify(`Re-index error: ${err.message}`, 'error');
     } finally {
       setIsReindexing(false);
     }
@@ -177,7 +178,7 @@ export default function AiAssistant({
   const toggleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      notify('Speech recognition is not supported in this browser. Please use Chrome or Edge.', 'info');
       return;
     }
 
@@ -362,7 +363,7 @@ export default function AiAssistant({
               <Brain className="w-3.5 h-3.5 text-indigo-600" />
               <span className="hidden sm:inline">Memory Vault</span>
               {memoryStats && (
-                <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full text-[10px]">
+                <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full text-xs">
                   {memoryStats.total_memories || 0}
                 </span>
               )}
@@ -394,7 +395,7 @@ export default function AiAssistant({
               <Clock className="w-3.5 h-3.5 text-indigo-600" />
               <span>AI Sessions</span>
             </div>
-            <button
+            <button aria-label="Start New Conversation Session"
               onClick={handleCreateNewSession}
               className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition flex items-center gap-1 text-xs font-bold"
               title="Start New Conversation Session"
@@ -425,7 +426,7 @@ export default function AiAssistant({
                   >
                     <div className="min-w-0 flex-1 pr-2">
                       <div className="truncate">{sess.title || 'Untitled Session'}</div>
-                      <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                      <div className="text-xs text-slate-400 font-normal mt-0.5">
                         {sess.created_at ? new Date(sess.created_at).toLocaleDateString() : 'Active'}
                       </div>
                     </div>
@@ -511,7 +512,7 @@ export default function AiAssistant({
                       </div>
                     )}
 
-                    <div className="text-[10px] text-slate-400 px-1 font-mono">
+                    <div className="text-xs text-slate-400 px-1 font-mono">
                       {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
                     </div>
                   </div>
@@ -561,7 +562,7 @@ export default function AiAssistant({
               {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
 
-            <textarea
+            <textarea aria-label="Message the AI copilot"
               value={inputPrompt}
               onChange={(e) => setInputPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -573,6 +574,7 @@ export default function AiAssistant({
 
             <button
               type="submit"
+              aria-label="Send message"
               disabled={!inputPrompt.trim() || isProcessing}
               className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white rounded-xl transition shadow-sm active:scale-95"
             >
@@ -600,7 +602,7 @@ export default function AiAssistant({
             <div className="py-3 space-y-3 flex-1 overflow-y-auto">
               <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 space-y-1.5 text-xs">
                 <div className="font-bold text-indigo-900">4-Stage Memory Pipeline:</div>
-                <div className="text-slate-600 text-[11px] font-mono leading-relaxed">
+                <div className="text-slate-600 text-xs font-mono leading-relaxed">
                   Ingestion ➔ Extraction ➔ Consolidation ➔ Storage
                 </div>
               </div>
@@ -611,20 +613,20 @@ export default function AiAssistant({
                   <div className="font-extrabold text-indigo-600 text-lg">
                     {memoryStats?.total_memories || 0}
                   </div>
-                  <div className="text-[10px] text-slate-500 font-medium">Active Memories</div>
+                  <div className="text-xs text-slate-500 font-medium">Active Memories</div>
                 </div>
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
                   <div className="font-extrabold text-emerald-600 text-lg">
                     {memoryStats?.sources ? Object.keys(memoryStats.sources).length : 4}
                   </div>
-                  <div className="text-[10px] text-slate-500 font-medium">Connected Sources</div>
+                  <div className="text-xs text-slate-500 font-medium">Connected Sources</div>
                 </div>
               </div>
 
               {/* Memory Categories */}
               {memoryStats?.categories && (
                 <div className="space-y-1 pt-1">
-                  <div className="text-[10px] uppercase font-bold text-slate-400">Categories</div>
+                  <div className="text-xs uppercase font-bold text-slate-400">Categories</div>
                   {Object.entries(memoryStats.categories).map(([cat, count]) => (
                     <div key={cat} className="flex justify-between text-xs py-1 px-2 rounded-lg bg-slate-50">
                       <span className="capitalize font-medium text-slate-700">{cat}</span>
@@ -653,7 +655,7 @@ export default function AiAssistant({
       {/* Gemini API Key Configuration Modal (Item 2) */}
       {showApiKeyModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+          <div data-modal className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Key className="w-5 h-5 text-indigo-600" />

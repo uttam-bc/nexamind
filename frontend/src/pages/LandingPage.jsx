@@ -29,9 +29,20 @@ import {
   MailCheck,
   RefreshCw,
   ArrowLeft,
-  Shield,
+  Menu,
+  X,
 } from 'lucide-react';
 import { api, setAuthToken } from '../api';
+import { useDialog } from '../lib/dialog';
+
+const NAV_SECTIONS = [
+  ['home', 'Home'],
+  ['product', 'Product & Features'],
+  ['memory', 'AI Memory Engine'],
+  ['about', 'About Us'],
+  ['contact', 'Contact'],
+];
+const SECTION_IDS = NAV_SECTIONS.map(([id]) => id);
 
 export default function LandingPage({
   onLogin,
@@ -42,8 +53,9 @@ export default function LandingPage({
   setAuthError: propSetAuthError,
 }) {
   const [activeNav, setActiveNav] = useState('home'); // 'home' | 'product' | 'about' | 'contact'
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register' | 'forgot'
   const [form, setForm] = useState({
     name: '',
     username: '',
@@ -52,6 +64,7 @@ export default function LandingPage({
   });
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState('');
+  const [notice, setNotice] = useState('');
 
   // Email verification (OTP) states
   const [otpSent, setOtpSent] = useState(false);
@@ -59,10 +72,14 @@ export default function LandingPage({
   const [otpCountdown, setOtpCountdown] = useState(0);
   const [devOtpNotice, setDevOtpNotice] = useState(null);
 
-  // Google OAuth states
+  // Password reset states
+  const [resetStep, setResetStep] = useState('email'); // 'email' | 'code'
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+
+  // Google OAuth states. The button is only offered when the server has a client ID.
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleClientId, setGoogleClientId] = useState(null);
-  const [showGoogleHelp, setShowGoogleHelp] = useState(false);
 
   // Contact form state
   const [contactForm, setContactForm] = useState({
@@ -70,8 +87,10 @@ export default function LandingPage({
     email: '',
     subject: '',
     message: '',
+    website: '', // honeypot, hidden from people
   });
-  const [contactSubmitted, setContactSubmitted] = useState(false);
+  const [contactStatus, setContactStatus] = useState('idle'); // 'idle' | 'sending' | 'sent' | 'error'
+  const [contactError, setContactError] = useState('');
 
   // OTP Countdown Timer
   useEffect(() => {
@@ -84,28 +103,36 @@ export default function LandingPage({
 
   // Load Google Client ID on mount
   useEffect(() => {
-    const envClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (envClientId) {
-      setGoogleClientId(envClientId);
-    }
+    let cancelled = false;
     api.getGoogleConfig()
       .then((cfg) => {
-        if (cfg?.client_id) {
+        if (!cancelled && cfg?.client_id) {
           setGoogleClientId(cfg.client_id);
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Links like /#contact open at that section.
+  useEffect(() => {
+    const id = window.location.hash.replace(/^#/, '');
+    if (SECTION_IDS.includes(id)) {
+      setActiveNav(id);
+      document.getElementById(id)?.scrollIntoView();
+    }
   }, []);
 
   // Render official Google button when modal opens
   useEffect(() => {
-    const activeClientId = googleClientId || import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (!activeClientId) return;
+    if (!googleClientId || !showAuthModal || authMode === 'forgot') return;
 
     const setupGoogleBtn = () => {
       if (window.google?.accounts?.id) {
         window.google.accounts.id.initialize({
-          client_id: activeClientId,
+          client_id: googleClientId,
           callback: (resp) => {
             if (resp?.credential) {
               handleGoogleCredentialResponse(resp.credential);
@@ -118,7 +145,7 @@ export default function LandingPage({
           window.google.accounts.id.renderButton(container, {
             theme: 'outline',
             size: 'large',
-            width: 384,
+            width: 320,
             text: 'continue_with',
             shape: 'rectangular',
           });
@@ -126,22 +153,40 @@ export default function LandingPage({
       }
     };
 
-    if (showAuthModal) {
-      const t = setTimeout(setupGoogleBtn, 80);
-      return () => clearTimeout(t);
-    }
-  }, [showAuthModal, googleClientId]);
+    const t = setTimeout(setupGoogleBtn, 80);
+    return () => clearTimeout(t);
+  }, [showAuthModal, googleClientId, authMode]);
+
+  const resetAuthState = () => {
+    setLocalError('');
+    setNotice('');
+    setOtpSent(false);
+    setOtp('');
+    setDevOtpNotice(null);
+    setResetStep('email');
+    setResetCode('');
+    setResetNewPassword('');
+    if (propSetAuthError) propSetAuthError('');
+  };
 
   const handleOpenAuth = (mode = 'login') => {
     setAuthMode(mode);
     setShowAuthModal(true);
-    setLocalError('');
-    setOtpSent(false);
-    setOtp('');
-    setDevOtpNotice(null);
-    setShowGoogleHelp(false);
-    if (propSetAuthError) propSetAuthError('');
+    setMobileNavOpen(false);
+    resetAuthState();
   };
+
+  const closeAuthModal = () => {
+    setShowAuthModal(false);
+    resetAuthState();
+  };
+
+  const switchAuthMode = (mode) => {
+    setAuthMode(mode);
+    resetAuthState();
+  };
+
+  const authDialogRef = useDialog(showAuthModal, closeAuthModal);
 
   const handleGoogleCredentialResponse = async (credential) => {
     setGoogleLoading(true);
@@ -177,11 +222,11 @@ export default function LandingPage({
       });
       window.google.accounts.id.prompt((notification) => {
         if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-          setShowGoogleHelp(true);
+          setLocalError('Google sign-in was dismissed or blocked by the browser. You can sign in with email instead.');
         }
       });
     } else {
-      setShowGoogleHelp(true);
+      setLocalError("Google sign-in couldn't load. Check your connection or sign in with email.");
     }
   };
 
@@ -212,7 +257,7 @@ export default function LandingPage({
       setOtpSent(true);
       setOtpCountdown(60);
       if (res?.dev_code) {
-        setDevOtpNotice('Dev Mode: Verification OTP is ' + res.dev_code);
+        setDevOtpNotice('Development mode: your code is ' + res.dev_code);
         setOtp(res.dev_code);
       } else {
         setDevOtpNotice(null);
@@ -224,10 +269,62 @@ export default function LandingPage({
     }
   };
 
+  const handleResetRequest = async () => {
+    const email = form.email.trim();
+    if (!email) {
+      setLocalError('Enter the email address of your account.');
+      return;
+    }
+    setLocalLoading(true);
+    try {
+      const res = await api.sendOtp(email, 'reset_password');
+      setResetStep('code');
+      setOtpCountdown(60);
+      setNotice(res?.message || 'If an account uses this address, we sent it a reset code.');
+      if (res?.dev_code) {
+        setDevOtpNotice('Development mode: your code is ' + res.dev_code);
+        setResetCode(res.dev_code);
+      }
+    } catch (err) {
+      setLocalError(err.message || 'Could not send a reset code. Please try again.');
+    } finally {
+      setLocalLoading(false);
+    }
+  };
+
+  const handleResetSubmit = async () => {
+    if (!/^\d{6}$/.test(resetCode.trim())) {
+      setLocalError('Enter the 6-digit code from the email.');
+      return;
+    }
+    if (resetNewPassword.length < 8 || !/[a-zA-Z]/.test(resetNewPassword) || !/\d/.test(resetNewPassword)) {
+      setLocalError('New password must be at least 8 characters, with letters and numbers.');
+      return;
+    }
+    setLocalLoading(true);
+    try {
+      await api.resetPassword(form.email.trim(), resetCode.trim(), resetNewPassword);
+      setAuthMode('login');
+      resetAuthState();
+      setForm({ ...form, password: '' });
+      setNotice('Your password was changed and other sessions were signed out. Sign in with the new password.');
+    } catch (err) {
+      setLocalError(err.message || 'Could not reset the password.');
+    } finally {
+      setLocalLoading(false);
+    }
+  };
+
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setLocalError('');
     if (propSetAuthError) propSetAuthError('');
+
+    if (authMode === 'forgot') {
+      if (resetStep === 'email') await handleResetRequest();
+      else await handleResetSubmit();
+      return;
+    }
 
     const email = form.email.trim();
     const password = form.password;
@@ -299,23 +396,43 @@ export default function LandingPage({
     }
   };
 
-  const handleContactSubmit = (e) => {
+  const handleContactSubmit = async (e) => {
     e.preventDefault();
-    if (!contactForm.email || !contactForm.message) return;
-    setContactSubmitted(true);
-    setTimeout(() => {
-      setContactForm({ name: '', email: '', subject: '', message: '' });
-      setContactSubmitted(false);
-    }, 4000);
+    setContactError('');
+    if (!contactForm.name.trim() || !contactForm.email.trim() || !contactForm.message.trim()) {
+      setContactError('Please fill in your name, email and message.');
+      return;
+    }
+    setContactStatus('sending');
+    try {
+      await api.sendContactMessage(contactForm);
+      setContactStatus('sent');
+      setContactForm({ name: '', email: '', subject: '', message: '', website: '' });
+    } catch (err) {
+      setContactStatus('error');
+      setContactError(err.message || 'Your message could not be sent. Please try again.');
+    }
   };
 
   const scrollToSection = (id) => {
     setActiveNav(id);
+    setMobileNavOpen(false);
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
     }
   };
+
+  const sectionLink = (id) => ({
+    href: `#${id}`,
+    onClick: (e) => {
+      e.preventDefault();
+      scrollToSection(id);
+    },
+    'aria-current': activeNav === id ? 'location' : undefined,
+  });
+
+  const errorText = localError || propAuthError;
 
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900 font-sans antialiased selection:bg-indigo-500 selection:text-white overflow-y-auto overflow-x-hidden">
@@ -325,78 +442,85 @@ export default function LandingPage({
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200/80 transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Brand Logo */}
-          <div
-            onClick={() => scrollToSection('home')}
-            className="flex items-center gap-2 cursor-pointer group"
-          >
+          <a {...sectionLink('home')} className="flex items-center gap-2 cursor-pointer group" aria-label="NexaMind home">
             <img
               src="/logo.png"
-              alt="NexaMind Logo"
+              alt="NexaMind"
               className="h-8 md:h-9 w-auto object-contain transition-transform group-hover:scale-[1.02]"
             />
-          </div>
+          </a>
 
           {/* Navigation Links */}
-          <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
-            <button
-              onClick={() => scrollToSection('home')}
-              className={`hover:text-indigo-600 transition ${
-                activeNav === 'home' ? 'text-indigo-600 font-bold' : ''
-              }`}
-            >
-              Home
-            </button>
-            <button
-              onClick={() => scrollToSection('product')}
-              className={`hover:text-indigo-600 transition ${
-                activeNav === 'product' ? 'text-indigo-600 font-bold' : ''
-              }`}
-            >
-              Product & Features
-            </button>
-            <button
-              onClick={() => scrollToSection('memory')}
-              className={`hover:text-indigo-600 transition ${
-                activeNav === 'memory' ? 'text-indigo-600 font-bold' : ''
-              }`}
-            >
-              AI Memory Engine
-            </button>
-            <button
-              onClick={() => scrollToSection('about')}
-              className={`hover:text-indigo-600 transition ${
-                activeNav === 'about' ? 'text-indigo-600 font-bold' : ''
-              }`}
-            >
-              About Us
-            </button>
-            <button
-              onClick={() => scrollToSection('contact')}
-              className={`hover:text-indigo-600 transition ${
-                activeNav === 'contact' ? 'text-indigo-600 font-bold' : ''
-              }`}
-            >
-              Contact
-            </button>
+          <nav aria-label="Main" className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
+            {NAV_SECTIONS.map(([id, label]) => (
+              <a
+                key={id}
+                {...sectionLink(id)}
+                className={`hover:text-indigo-600 transition ${activeNav === id ? 'text-indigo-600 font-bold' : ''}`}
+              >
+                {label}
+              </a>
+            ))}
           </nav>
 
           {/* Action CTAs */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
+              type="button"
               onClick={() => handleOpenAuth('login')}
-              className="text-xs font-bold text-slate-700 hover:text-indigo-600 px-3.5 py-2 rounded-xl hover:bg-slate-100 transition"
+              className="text-sm font-bold text-slate-700 hover:text-indigo-600 px-3 py-2 rounded-xl hover:bg-slate-100 transition"
             >
               Sign In
             </button>
             <button
+              type="button"
               onClick={() => handleOpenAuth('register')}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md shadow-indigo-600/25 hover:shadow-indigo-600/40 hover:-translate-y-0.5 transition active:translate-y-0 flex items-center gap-1.5"
+              className="hidden sm:flex bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-md shadow-indigo-600/25 hover:shadow-indigo-600/40 hover:-translate-y-0.5 transition active:translate-y-0 items-center gap-1.5"
             >
               <span>Get Started</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen((open) => !open)}
+              className="md:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100"
+              aria-expanded={mobileNavOpen}
+              aria-controls="landing-mobile-nav"
+              aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
+            >
+              {mobileNavOpen ? <X className="w-5 h-5" aria-hidden="true" /> : <Menu className="w-5 h-5" aria-hidden="true" />}
             </button>
           </div>
         </div>
+
+        {/* Mobile section menu */}
+        {mobileNavOpen && (
+          <nav id="landing-mobile-nav" aria-label="Main" className="md:hidden border-t border-slate-200 bg-white px-4 py-3">
+            <ul className="space-y-1">
+              {NAV_SECTIONS.map(([id, label]) => (
+                <li key={id}>
+                  <a
+                    {...sectionLink(id)}
+                    className={`block px-3 py-2.5 rounded-xl text-sm font-semibold ${
+                      activeNav === id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {label}
+                  </a>
+                </li>
+              ))}
+              <li className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenAuth('register')}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl"
+                >
+                  Get Started
+                </button>
+              </li>
+            </ul>
+          </nav>
+        )}
       </header>
 
       {/* ------------------------------------------------------------- */}
@@ -439,12 +563,12 @@ export default function LandingPage({
               <span>Launch Your Free Workspace</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => scrollToSection('product')}
-              className="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm px-8 py-3.5 rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400"
+            <a
+              {...sectionLink('product')}
+              className="w-full sm:w-auto text-center bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm px-8 py-3.5 rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400"
             >
               Explore Live Architecture
-            </button>
+            </a>
           </div>
 
           {/* Trust Metrics */}
@@ -454,8 +578,8 @@ export default function LandingPage({
               <div className="text-xs text-slate-500 font-medium mt-0.5">Continuous Memory Pipeline</div>
             </div>
             <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-indigo-600 font-mono">Gemini 2.0</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">Multimodal Intelligence</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-indigo-600 font-mono">Gemini</div>
+              <div className="text-xs text-slate-500 font-medium mt-0.5">Flash models, Groq fallback</div>
             </div>
             <div>
               <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">1-Click</div>
@@ -629,7 +753,7 @@ export default function LandingPage({
                 <Bot className="w-4 h-4" />
                 <span>NexaMind Agentic Copilot Session</span>
               </div>
-              <span className="text-[10px] text-emerald-400 bg-emerald-950 px-2.5 py-0.5 rounded-full border border-emerald-800">
+              <span className="text-xs text-emerald-400 bg-emerald-950 px-2.5 py-0.5 rounded-full border border-emerald-800">
                 ● Memory Active
               </span>
             </div>
@@ -738,37 +862,55 @@ export default function LandingPage({
 
             {/* Right Contact Form */}
             <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm">
-              {contactSubmitted ? (
-                <div className="text-center py-12 space-y-3">
+              {contactStatus === 'sent' ? (
+                <div className="text-center py-12 space-y-3" role="status">
                   <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-6 h-6" />
+                    <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900">Message Received!</h3>
-                  <p className="text-xs text-slate-600">
-                    Thank you for reaching out. Our team will review your message and reply promptly.
+                  <h3 className="text-lg font-bold text-slate-900">Message sent</h3>
+                  <p className="text-sm text-slate-600">
+                    Thanks for getting in touch. We've received your message and will reply by email.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setContactStatus('idle')}
+                    className="text-sm font-semibold text-indigo-600 hover:underline"
+                  >
+                    Send another message
+                  </button>
                 </div>
               ) : (
-                <form onSubmit={handleContactSubmit} className="space-y-4">
+                <form onSubmit={handleContactSubmit} className="space-y-4" noValidate>
+                  {contactError && (
+                    <div id="contact-error" role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl">
+                      {contactError}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Your Name</label>
+                      <label htmlFor="contact-name" className="text-xs font-bold text-slate-700">Your Name</label>
                       <input
+                        id="contact-name"
                         type="text"
                         required
+                        autoComplete="name"
+                        maxLength={255}
                         placeholder="Alex Mitchell"
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition"
+                        className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
                         value={contactForm.name}
                         onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Email Address</label>
+                      <label htmlFor="contact-email" className="text-xs font-bold text-slate-700">Email Address</label>
                       <input
+                        id="contact-email"
                         type="email"
                         required
+                        autoComplete="email"
+                        maxLength={255}
                         placeholder="alex@company.com"
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition"
+                        className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
                         value={contactForm.email}
                         onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
                       />
@@ -776,34 +918,56 @@ export default function LandingPage({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Subject</label>
+                    <label htmlFor="contact-subject" className="text-xs font-bold text-slate-700">Subject (optional)</label>
                     <input
+                      id="contact-subject"
                       type="text"
+                      maxLength={255}
                       placeholder="Product question or feedback"
-                      className="w-full bg-white border border-slate-200 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition"
+                      className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
                       value={contactForm.subject}
                       onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })}
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Message</label>
+                    <label htmlFor="contact-message" className="text-xs font-bold text-slate-700">Message</label>
                     <textarea
+                      id="contact-message"
                       required
                       rows={4}
+                      maxLength={5000}
                       placeholder="Tell us what you'd like to achieve with NexaMind..."
-                      className="w-full bg-white border border-slate-200 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition resize-none"
+                      className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition resize-none"
                       value={contactForm.message}
                       onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
                     />
                   </div>
 
+                  {/* Honeypot: invisible to people and assistive tech, often filled in by bots. */}
+                  <div className="hidden" aria-hidden="true">
+                    <label htmlFor="contact-website">Website</label>
+                    <input
+                      id="contact-website"
+                      type="text"
+                      tabIndex={-1}
+                      autoComplete="off"
+                      value={contactForm.website}
+                      onChange={(e) => setContactForm({ ...contactForm, website: e.target.value })}
+                    />
+                  </div>
+
                   <button
                     type="submit"
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2"
+                    disabled={contactStatus === 'sending'}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-sm py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Send Message</span>
+                    {contactStatus === 'sending' ? (
+                      <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    <span>{contactStatus === 'sending' ? 'Sending…' : 'Send Message'}</span>
                   </button>
                 </form>
               )}
@@ -826,18 +990,18 @@ export default function LandingPage({
             <span className="text-slate-400 text-xs">— The Agentic AI Workspace</span>
           </div>
           <div className="flex items-center gap-6">
-            <button onClick={() => scrollToSection('home')} className="hover:text-white transition">
+            <a {...sectionLink('home')} className="hover:text-white transition">
               Home
-            </button>
-            <button onClick={() => scrollToSection('product')} className="hover:text-white transition">
+            </a>
+            <a {...sectionLink('product')} className="hover:text-white transition">
               Features
-            </button>
-            <button onClick={() => scrollToSection('about')} className="hover:text-white transition">
+            </a>
+            <a {...sectionLink('about')} className="hover:text-white transition">
               About
-            </button>
-            <button onClick={() => scrollToSection('contact')} className="hover:text-white transition">
+            </a>
+            <a {...sectionLink('contact')} className="hover:text-white transition">
               Contact
-            </button>
+            </a>
             <button onClick={() => handleOpenAuth('login')} className="hover:text-indigo-400 transition font-bold">
               Sign In
             </button>
@@ -849,125 +1013,186 @@ export default function LandingPage({
       {/* 8. AUTH MODAL (LOGIN & REGISTRATION)                           */}
       {/* ------------------------------------------------------------- */}
       {showAuthModal && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-8 shadow-2xl relative space-y-5 max-h-[90vh] overflow-y-auto">
-            {/* Close Button */}
+        <div
+          className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={closeAuthModal}
+        >
+          <div
+            ref={authDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="auth-dialog-title"
+            aria-describedby="auth-dialog-desc"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative space-y-5 max-h-[90vh] overflow-y-auto outline-none"
+          >
             <button
-              onClick={() => {
-                setShowAuthModal(false);
-                setOtpSent(false);
-                setOtp('');
-                setLocalError('');
-                setShowGoogleHelp(false);
-              }}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1.5 rounded-lg transition hover:bg-slate-100 cursor-pointer"
+              type="button"
+              onClick={closeAuthModal}
+              aria-label="Close sign-in dialog"
+              className="absolute top-5 right-5 text-slate-500 hover:text-slate-800 p-1.5 rounded-lg transition hover:bg-slate-100 cursor-pointer"
             >
-              ✕
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
 
             {/* Modal Header */}
             <div className="text-center space-y-1.5">
               <div className="flex items-center justify-center mx-auto mb-1">
-                <img src="/logo-mark.png" alt="NexaMind" className="h-11 w-auto object-contain" />
+                <img src="/logo-mark.png" alt="" className="h-11 w-auto object-contain" />
               </div>
-              <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">
+              <h2 id="auth-dialog-title" className="text-xl font-extrabold text-slate-900 tracking-tight">
                 {authMode === 'login'
                   ? 'Sign In to NexaMind'
+                  : authMode === 'forgot'
+                  ? 'Reset Your Password'
                   : otpSent
                   ? 'Verify Your Email'
                   : 'Create Free Account'}
-              </h3>
-              <p className="text-xs text-slate-500 font-sans">
+              </h2>
+              <p id="auth-dialog-desc" className="text-sm text-slate-600">
                 {authMode === 'login'
                   ? 'Access your workspaces, persistent memories, and teams'
+                  : authMode === 'forgot'
+                  ? resetStep === 'email'
+                    ? "Enter your account's email and we'll send you a reset code"
+                    : 'Enter the code from the email and choose a new password'
                   : otpSent
                   ? 'Enter the 6-digit confirmation code sent to your inbox'
                   : 'Start your personal and team workspace in seconds'}
               </p>
             </div>
 
-            {/* Google Sign-In Button */}
-            <div className="space-y-2 pt-1">
-              <div id="google-btn-container" className="w-full flex justify-center min-h-[44px]">
-                <button
-                  type="button"
-                  onClick={handleGoogleClick}
-                  disabled={googleLoading || localLoading}
-                  className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs py-3 px-4 rounded-xl border border-slate-300 shadow-sm hover:shadow transition cursor-pointer disabled:opacity-50"
-                >
-                {googleLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
-                ) : (
-                  <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                )}
-                <span>{googleLoading ? 'Signing in with Google...' : 'Continue with Google'}</span>
-                </button>
-              </div>
-
-              {/* In-Modal Google OAuth Helper */}
-              {showGoogleHelp && (
-                <div className="p-3.5 bg-indigo-50/80 border border-indigo-200/80 rounded-2xl text-xs space-y-2.5 animate-in fade-in">
-                  <div className="flex items-center justify-between text-indigo-950 font-bold text-[11px]">
-                    <span>Google Sign-In Configuration</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowGoogleHelp(false)}
-                      className="text-indigo-400 hover:text-indigo-700 text-xs"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <p className="text-indigo-700 text-[11px] leading-relaxed">
-                    {googleClientId
-                      ? 'Select your account from the Google One-Tap prompt, or test with a simulated Google account below:'
-                      : 'Set GOOGLE_CLIENT_ID in your backend .env to link your Google Cloud project. You can also test with a demo account:'}
-                  </p>
+            {/* Google Sign-In: offered only when the server is configured for it */}
+            {googleClientId && authMode !== 'forgot' && !otpSent && (
+              <div className="space-y-2 pt-1">
+                <div id="google-btn-container" className="w-full flex justify-center min-h-[44px]">
                   <button
                     type="button"
-                    onClick={() => handleGoogleCredentialResponse('mock_google_:alex.designer@gmail.com:Alex Mercer')}
-                    disabled={googleLoading}
-                    className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                    onClick={handleGoogleClick}
+                    disabled={googleLoading || localLoading}
+                    className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm py-3 px-4 rounded-xl border border-slate-300 shadow-sm hover:shadow transition cursor-pointer disabled:opacity-50"
                   >
-                    <Shield className="w-3.5 h-3.5" />
-                    <span>Sign in with Demo Google Account</span>
+                    {googleLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-500" aria-hidden="true" />
+                    ) : (
+                      <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                      </svg>
+                    )}
+                    <span>{googleLoading ? 'Signing in with Google...' : 'Continue with Google'}</span>
                   </button>
                 </div>
-              )}
 
-              {/* Or Divider */}
-              <div className="flex items-center gap-3 pt-1">
-                <div className="h-px bg-slate-200 flex-1" />
-                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">or with email</span>
-                <div className="h-px bg-slate-200 flex-1" />
-              </div>
-            </div>
-
-            {/* Error Notice */}
-            {(localError || propAuthError) && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-in fade-in flex items-start gap-2">
-                <span className="text-rose-500 font-bold flex-shrink-0">⚠</span>
-                <span>{localError || propAuthError}</span>
+                <div className="flex items-center gap-3 pt-1">
+                  <div className="h-px bg-slate-200 flex-1" />
+                  <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">or with email</span>
+                  <div className="h-px bg-slate-200 flex-1" />
+                </div>
               </div>
             )}
 
-            {/* Form */}
-            <form onSubmit={handleAuthSubmit} className="space-y-3.5">
-              {/* Registration: Step 2 (OTP Verification) */}
-              {authMode === 'register' && otpSent ? (
-                <div className="space-y-4 animate-in fade-in duration-200">
+            {notice && !errorText && (
+              <div role="status" className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl">
+                {notice}
+              </div>
+            )}
+
+            {errorText && (
+              <div id="auth-error" role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl font-medium flex items-start gap-2">
+                <span className="text-rose-600 font-bold flex-shrink-0" aria-hidden="true">⚠</span>
+                <span>{errorText}</span>
+              </div>
+            )}
+
+            {devOtpNotice && (
+              <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl font-mono text-center">
+                {devOtpNotice}
+              </div>
+            )}
+
+            <form onSubmit={handleAuthSubmit} className="space-y-3.5" noValidate aria-describedby={errorText ? 'auth-error' : undefined}>
+              {authMode === 'forgot' ? (
+                <div className="space-y-3.5">
+                  <div className="space-y-1">
+                    <label htmlFor="reset-email" className="text-xs font-bold text-slate-700">Email Address</label>
+                    <input
+                      id="reset-email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      disabled={resetStep === 'code'}
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-sm text-slate-900 transition disabled:opacity-70"
+                      value={form.email}
+                      onChange={(e) => setForm({ ...form, email: e.target.value })}
+                      data-autofocus
+                    />
+                  </div>
+                  {resetStep === 'code' && (
+                    <>
+                      <div className="space-y-1">
+                        <label htmlFor="reset-code" className="text-xs font-bold text-slate-700">Reset code</label>
+                        <input
+                          id="reset-code"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          required
+                          maxLength={6}
+                          className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-center text-lg tracking-[0.3em] font-mono text-slate-900 transition"
+                          value={resetCode}
+                          onChange={(e) => setResetCode(e.target.value.replace(/[^0-9]/g, ''))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label htmlFor="reset-password" className="text-xs font-bold text-slate-700">New password</label>
+                        <input
+                          id="reset-password"
+                          type="password"
+                          required
+                          minLength={8}
+                          autoComplete="new-password"
+                          aria-describedby="reset-password-hint"
+                          className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
+                          value={resetNewPassword}
+                          onChange={(e) => setResetNewPassword(e.target.value)}
+                        />
+                        <p id="reset-password-hint" className="text-xs text-slate-600">At least 8 characters, with letters and numbers.</p>
+                      </div>
+                      <div className="flex items-center justify-between text-xs px-1">
+                        <span className="text-slate-600">Didn't receive the email?</span>
+                        <button
+                          type="button"
+                          disabled={otpCountdown > 0 || localLoading}
+                          onClick={handleResetRequest}
+                          className="text-indigo-600 hover:text-indigo-700 disabled:text-slate-500 font-semibold"
+                        >
+                          {otpCountdown > 0 ? `Resend code (${otpCountdown}s)` : 'Resend code'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={localLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2"
+                  >
+                    {localLoading && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                    <span>{resetStep === 'email' ? 'Send reset code' : 'Set new password'}</span>
+                  </button>
+                </div>
+              ) : authMode === 'register' && otpSent ? (
+                <div className="space-y-4 animate-fade-in">
                   <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-center space-y-1.5">
                     <div className="flex items-center justify-center text-indigo-600 mb-1">
-                      <MailCheck className="w-6 h-6" />
+                      <MailCheck className="w-6 h-6" aria-hidden="true" />
                     </div>
-                    <div className="text-xs font-bold text-slate-900">Check your inbox</div>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      We sent a 6-digit confirmation code to{' '}
-                      <span className="font-bold text-indigo-600">{form.email}</span>
+                    <div className="text-sm font-bold text-slate-900">Check your inbox</div>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      If <span className="font-bold text-indigo-700">{form.email}</span> can receive email, we sent it a 6-digit code.
                     </p>
                     <button
                       type="button"
@@ -975,46 +1200,44 @@ export default function LandingPage({
                         setOtpSent(false);
                         setOtp('');
                         setLocalError('');
+                        setDevOtpNotice(null);
                       }}
-                      className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold underline mt-1 cursor-pointer"
+                      className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:text-indigo-900 font-semibold underline mt-1 cursor-pointer"
                     >
-                      <ArrowLeft className="w-3 h-3" />
+                      <ArrowLeft className="w-3 h-3" aria-hidden="true" />
                       <span>Change email or details</span>
                     </button>
                   </div>
 
-                  {devOtpNotice && (
-                    <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded-xl font-mono text-center">
-                      ⚡ {devOtpNotice}
-                    </div>
-                  )}
-
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                      <span>Verification Code (OTP)</span>
-                      <span className="text-[10px] text-slate-400">Valid for 10 min</span>
+                    <label htmlFor="register-otp" className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                      <span>Verification Code</span>
+                      <span className="text-xs text-slate-500 font-normal">Valid for 10 min</span>
                     </label>
                     <input
+                      id="register-otp"
                       type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
                       required
                       maxLength={6}
                       placeholder="123456"
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-3 text-center text-2xl tracking-[0.35em] font-mono font-bold text-slate-900 outline-none transition"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-3 text-center text-2xl tracking-[0.35em] font-mono font-bold text-slate-900 transition"
                       value={otp}
                       onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
-                      autoFocus
+                      data-autofocus
                     />
                   </div>
 
                   <div className="flex items-center justify-between text-xs px-1">
-                    <span className="text-[11px] text-slate-500">Didn't receive the email?</span>
+                    <span className="text-slate-600">Didn't receive the email?</span>
                     <button
                       type="button"
                       disabled={otpCountdown > 0 || localLoading}
                       onClick={handleSendOtp}
-                      className="text-xs text-indigo-600 hover:text-indigo-700 disabled:text-slate-400 font-semibold flex items-center gap-1 cursor-pointer"
+                      className="text-indigo-600 hover:text-indigo-700 disabled:text-slate-500 font-semibold flex items-center gap-1 cursor-pointer"
                     >
-                      <RefreshCw className={`w-3 h-3 ${localLoading ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-3 h-3 ${localLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
                       <span>{otpCountdown > 0 ? `Resend code (${otpCountdown}s)` : 'Resend Code'}</span>
                     </button>
                   </div>
@@ -1022,50 +1245,54 @@ export default function LandingPage({
                   <button
                     type="submit"
                     disabled={localLoading || propAuthLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer mt-2"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer mt-2"
                   >
                     {localLoading || propAuthLoading ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                         <span>Verifying & Setting Up Workspace...</span>
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 className="w-4 h-4" />
+                        <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
                         <span>Confirm & Complete Registration</span>
                       </>
                     )}
                   </button>
                 </div>
               ) : (
-                /* Registration Step 1 OR Login Form */
                 <>
                   {authMode === 'register' && (
                     <>
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-700">Full Name</label>
+                        <label htmlFor="register-name" className="text-xs font-bold text-slate-700">Full Name</label>
                         <input
+                          id="register-name"
                           type="text"
                           required
+                          autoComplete="name"
                           placeholder="e.g. Jason Bourne"
-                          className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
+                          className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
                           value={form.name}
                           onChange={(e) => setForm({ ...form, name: e.target.value })}
+                          data-autofocus
                         />
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                        <label htmlFor="register-username" className="text-xs font-bold text-slate-700 flex items-center justify-between">
                           <span>Unique Username</span>
-                          <span className="text-[10px] text-slate-400 font-normal">For chat invitations</span>
+                          <span className="text-xs text-slate-500 font-normal">For chat invitations</span>
                         </label>
                         <div className="relative">
-                          <span className="absolute left-3.5 top-2.5 text-slate-400 font-mono text-xs">@</span>
+                          <span className="absolute left-3.5 top-2.5 text-slate-500 font-mono text-sm" aria-hidden="true">@</span>
                           <input
+                            id="register-username"
                             type="text"
                             required
+                            autoComplete="username"
                             placeholder="jason_bourne"
-                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-xs text-slate-900 outline-none transition font-mono"
+                            className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-sm text-slate-900 transition font-mono"
                             value={form.username}
                             onChange={(e) =>
                               setForm({
@@ -1080,55 +1307,68 @@ export default function LandingPage({
                   )}
 
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                      <span>{authMode === 'login' ? 'Email or @Username' : 'Email Address'}</span>
-                      {authMode === 'register' && (
-                        <span className="text-[10px] text-indigo-600 font-medium">Domain verification active</span>
-                      )}
+                    <label htmlFor="auth-email" className="text-xs font-bold text-slate-700">
+                      {authMode === 'login' ? 'Email or @Username' : 'Email Address'}
                     </label>
                     <input
+                      id="auth-email"
                       type={authMode === 'login' ? 'text' : 'email'}
                       required
+                      autoComplete={authMode === 'login' ? 'username' : 'email'}
                       placeholder={authMode === 'login' ? 'jason@gmail.com or @jason_bourne' : 'jason@gmail.com'}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
                       value={form.email}
                       onChange={(e) => setForm({ ...form, email: e.target.value })}
+                      {...(authMode === 'login' ? { 'data-autofocus': true } : {})}
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Password</label>
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="auth-password" className="text-xs font-bold text-slate-700">Password</label>
+                      {authMode === 'login' && (
+                        <button
+                          type="button"
+                          onClick={() => switchAuthMode('forgot')}
+                          className="text-xs font-semibold text-indigo-600 hover:underline"
+                        >
+                          Forgot password?
+                        </button>
+                      )}
+                    </div>
                     <input
+                      id="auth-password"
                       type="password"
                       required
                       placeholder="••••••••"
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 outline-none transition font-sans"
+                      aria-describedby={authMode === 'register' ? 'auth-password-hint' : undefined}
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
                       value={form.password}
                       onChange={(e) => setForm({ ...form, password: e.target.value })}
                       minLength={authMode === 'register' ? 8 : undefined}
                       autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                     />
                     {authMode === 'register' && (
-                      <p className="text-[11px] text-slate-500">At least 8 characters, with letters and numbers.</p>
+                      <p id="auth-password-hint" className="text-xs text-slate-600">At least 8 characters, with letters and numbers.</p>
                     )}
                   </div>
 
                   <button
                     type="submit"
                     disabled={localLoading || propAuthLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2 cursor-pointer"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2 cursor-pointer"
                   >
                     {localLoading || propAuthLoading ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>{authMode === 'register' ? 'Verifying Deliverability & Sending Code...' : 'Authenticating...'}</span>
+                        <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                        <span>{authMode === 'register' ? 'Sending Code...' : 'Signing In...'}</span>
                       </>
                     ) : authMode === 'login' ? (
                       <span>Sign In to Workspace</span>
                     ) : (
                       <>
                         <span>Verify Email & Send Code</span>
-                        <ArrowRight className="w-4 h-4" />
+                        <ArrowRight className="w-4 h-4" aria-hidden="true" />
                       </>
                     )}
                   </button>
@@ -1136,22 +1376,16 @@ export default function LandingPage({
               )}
             </form>
 
-            {/* Toggle Login / Register */}
             <div className="text-center pt-1 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => {
-                  setAuthMode(authMode === 'login' ? 'register' : 'login');
-                  setOtpSent(false);
-                  setOtp('');
-                  setLocalError('');
-                  setShowGoogleHelp(false);
-                  propSetAuthError?.('');
-                }}
-                className="text-xs text-indigo-600 hover:underline font-semibold cursor-pointer"
+                onClick={() => switchAuthMode(authMode === 'register' ? 'login' : authMode === 'forgot' ? 'login' : 'register')}
+                className="text-sm text-indigo-600 hover:underline font-semibold cursor-pointer pt-3"
               >
                 {authMode === 'login'
                   ? "Don't have an account? Create one free"
+                  : authMode === 'forgot'
+                  ? 'Back to Sign In'
                   : 'Already registered? Sign In'}
               </button>
             </div>

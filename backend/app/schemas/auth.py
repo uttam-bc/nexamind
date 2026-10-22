@@ -89,3 +89,41 @@ class GoogleAuthRequest(BaseModel):
 
 class GoogleConfigResponse(BaseModel):
     client_id: str | None = None
+
+
+def _check_password(v: str) -> str:
+    return UserCreate.password_strength(v)
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=4, max_length=10)
+    new_password: str = Field(min_length=8, max_length=72)
+
+    _strength = field_validator("new_password")(classmethod(lambda cls, v: _check_password(v)))
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=72)
+
+    _strength = field_validator("new_password")(classmethod(lambda cls, v: _check_password(v)))
+
+
+class ProfileUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    username: str | None = Field(default=None, max_length=50)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("Name cannot be empty")
+        return v
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)

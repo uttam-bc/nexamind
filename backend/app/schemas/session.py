@@ -7,6 +7,8 @@ from app.models.session import SessionSource, SessionStatus
 
 
 class SessionCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str = Field(..., min_length=1, max_length=255)
     source: SessionSource = SessionSource.NOTES
     transcript: str | None = None
@@ -15,6 +17,8 @@ class SessionCreate(BaseModel):
 
 
 class SessionUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     title: str | None = Field(None, min_length=1, max_length=255)
     transcript: str | None = None
     ai_summary: str | None = None

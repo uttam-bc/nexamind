@@ -51,7 +51,29 @@ rate_limiter = RateLimiter()
 
 
 def client_ip(request: Request) -> str:
+    """The caller's IP as seen by the outermost trusted proxy.
+
+    X-Forwarded-For is client-controlled: proxies only append to it. So the leftmost entry is
+    never trusted. Instead use a header the trusted edge overwrites (CLIENT_IP_HEADER), or the
+    entry added by the outermost of TRUSTED_PROXY_HOPS proxies, or the socket peer.
+    """
+    settings = get_settings()
+    if settings.client_ip_header:
+        value = request.headers.get(settings.client_ip_header, "").split(",")[0].strip()
+        if value:
+            return value
+    hops = settings.trusted_proxy_hops
+    if hops > 0:
+        chain = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
     return request.client.host if request.client else "unknown"
+
+
+def check_identity_limit(bucket: str, identity: str, limit: int, window_seconds: float) -> None:
+    """Per-account limit, independent of IP, so rotating addresses can't reset it."""
+    if get_settings().rate_limit_enabled and identity:
+        rate_limiter.check(f"{bucket}:{identity.strip().lower()}", limit, window_seconds)
 
 
 def _limit(bucket: str, limit_attr: str):

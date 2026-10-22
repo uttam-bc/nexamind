@@ -24,6 +24,7 @@ import {
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
 import FormattedChatMessage from './FormattedChatMessage';
+import { notify } from '../context/ToastContext';
 
 export default function SoloChat({
   workspaceId,
@@ -147,7 +148,7 @@ export default function SoloChat({
       setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
       if (onRefreshAll) onRefreshAll();
     } catch (err) {
-      alert(`Could not send message: ${err.message}`);
+      notify(`Could not send message: ${err.message}`, 'error');
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
     } finally {
       setSending(false);
@@ -202,7 +203,7 @@ export default function SoloChat({
   const toggleVoiceInput = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Voice dictation is supported in Chrome, Edge, and modern browsers.');
+      notify('Voice dictation is supported in Chrome, Edge, and modern browsers.', 'info');
       return;
     }
 
@@ -350,7 +351,7 @@ export default function SoloChat({
             {/* Search Input */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
+              <input aria-label="Search direct chats"
                 type="text"
                 placeholder="Search direct chats..."
                 value={searchQuery}
@@ -371,7 +372,7 @@ export default function SoloChat({
                 </div>
                 <div>
                   <h4 className="font-bold text-xs text-slate-800">No Direct Chats Yet</h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
                     In Solo mode, you can message any user directly by their @username.
                   </p>
                 </div>
@@ -410,15 +411,15 @@ export default function SoloChat({
                         <span className="text-xs font-bold text-slate-900 truncate">
                           {details.name}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">
+                        <span className="text-xs text-slate-400 font-mono">
                           {chan.created_at ? new Date(chan.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[11px] text-indigo-600 font-mono font-medium">
+                        <span className="text-xs text-indigo-600 font-mono font-medium">
                           @{details.username}
                         </span>
-                        <span className="text-[10px] text-slate-400 truncate">
+                        <span className="text-xs text-slate-400 truncate">
                           • 1-on-1 Direct Message
                         </span>
                       </div>
@@ -449,11 +450,11 @@ export default function SoloChat({
                       <h3 className="font-extrabold text-sm text-slate-900">
                         {activeParticipant.name}
                       </h3>
-                      <span className="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                      <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-mono font-bold">
                         @{activeParticipant.username}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
+                    <p className="text-xs text-slate-500 mt-0.5">
                       Private Direct Message • Only visible to you and @{activeParticipant.username}
                     </p>
                   </div>
@@ -510,7 +511,7 @@ export default function SoloChat({
                         <div className={`space-y-1 ${isOutgoing ? 'items-end' : 'items-start'}`}>
                           {/* Sender name for incoming messages */}
                           {!isOutgoing && (
-                            <div className="flex items-center gap-1.5 px-1 text-[11px] text-slate-500 font-medium">
+                            <div className="flex items-center gap-1.5 px-1 text-xs text-slate-500 font-medium">
                               <span className="font-bold text-slate-800">{msg.sender_name}</span>
                               {msg.sender_username && (
                                 <span className="font-mono text-indigo-600">
@@ -537,7 +538,7 @@ export default function SoloChat({
 
                           {/* Time & Reactions */}
                           <div
-                            className={`flex items-center gap-2 px-1 text-[10px] text-slate-400 font-mono ${
+                            className={`flex items-center gap-2 px-1 text-xs text-slate-400 font-mono ${
                               isOutgoing ? 'justify-end' : 'justify-start'
                             }`}
                           >
@@ -575,7 +576,7 @@ export default function SoloChat({
                                 <button
                                   key={rIdx}
                                   onClick={() => handleToggleReaction(msg.id, r.emoji)}
-                                  className={`px-2 py-0.5 rounded-full border text-[11px] flex items-center gap-1 transition ${
+                                  className={`px-2 py-0.5 rounded-full border text-xs flex items-center gap-1 transition ${
                                     r.has_reacted
                                       ? 'bg-indigo-50 border-indigo-300 text-indigo-800 font-bold'
                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -613,7 +614,7 @@ export default function SoloChat({
                   {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
 
-                <input
+                <input aria-label="Direct message text"
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -658,7 +659,7 @@ export default function SoloChat({
       {/* 3. User Search Modal to Start New 1-on-1 Chat */}
       {showUserSearchModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+          <div data-modal className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-indigo-600" />
@@ -683,12 +684,12 @@ export default function SoloChat({
             </p>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 block">
+              <label htmlFor="solo-chat-field-1" className="text-xs font-bold text-slate-700 block">
                 Search @Username or Name
               </label>
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
+                <input id="solo-chat-field-1"
                   type="text"
                   autoFocus
                   placeholder="e.g. @alex, john, sarah..."
@@ -697,7 +698,7 @@ export default function SoloChat({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                 />
                 {isSearchingUsers && (
-                  <span className="absolute right-3 top-2.5 text-[10px] text-slate-400 font-mono animate-pulse">
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono animate-pulse">
                     searching...
                   </span>
                 )}
@@ -728,12 +729,12 @@ export default function SoloChat({
                           <div className="font-bold text-slate-900 flex items-center gap-1.5">
                             <span>{u.name}</span>
                             {isCurrent && (
-                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1 rounded">
+                              <span className="text-xs bg-slate-200 text-slate-700 px-1 rounded">
                                 you
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-indigo-600 font-mono">
+                          <div className="text-xs text-indigo-600 font-mono">
                             @{u.username}
                           </div>
                         </div>

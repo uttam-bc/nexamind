@@ -7,14 +7,20 @@ from app.models import WorkspaceRole, WorkspaceType
 
 
 class WorkspaceCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(min_length=1, max_length=255)
 
 
 class WorkspaceUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(min_length=1, max_length=255)
 
 
 class WorkspaceJoin(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     join_code: str = Field(min_length=6, max_length=32)
 
 
@@ -52,3 +58,11 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspaceDetailResponse(WorkspaceResponse):
     members: list[WorkspaceMemberResponse] = []
+
+
+class MemberRoleUpdate(BaseModel):
+    role: WorkspaceRole
+
+
+class WorkspaceDeleteRequest(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=255)

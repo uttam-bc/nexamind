@@ -26,6 +26,14 @@ class FileRecord(Base):
     file_path: Mapped[str] = mapped_column(String(512), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False, default="application/octet-stream")
+    # The Docs page made from this upload (Word/PDF/Markdown/text). The page is the editable
+    # version; this row keeps the original. Deleting the page deletes the original too.
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

@@ -36,7 +36,7 @@ async def get_workspace_sessions(
     status: SessionStatus | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[SessionResponse]:
     sessions = await list_sessions(db, workspace_id, current_user.id, status=status, limit=limit)
     return [SessionResponse.model_validate(s) for s in sessions]
@@ -48,7 +48,7 @@ async def upload_meeting_session(
     file: UploadFile = File(...),
     title: str | None = Form(None),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     session = await upload_session_file(db, workspace_id, current_user, file, title=title)
     
@@ -70,7 +70,7 @@ async def create_workspace_session(
     workspace_id: UUID,
     data: SessionCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     session = await create_session(db, workspace_id, current_user, data)
     session_data = SessionResponse.model_validate(session).model_dump(mode="json")
@@ -86,7 +86,7 @@ async def get_workspace_session(
     workspace_id: UUID,
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     session = await get_session(db, workspace_id, session_id, current_user.id)
     return SessionResponse.model_validate(session)
@@ -98,7 +98,7 @@ async def update_workspace_session(
     session_id: UUID,
     data: SessionUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     session = await update_session(db, workspace_id, session_id, current_user.id, data)
     session_data = SessionResponse.model_validate(session).model_dump(mode="json")
@@ -114,7 +114,7 @@ async def generate_session_mom(
     workspace_id: UUID,
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
     from app.services.ai_service import summarize_meeting_transcript
     session = await get_session(db, workspace_id, session_id, current_user.id)
@@ -140,7 +140,7 @@ async def delete_workspace_session(
     workspace_id: UUID,
     session_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     await delete_session(db, workspace_id, session_id, current_user.id)
     await ws_manager.broadcast_to_workspace(

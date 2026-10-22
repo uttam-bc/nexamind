@@ -77,10 +77,7 @@ async def save_upload(file: UploadFile, target_path: Path, max_bytes: int) -> in
 
 
 def delete_stored_file(path: str | None) -> None:
-    """Remove a stored upload, refusing anything outside the upload directory."""
-    if not path:
-        return
-    root = upload_root().resolve()
-    candidate = Path(path).resolve()
-    if candidate.is_relative_to(root):
-        candidate.unlink(missing_ok=True)
+    """Remove a stored upload (local file inside the upload directory, or an object in the bucket)."""
+    from app.services import storage
+
+    storage.delete(path, upload_root())

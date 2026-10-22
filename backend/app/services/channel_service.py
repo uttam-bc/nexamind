@@ -1,10 +1,12 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import (
+    AiMemory,
     Channel,
     ChannelMember,
     ChannelReadState,
@@ -16,7 +18,7 @@ from app.models import (
 )
 from app.schemas.channel import ChannelCreate, MessageCreate
 from app.services.auth_service import AuthError, get_user_by_username
-from app.services.workspace_service import get_workspace_membership
+from app.services.workspace_service import MANAGER_ROLES, get_workspace_membership
 
 # Access rules
 # - Public channel: any member of the channel's workspace.
@@ -207,6 +209,7 @@ async def list_messages(
     parent_id: UUID | None = None,
     root_only: bool = False,
     limit: int = 100,
+    before: datetime | None = None,
 ) -> list[dict]:
     channel = await get_channel(db, workspace_id, channel_id, user_id)
     query = (
@@ -223,6 +226,9 @@ async def list_messages(
         query = query.where(Message.parent_id == parent_id)
     elif root_only:
         query = query.where(Message.parent_id.is_(None))
+    if before is not None:
+        # Cursor pagination: pass the oldest loaded message's created_at to get the page before it.
+        query = query.where(Message.created_at < before)
 
     # Newest `limit` messages, returned oldest first.
     query = query.order_by(Message.created_at.desc()).limit(limit)
@@ -274,6 +280,68 @@ async def post_message(
         "reply_count": 0,
         "reactions": [],
     }
+
+
+async def _get_message(db: AsyncSession, channel: Channel, message_id: UUID) -> Message:
+    result = await db.execute(
+        select(Message)
+        .options(selectinload(Message.sender), selectinload(Message.reactions), selectinload(Message.replies))
+        .where(Message.id == message_id, Message.channel_id == channel.id)
+    )
+    message = result.scalar_one_or_none()
+    if message is None:
+        raise AuthError("Message not found", status_code=404)
+    return message
+
+
+async def _forget_message(db: AsyncSession, message: Message) -> None:
+    """Drop memories distilled from a message once it is edited or deleted."""
+    await db.execute(delete(AiMemory).where(AiMemory.source_type == "chat", AiMemory.source_id == str(message.id)))
+
+
+async def edit_message(
+    db: AsyncSession, workspace_id: UUID, channel_id: UUID, message_id: UUID, user_id: UUID, content: str
+) -> dict:
+    channel = await get_channel(db, workspace_id, channel_id, user_id)
+    message = await _get_message(db, channel, message_id)
+    if message.sender_id != user_id:
+        raise AuthError("You can only edit your own messages", status_code=403)
+    message.content = content.strip()
+    message.edited_at = datetime.now(UTC)
+    await _forget_message(db, message)
+    await db.flush()
+    return format_message_dict(message, user_id)
+
+
+async def delete_message(db: AsyncSession, workspace_id: UUID, channel_id: UUID, message_id: UUID, user_id: UUID) -> None:
+    """Senders may delete their messages; workspace owners/admins may moderate non-DM channels."""
+    channel = await get_channel(db, workspace_id, channel_id, user_id)
+    message = await _get_message(db, channel, message_id)
+    if message.sender_id != user_id:
+        membership = None if channel.is_direct else await get_workspace_membership(db, channel.workspace_id, user_id)
+        if not membership or membership.role not in MANAGER_ROLES:
+            raise AuthError("You can only delete your own messages", status_code=403)
+    await _forget_message(db, message)
+    for reply in message.replies or []:
+        await _forget_message(db, reply)
+    await db.delete(message)
+    await db.flush()
+
+
+async def delete_channel(db: AsyncSession, workspace_id: UUID, channel_id: UUID, user_id: UUID) -> None:
+    """Channel creators and workspace owners/admins may delete a channel and its history."""
+    channel = await get_channel(db, workspace_id, channel_id, user_id)
+    if channel.is_direct:
+        raise AuthError("Direct conversations can't be deleted", status_code=400)
+    if channel.created_by != user_id:
+        membership = await get_workspace_membership(db, channel.workspace_id, user_id)
+        if not membership or membership.role not in MANAGER_ROLES:
+            raise AuthError("Only the channel's creator or a workspace admin can delete it", status_code=403)
+    message_ids = [str(mid) for mid in (await db.execute(select(Message.id).where(Message.channel_id == channel.id))).scalars()]
+    if message_ids:
+        await db.execute(delete(AiMemory).where(AiMemory.source_type == "chat", AiMemory.source_id.in_(message_ids)))
+    await db.delete(channel)
+    await db.flush()
 
 
 async def toggle_reaction(
@@ -396,6 +464,7 @@ def format_message_dict(msg: Message, current_user_id: UUID) -> dict:
         "parent_id": msg.parent_id,
         "content": msg.content,
         "created_at": msg.created_at,
+        "edited_at": msg.edited_at,
         "reply_count": len(msg.replies) if msg.replies else 0,
         "reactions": build_reaction_summaries(msg.reactions or [], current_user_id),
     }

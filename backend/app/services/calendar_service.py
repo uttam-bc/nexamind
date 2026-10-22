@@ -20,6 +20,7 @@ from app.schemas.calendar import (
 )
 from app.services import llm_client
 from app.services.auth_service import AuthError
+from app.services.workspace_service import require_author_or_manager
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ async def list_calendar_events(
     workspace_id: UUID,
     user_id: UUID,
     event_type: CalendarEventType | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[CalendarEvent]:
     """Lists calendar events in the workspace."""
     await _require_workspace_access(db, workspace_id, user_id)
@@ -57,6 +60,7 @@ async def list_calendar_events(
     )
     if event_type:
         query = query.where(CalendarEvent.event_type == event_type)
+    query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -146,6 +150,7 @@ async def delete_calendar_event(
 ) -> None:
     """Deletes a calendar event."""
     event = await get_calendar_event(db, workspace_id, event_id, user_id)
+    await require_author_or_manager(db, event.workspace_id, user_id, event.user_id)
     await db.delete(event)
     await db.flush()
 

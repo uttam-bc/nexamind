@@ -17,7 +17,7 @@ from app.schemas.project import (
     TaskUpdate,
 )
 from app.services.auth_service import AuthError
-from app.services.workspace_service import get_workspace_membership
+from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
 
 async def list_tasks(
@@ -25,12 +25,14 @@ async def list_tasks(
     workspace_id: UUID,
     user_id: UUID,
     status: TaskStatus | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Task]:
     await _require_workspace_access(db, workspace_id, user_id)
     query = select(Task).where(Task.workspace_id == workspace_id)
     if status is not None:
         query = query.where(Task.status == status)
-    query = query.order_by(Task.position.asc(), Task.created_at.desc())
+    query = query.order_by(Task.position.asc(), Task.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -114,6 +116,7 @@ async def delete_task(
     user_id: UUID,
 ) -> None:
     task = await get_task(db, workspace_id, task_id, user_id)
+    await require_author_or_manager(db, task.workspace_id, user_id, task.created_by)
     await db.delete(task)
     await db.flush()
 
@@ -329,7 +332,8 @@ async def delete_repo_file(
     file_id: UUID,
     user_id: UUID,
 ) -> None:
-    await get_repo(db, workspace_id, repo_id, user_id)
+    repo = await get_repo(db, workspace_id, repo_id, user_id)
+    await require_author_or_manager(db, repo.workspace_id, user_id, repo.created_by)
     result = await db.execute(
         select(RepoFile).where(RepoFile.repo_id == repo_id, RepoFile.id == file_id)
     )
