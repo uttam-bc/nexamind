@@ -229,6 +229,21 @@ export default function App() {
     }
   };
 
+  const isSoloWorkspace = currentWorkspace?.type === 'personal';
+
+  const handleToggleMode = (targetMode) => {
+    if (targetMode === 'personal') {
+      const personal = workspaces.find((w) => w.type === 'personal');
+      if (personal) handleSelectWorkspace(personal.id);
+    } else {
+      const team = workspaces.find(
+        (w) => w.type === 'team' || w.type === 'group'
+      );
+      if (team) handleSelectWorkspace(team.id);
+      else setShowJoinWsModal(true);
+    }
+  };
+
   const handleCreateWorkspace = async (e) => {
     e.preventDefault();
     if (!newWsName.trim()) return;
@@ -349,6 +364,32 @@ export default function App() {
               className="pl-9 pr-4 py-1.5 bg-[#F2F4F6] border-b border-[#E2E8F0] focus:border-[#4F46E5] focus:outline-none text-xs w-64 font-mono rounded-none transition-colors text-[#191C1E] placeholder-slate-400 cursor-pointer"
             />
           </div>
+        </div>
+
+        {/* Solo / Group mode switcher — centered in the top bar */}
+        <div className="absolute left-1/2 -translate-x-1/2 p-1 bg-[#ECEEF0] rounded-xl flex items-center gap-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => handleToggleMode('personal')}
+            className={`flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${
+              isSoloWorkspace
+                ? 'bg-white text-sky-600 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <User className="w-3.5 h-3.5" /> Solo
+          </button>
+          <button
+            type="button"
+            onClick={() => handleToggleMode('team')}
+            className={`flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${
+              !isSoloWorkspace
+                ? 'bg-white text-purple-600 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" /> Group
+          </button>
         </div>
 
         {/* Top Right Action Tools */}

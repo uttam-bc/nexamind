@@ -43,22 +43,6 @@ export default function Sidebar({
   const [isPanelExpanded, setIsPanelExpanded] = useState(true);
 
   const isSolo = currentWorkspace?.type === 'personal';
-  const personalWorkspaces = workspaces.filter((w) => w.type === 'personal');
-  const teamWorkspaces = workspaces.filter((w) => w.type === 'team');
-
-  const handleToggleMode = (targetMode) => {
-    if (targetMode === 'personal') {
-      if (personalWorkspaces.length > 0) {
-        onSelectWorkspace(personalWorkspaces[0].id);
-      }
-    } else {
-      if (teamWorkspaces.length > 0) {
-        onSelectWorkspace(teamWorkspaces[0].id);
-      } else {
-        onOpenJoinWs();
-      }
-    }
-  };
 
   const activityRailItems = [
     { id: 'dashboard', label: 'Activity', icon: LayoutDashboard },
@@ -413,27 +397,8 @@ export default function Sidebar({
             </button>
           </div>
 
-          {/* Mode Switcher Pill & Panel Collapse Toggle */}
-          <div className="space-y-2 pt-2 border-t border-slate-200">
-            <div className="p-1 bg-[#ECEEF0] rounded-xl flex items-center gap-1">
-              <button
-                onClick={() => handleToggleMode('personal')}
-                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-xs font-bold transition ${
-                  isSolo ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <User className="w-3 h-3" /> Solo
-              </button>
-              <button
-                onClick={() => handleToggleMode('team')}
-                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-xs font-bold transition ${
-                  !isSolo ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Users className="w-3 h-3" /> Group
-              </button>
-            </div>
-
+          {/* Panel Collapse Toggle */}
+          <div className="pt-2 border-t border-slate-200">
             <button
               onClick={() => setIsPanelExpanded(false)}
               className="w-full flex items-center justify-center gap-1.5 py-1 text-slate-400 hover:text-slate-700 text-xs transition"
