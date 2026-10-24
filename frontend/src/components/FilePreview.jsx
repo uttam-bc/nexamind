@@ -22,7 +22,7 @@ function blobType(kind, file) {
 const demoteHeadings = (markdown) => markdown.replace(/^(#{1,5}) /gm, '#$1 ');
 
 /** The file itself, rendered inside the app: PDF viewer, image, player, formatted Word/Markdown, or text. */
-export default function FilePreview({ workspaceId, file }) {
+export default function FilePreview({ workspaceId, file, fill = false }) {
   const [state, setState] = useState({ status: 'loading' });
 
   useEffect(() => {
@@ -66,7 +66,8 @@ export default function FilePreview({ workspaceId, file }) {
 
   const { kind, text, url, reason } = state;
   if (kind === 'pdf') {
-    return <iframe src={url} title={`Preview of ${file.filename}`} className="w-full h-[65vh] rounded-xl border border-slate-200 bg-white" />;
+    // The browser's own PDF viewer draws the stored bytes: pages, fonts, images and layout as uploaded.
+    return <iframe src={url} title={`Preview of ${file.filename}`} className={`w-full ${fill ? 'h-full min-h-[60vh]' : 'h-[65vh]'} rounded-xl border border-slate-200 bg-white`} />;
   }
   if (kind === 'image') {
     return (

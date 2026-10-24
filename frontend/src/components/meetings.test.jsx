@@ -128,3 +128,38 @@ describe('Meetings lobby', () => {
     expect(body.scheduled_start).toMatch(/^\d{4}-\d{2}-\d{2}T10:00:00[+-]\d{2}:\d{2}$/);
   });
 });
+
+describe('In-call chat replies', () => {
+  const messages = [
+    { id: 'm1', client_message_id: 'c1', sender_id: 'u2', sender_name: 'Priya', content: 'Can someone share the deck?', created_at: '2026-10-25T10:00:00Z' },
+    { id: 'm2', client_message_id: 'c2', sender_id: 'u1', sender_name: 'Asha', content: 'Sharing now', created_at: '2026-10-25T10:01:00Z',
+      reply_to_id: 'm1', reply_to: { id: 'm1', sender_name: 'Priya', excerpt: 'Can someone share the deck?', available: true } },
+    { id: 'm3', client_message_id: 'c3', sender_id: 'u2', sender_name: 'Priya', content: 'Thanks', created_at: '2026-10-25T10:02:00Z',
+      reply_to_id: 'gone', reply_to: { id: 'gone', available: false } },
+  ];
+
+  it('replies to a specific message, shows the preview and can cancel it', async () => {
+    const { ChatPanel } = await import('./meetings/MeetingRoom');
+    window.HTMLElement.prototype.scrollIntoView = () => {};
+    const onSend = vi.fn();
+    render(<ChatPanel messages={messages} userId="u1" onSend={onSend} />);
+    fireEvent.click(screen.getAllByLabelText('Reply to Priya')[0]);
+    expect(screen.getByTestId('reply-preview').textContent).toContain('Replying to Priya');
+    fireEvent.click(screen.getByLabelText('Cancel reply'));
+    expect(screen.queryByTestId('reply-preview')).toBeNull();
+
+    fireEvent.click(screen.getAllByText('Reply')[0]);
+    fireEvent.change(screen.getByLabelText('Message everyone'), { target: { value: 'On it' } });
+    fireEvent.submit(screen.getByLabelText('Message everyone').closest('form'));
+    expect(onSend).toHaveBeenCalledWith('On it', expect.objectContaining({ id: 'm1', sender_name: 'Priya' }));
+    expect(screen.queryByTestId('reply-preview')).toBeNull();
+  });
+
+  it('shows the quoted original, and an unavailable original gracefully', async () => {
+    const { ChatPanel } = await import('./meetings/MeetingRoom');
+    window.HTMLElement.prototype.scrollIntoView = () => {};
+    render(<ChatPanel messages={messages} userId="u1" onSend={() => {}} />);
+    expect(screen.getByLabelText('Replying to Priya: Can someone share the deck?')).toBeTruthy();
+    expect(screen.getByText('Original message unavailable')).toBeTruthy();
+  });
+});

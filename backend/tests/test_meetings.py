@@ -442,3 +442,117 @@ async def test_invite_only_minutes_are_private_and_locked(client: AsyncClient, t
     await client.post(f"{sessions}/{sid}/mom/approve", headers=team["owner"], json={"item_ids": []})
     assert (await client.post(f"{sessions}/{sid}/mom", headers=team["owner"])).status_code == 409
     assert (await client.patch(f"{sessions}/{sid}", headers=team["owner"], json={"title": "renamed"})).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_hub_one_connection_per_person_and_limit() -> None:
+    from app.services.meeting_hub import REPLACED_CLOSE_CODE, RoomFull
+
+    hub, mid = MeetingHub(), uuid.uuid4()
+    asha, ben = uuid.uuid4(), uuid.uuid4()
+    first, ben_ws = FakeSocket(), FakeSocket()
+    old = await hub.join(mid, first, asha, "Asha", True)
+    await hub.join(mid, ben_ws, ben, "Ben", False)
+    await hub.set_screen_share(mid, old.client_id, True)
+
+    # Asha refreshes (or her old socket is half-open): the new connection replaces the old one.
+    second = FakeSocket()
+    new = await hub.join(mid, second, asha, "Asha", True)
+    assert [p["name"] for p in hub.participants(mid)].count("Asha") == 1
+    assert first.closed == REPLACED_CLOSE_CODE and first.sent[-1]["type"] == "replaced"
+    assert {"type": "participant_left", "client_id": old.client_id} in ben_ws.sent
+    assert hub.room(mid).screen_owner is None  # the replaced connection's share is gone
+    assert new.client_id != old.client_id
+
+    # The limit counts people, and rejoining never counts twice.
+    with pytest.raises(RoomFull):
+        await hub.join(mid, FakeSocket(), uuid.uuid4(), "Cara", False, limit=2)
+    await hub.join(mid, FakeSocket(), ben, "Ben", False, limit=2)
+    assert hub.connected_count(mid) == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_replies_link_to_the_original(client: AsyncClient, team: dict, db_session) -> None:
+    from app.models import User
+    from app.services import meeting_service
+
+    meeting = await _live(client, team)
+    mid = uuid.UUID(meeting["id"])
+    owner = await db_session.get(User, uuid.UUID(team["owner_id"]))
+    member = await db_session.get(User, uuid.UUID(team["member"]["id"]))
+    first, _ = await meeting_service.store_chat_message(db_session, mid, owner, "Can someone share the deck?", "cm-00000001")
+    reply, parent = await meeting_service.store_chat_message(db_session, mid, member, "Sharing now", "cm-00000002", str(first.id))
+    assert parent.id == first.id and reply.reply_to_id == first.id
+    # A resend after a reconnect is the same message, still linked.
+    again, again_parent = await meeting_service.store_chat_message(db_session, mid, member, "Sharing now", "cm-00000002", str(first.id))
+    assert again.id == reply.id and again_parent.id == first.id
+    # Replies can't point into another meeting (or at garbage): they're stored unlinked.
+    other = await _live(client, team)
+    foreign, _ = await meeting_service.store_chat_message(db_session, uuid.UUID(other["id"]), owner, "elsewhere", "cm-00000003")
+    stray, stray_parent = await meeting_service.store_chat_message(db_session, mid, owner, "x", "cm-00000004", str(foreign.id))
+    assert stray.reply_to_id is None and stray_parent is None
+    bad, _ = await meeting_service.store_chat_message(db_session, mid, owner, "y", "cm-00000005", "not-a-uuid")
+    assert bad.reply_to_id is None
+    await db_session.commit()
+
+    # History (after a refresh) keeps the link, with a preview even if the original is on an older page.
+    url = f"{team['base']}/{meeting['id']}/messages"
+    latest = (await client.get(url, params={"limit": 2}, headers=team["member"]["headers"])).json()
+    assert [m["content"] for m in latest] == ["x", "y"]
+    full = (await client.get(url, headers=team["member"]["headers"])).json()
+    linked = next(m for m in full if m["content"] == "Sharing now")
+    assert linked["reply_to"] == {"id": str(first.id), "sender_name": owner.name, "available": True,
+                                  "excerpt": "Can someone share the deck?"}
+    older = (await client.get(url, params={"before": latest[0]["created_at"]}, headers=team["member"]["headers"])).json()
+    assert [m["content"] for m in older] == ["Can someone share the deck?", "Sharing now"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_start_returns_the_original(client: AsyncClient, team: dict, db_session) -> None:
+    """Two simultaneous clicks: the second insert hits the unique key and must return the first."""
+    from app.models import User
+    from app.schemas.meeting import MeetingInstant
+    from app.services import meeting_service
+
+    owner = await db_session.get(User, uuid.UUID(team["owner_id"]))
+    data = MeetingInstant(title="Race", client_request_id="race-req-0001")
+    first, created = await meeting_service.start_instant(db_session, uuid.UUID(team["wid"]), owner, data)
+    assert created
+    # Simulate the race: the duplicate check passes (as if the first wasn't committed yet).
+    original = meeting_service._existing_request
+
+    async def not_seen_first(*args, **kwargs):
+        meeting_service._existing_request = original
+        return None
+
+    meeting_service._existing_request = not_seen_first
+    again, created_again = await meeting_service.start_instant(db_session, uuid.UUID(team["wid"]), owner, data)
+    assert not created_again and again.id == first.id
+    await db_session.commit()  # the session is still usable
+
+
+@pytest.mark.asyncio
+async def test_restart_does_not_end_live_meetings(client: AsyncClient, team: dict, db_session, monkeypatch) -> None:
+    """After a restart or deploy the hub has no rooms yet; people are reconnecting, not gone."""
+    import time
+
+    from app.models import Meeting, MeetingStatus
+    from app.services import meeting_service
+    from app.services.meeting_hub import MeetingHub
+
+    meeting = await _live(client, team)
+    stored = await db_session.get(Meeting, uuid.UUID(meeting["id"]))
+    stored.started_at = datetime.now(UTC) - timedelta(hours=1)  # the meeting has been going for an hour
+    await db_session.commit()
+
+    fresh_process = MeetingHub()  # what a restarted server has
+    monkeypatch.setattr(meeting_service, "meeting_hub", fresh_process)
+    assert await meeting_service.end_abandoned_meetings(db_session) == 0
+    await db_session.refresh(stored)
+    assert stored.status == MeetingStatus.LIVE
+
+    # Nobody came back for the whole timeout: now it ends.
+    fresh_process.started_at = time.time() - meeting_service.EMPTY_MEETING_TIMEOUT_SECONDS - 1
+    assert await meeting_service.end_abandoned_meetings(db_session) == 1
+    await db_session.refresh(stored)
+    assert stored.status == MeetingStatus.ENDED

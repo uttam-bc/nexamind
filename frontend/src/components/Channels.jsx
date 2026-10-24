@@ -478,7 +478,7 @@ export default function Channels({
       {/* ------------------------------------------------------------- */}
       {/* 1. LEFT CHANNEL & DM SIDEBAR                                   */}
       {/* ------------------------------------------------------------- */}
-      <aside className={`${mobileView === 'chat' ? 'hidden md:flex' : 'flex'} w-full md:w-64 lg:w-72 bg-white border-r border-slate-200 flex-col h-full flex-shrink-0 select-none shadow-sm`}>
+      <aside className={`${mobileView === 'chat' ? 'hidden lg:flex' : 'flex'} w-full lg:w-64 xl:w-72 bg-white border-r border-slate-200 flex-col h-full flex-shrink-0 select-none shadow-sm`}>
         {/* Sidebar Header with Back Button */}
         <div className="p-3.5 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -684,13 +684,13 @@ export default function Channels({
       {/* ------------------------------------------------------------- */}
       {/* 2. MAIN CHAT CONVERSATION AREA                                 */}
       {/* ------------------------------------------------------------- */}
-      <main className={`${mobileView === 'list' ? 'hidden md:flex' : 'flex'} flex-1 min-w-0 flex-col h-full bg-slate-50 overflow-hidden shadow-sm relative`}>
+      <main className={`${mobileView === 'list' ? 'hidden lg:flex' : 'flex'} flex-1 min-w-0 flex-col h-full bg-slate-50 overflow-hidden shadow-sm relative`}>
         {activeChannel ? (
           <>
             {/* Chat Top Header */}
             <header className="px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-200 bg-white flex items-center justify-between gap-2 flex-shrink-0 shadow-xs">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                <button type="button" onClick={() => setMobileView('list')} className="md:hidden p-2 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Back to channels">
+                <button type="button" onClick={() => setMobileView('list')} className="lg:hidden p-2 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Back to channels">
                   <ArrowLeft className="w-4 h-4" />
                 </button>
                 <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center font-bold">
@@ -965,12 +965,12 @@ export default function Channels({
             {/* Message Input Form - High Contrast, Large Readable Text */}
             <form
               onSubmit={handleSendMessage}
-              className="p-4 border-t border-slate-200 bg-white flex items-center gap-3"
+              className="p-2 sm:p-4 border-t border-slate-200 bg-white flex items-center gap-2 sm:gap-3"
             >
               <input aria-label="Message text"
                 type="text"
                 placeholder={`Type message in #${getChannelDisplayName(activeChannel)}...`}
-                className="flex-1 bg-slate-50 border-2 border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl px-5 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none transition shadow-sm font-sans"
+                className="flex-1 min-w-0 bg-slate-50 border-2 border-slate-200 focus:border-indigo-600 focus:bg-white rounded-2xl px-3 sm:px-5 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none transition shadow-sm font-sans"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
               />

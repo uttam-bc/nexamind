@@ -101,7 +101,11 @@ export default function AiAssistant({
     }
   };
 
+  // Phones: the conversation list opens over the chat instead of squeezing it to a sliver.
+  const [showSessions, setShowSessions] = useState(false);
+
   const selectSession = async (sessionId) => {
+    setShowSessions(false);
     setActiveSessionId(sessionId);
     try {
       const history = await api.getAiSessionMessages(workspaceId, sessionId);
@@ -125,6 +129,7 @@ export default function AiAssistant({
 
   const handleCreateNewSession = async () => {
     try {
+      setShowSessions(false);
       const newSession = await api.createAiSession(workspaceId, 'New AI Consultation');
       setSessions((prev) => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
@@ -387,14 +392,17 @@ export default function AiAssistant({
       />
 
       {/* 2. Main Body: Session Rail + Conversation Stream */}
-      <div className="flex-1 flex gap-5 overflow-hidden min-h-0 pt-2">
+      <div className="flex-1 flex gap-3 md:gap-5 overflow-hidden min-h-0 pt-2 relative">
         {/* Left Drawer: Past Conversation Sessions (Item 2) */}
-        <div className="w-64 lg:w-72 bg-white rounded-2xl border border-slate-200 p-3.5 flex flex-col shadow-xs flex-shrink-0">
+        <div className={`${showSessions ? 'flex absolute inset-0 z-30' : 'hidden'} lg:static lg:flex lg:w-60 xl:w-72 bg-white rounded-2xl border border-slate-200 p-3.5 flex-col shadow-xs flex-shrink-0`}>
           <div className="flex items-center justify-between mb-3 px-1">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
               <Clock className="w-3.5 h-3.5 text-indigo-600" />
               <span>AI Sessions</span>
             </div>
+            <button type="button" onClick={() => setShowSessions(false)} className="lg:hidden ml-auto mr-2 text-xs font-bold text-slate-500" aria-label="Close conversations">
+              Close
+            </button>
             <button aria-label="Start New Conversation Session"
               onClick={handleCreateNewSession}
               className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition flex items-center gap-1 text-xs font-bold"
@@ -445,7 +453,14 @@ export default function AiAssistant({
         </div>
 
         {/* Center: Conversation Stream */}
-        <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col h-full overflow-hidden min-h-0">
+        <div className="flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col h-full overflow-hidden min-h-0">
+          <button
+            type="button"
+            onClick={() => setShowSessions(true)}
+            className="lg:hidden flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 text-xs font-bold text-slate-700"
+          >
+            <Clock className="w-3.5 h-3.5 text-indigo-600" aria-hidden="true" /> Conversations
+          </button>
           {/* Messages Stream */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
             {messages.map((msg, idx) => {
@@ -569,7 +584,7 @@ export default function AiAssistant({
               rows={1}
               placeholder="Ask anything, query workspace memory, or tell the AI to create tasks/docs..."
               disabled={isProcessing}
-              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 resize-none shadow-xs"
+              className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 resize-none shadow-xs"
             />
 
             <button
@@ -585,7 +600,7 @@ export default function AiAssistant({
 
         {/* Right Drawer: Memory Vault Inspection (Items 4 & 6) */}
         {showMemoryDrawer && (
-          <div className="w-80 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col shadow-lg flex-shrink-0 animate-in slide-in-from-right-4">
+          <div className="absolute inset-0 z-30 lg:static lg:w-80 bg-white rounded-2xl border border-slate-200 p-4 flex flex-col shadow-lg flex-shrink-0 animate-in slide-in-from-right-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center gap-2">
                 <Brain className="w-4 h-4 text-indigo-600" />

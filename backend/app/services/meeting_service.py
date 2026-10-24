@@ -27,6 +27,7 @@ from app.models import (
     CalendarEventType,
     Meeting,
     MeetingInvitee,
+    MeetingMessage,
     MeetingRecurrence,
     MeetingStatus,
     SessionRecord,
@@ -168,11 +169,13 @@ async def schedule_meeting(db: AsyncSession, workspace_id: UUID, user: User, dat
             recurrence_parent_id=meetings[0].id if meetings else None,
             client_request_id=data.client_request_id if index == 0 else None,
         )
-        db.add(meeting)
         try:
             async with db.begin_nested():
+                db.add(meeting)
                 await db.flush()
         except IntegrityError:  # the same request is being processed concurrently
+            if meeting in db:
+                db.expunge(meeting)
             original = await _existing_request(db, user.id, data.client_request_id)
             if original:
                 return original, False
@@ -212,11 +215,13 @@ async def start_instant(db: AsyncSession, workspace_id: UUID, user: User, data: 
         workspace_id=workspace_id, title=data.title, organizer_id=user.id, status=MeetingStatus.LIVE,
         scheduled_start=now, started_at=now, timezone="UTC", client_request_id=data.client_request_id,
     )
-    db.add(meeting)
     try:
         async with db.begin_nested():
+            db.add(meeting)
             await db.flush()
     except IntegrityError:
+        if meeting in db:
+            db.expunge(meeting)
         original = await _existing_request(db, user.id, data.client_request_id)
         if original:
             return original, False
@@ -393,6 +398,35 @@ async def end_for_all(db: AsyncSession, meeting: Meeting, user: User | None, rea
     return session
 
 
+async def store_chat_message(db: AsyncSession, meeting_id: UUID, user: User, content: str, client_message_id: str,
+                             reply_to_id=None) -> tuple[MeetingMessage, MeetingMessage | None]:
+    """Save an in-call chat message. Resending the same client id (after a reconnect) returns the
+    stored one. A reply must point at a message of the same meeting; anything else is sent as a
+    plain message rather than linked to the wrong conversation."""
+    parent = None
+    try:
+        parent_id = UUID(str(reply_to_id)) if reply_to_id else None
+    except ValueError:
+        parent_id = None
+    if parent_id:
+        parent = await db.get(MeetingMessage, parent_id)
+        if parent is None or parent.meeting_id != meeting_id:
+            parent = None
+    message = MeetingMessage(meeting_id=meeting_id, sender_id=user.id, sender_name=user.name, content=content,
+                             client_message_id=client_message_id, reply_to_id=parent.id if parent else None)
+    try:
+        async with db.begin_nested():
+            db.add(message)
+            await db.flush()
+    except IntegrityError:
+        if message in db:
+            db.expunge(message)
+        message = (await db.execute(select(MeetingMessage).where(
+            MeetingMessage.meeting_id == meeting_id, MeetingMessage.client_message_id == client_message_id))).scalar_one()
+        parent = await db.get(MeetingMessage, message.reply_to_id) if message.reply_to_id else None
+    return message, parent
+
+
 def schedule_mom_generation(session_id: UUID) -> None:
     """Draft the MoM in the background (it may take a while with an AI model)."""
     from app.services.mom_service import generate_mom_for_session
@@ -426,9 +460,9 @@ async def end_abandoned_meetings(db: AsyncSession) -> int:
         empty = meeting_hub.empty_for(meeting.id)
         if empty is None:
             continue
-        if empty == float("inf"):  # not seen since this process started
-            started = _aware(meeting.started_at) or now
-            empty = (now - started).total_seconds()
+        started = _aware(meeting.started_at)
+        if started is not None:  # a meeting can't have been empty longer than it has existed
+            empty = min(empty, (now - started).total_seconds())
         if empty >= EMPTY_MEETING_TIMEOUT_SECONDS:
             session = await end_for_all(db, meeting, None, reason="empty")
             ended += 1

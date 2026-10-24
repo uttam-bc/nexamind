@@ -100,7 +100,10 @@ function PagePreview({ workspaceId, doc }) {
 
 export default function FileManager({ workspaceId, filesList, documents, onRefreshFiles, onOpenDocument }) {
   const [selected, setSelected] = useState(null);
+  // A page made from a PDF opens on the PDF itself; its text extraction is the second view.
+  const [pageView, setPageView] = useState('original');
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all'); // 'all' | 'page' | 'image' | 'media' | 'file'
@@ -116,10 +119,11 @@ export default function FileManager({ workspaceId, filesList, documents, onRefre
     e.target.value = '';
     if (!file) return;
     setUploading(true);
+    setProgress(0);
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const stored = await api.uploadFile(workspaceId, fd);
+      const stored = await api.uploadFile(workspaceId, fd, setProgress);
       if (stored.document_id) notify(`"${file.name}" was added and can be edited in Pages.`, 'success');
       else if (stored.page_error) notify(`"${file.name}" was stored, but it couldn't be turned into an editable page: ${stored.page_error}`, 'info');
       else notify(`"${file.name}" was uploaded.`, 'success');
@@ -193,7 +197,7 @@ export default function FileManager({ workspaceId, filesList, documents, onRefre
 
           <label className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 cursor-pointer transition focus-within:ring-2 focus-within:ring-indigo-400">
             {uploading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Upload className="w-4 h-4" aria-hidden="true" />}
-            <span>{uploading ? 'Uploading…' : 'Upload File'}</span>
+            <span>{uploading ? (progress < 100 ? `Uploading ${progress}%` : 'Processing…') : 'Upload File'}</span>
             <input type="file" className="sr-only" disabled={uploading} onChange={handleUpload} />
           </label>
         </div>
@@ -274,7 +278,10 @@ export default function FileManager({ workspaceId, filesList, documents, onRefre
 
             <button
               type="button"
-              onClick={() => setSelected(item)}
+              onClick={() => {
+                setPageView('original');
+                setSelected(item);
+              }}
               className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 border border-slate-200 transition"
             >
               <Eye className="w-3.5 h-3.5" aria-hidden="true" />
@@ -315,8 +322,25 @@ export default function FileManager({ workspaceId, filesList, documents, onRefre
               </button>
             </div>
 
+            {selected.kind === 'page' && selected.original && /\.pdf$/i.test(selected.original.filename) && (
+              <div className="flex gap-1 text-xs" role="group" aria-label="Show">
+                {[['original', 'Original PDF'], ['text', 'Editable text']].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setPageView(id)}
+                    aria-pressed={pageView === id}
+                    className={`px-3 py-1.5 rounded-lg font-bold ${pageView === id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex-1 min-h-[220px] bg-slate-50 rounded-xl p-3 border border-slate-200">
-              {selected.kind === 'page' ? (
+              {selected.kind === 'page' && selected.original && /\.pdf$/i.test(selected.original.filename) && pageView === 'original' ? (
+                <FilePreview workspaceId={workspaceId} file={selected.original} />
+              ) : selected.kind === 'page' ? (
                 <PagePreview workspaceId={workspaceId} doc={selected.doc} />
               ) : (
                 <FilePreview workspaceId={workspaceId} file={selected.file} />

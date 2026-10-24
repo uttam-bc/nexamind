@@ -74,7 +74,12 @@ function StreamVideo({ stream, muted = true, mirror = false, fit = 'cover', onLi
     const play = () => video.play().catch(() => {});
     play();
     const track = () => stream?.getVideoTracks()[0];
-    const update = () => onLive?.(!!track() && !track().muted && track().readyState === 'live');
+    // A muted remote track only means no new frames (a still slide or tab sends none): once a frame
+    // has been decoded it stays on screen. Only an ended or missing track counts as not live.
+    const update = () => {
+      const t = track();
+      onLive?.(!!t && t.readyState === 'live' && (video.readyState >= 2 || !t.muted));
+    };
     const bind = () => {
       const t = track();
       if (t) {
@@ -91,11 +96,13 @@ function StreamVideo({ stream, muted = true, mirror = false, fit = 'cover', onLi
     stream?.addEventListener?.('addtrack', onAdd);
     stream?.addEventListener?.('removetrack', update);
     video.addEventListener('loadeddata', update);
+    video.addEventListener('playing', update);
     bind();
     return () => {
       stream?.removeEventListener?.('addtrack', onAdd);
       stream?.removeEventListener?.('removetrack', update);
       video.removeEventListener('loadeddata', update);
+      video.removeEventListener('playing', update);
       const t = track();
       t?.removeEventListener('mute', update);
       t?.removeEventListener('unmute', update);
@@ -127,7 +134,9 @@ function RemoteAudio({ stream }) {
   return <audio ref={ref} autoPlay data-testid="remote-audio" />;
 }
 
-function Tile({ name, stream, camOn, micOn, hand, speaking, isSelf, connection, isHost, compact = false }) {
+// Memoised: chat, transcript and speaker-level updates re-render the room several times a second;
+// a tile only needs to re-render when its own participant changes.
+const Tile = React.memo(function Tile({ name, stream, camOn, micOn, hand, speaking, isSelf, connection, isHost, compact = false }) {
   const [live, setLive] = useState(false);
   const showVideo = camOn && !!stream && live;
   return (
@@ -174,7 +183,7 @@ function Tile({ name, stream, camOn, micOn, hand, speaking, isSelf, connection, 
       </div>
     </div>
   );
-}
+});
 
 function ControlButton({ onClick, active = true, danger = false, label, children, disabled = false, badge }) {
   return (
@@ -385,9 +394,13 @@ export function EndDialog({ isHost, busy, onEndForMe, onEndForAll, onCancel }) {
   );
 }
 
-function ChatPanel({ messages, userId, onSend }) {
+export function ChatPanel({ messages, userId, onSend, onRetry }) {
   const [text, setText] = useState('');
+  const [replyTo, setReplyTo] = useState(null);
+  const [highlight, setHighlight] = useState(null);
   const endRef = useRef(null);
+  const listRef = useRef(null);
+  const inputRef = useRef(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
   }, [messages.length]);
@@ -395,41 +408,114 @@ function ChatPanel({ messages, userId, onSend }) {
     e.preventDefault();
     const value = text.trim();
     if (!value) return;
-    onSend(value);
+    onSend(value, replyTo);
     setText('');
+    setReplyTo(null);
   };
+  const startReply = (m) => {
+    setReplyTo({ id: m.id, sender_name: m.sender_name, excerpt: m.content.slice(0, 140) });
+    inputRef.current?.focus();
+  };
+  const jumpTo = (id) => {
+    const el = listRef.current?.querySelector(`[data-message-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlight(id);
+    setTimeout(() => setHighlight((h) => (h === id ? null : h)), 1600);
+  };
+  const loaded = new Set(messages.map((m) => m.id));
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 overflow-y-auto space-y-3 p-4 min-h-0">
+      <div ref={listRef} className="flex-1 overflow-y-auto space-y-3 p-4 min-h-0">
         {messages.length === 0 && <p className="text-sm text-slate-400 text-center mt-8">No messages yet. Messages are kept with the meeting.</p>}
         {messages.map((m) => {
           const mine = m.sender_id === userId;
+          const quote = m.reply_to;
           return (
-            <div key={m.client_message_id || m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+            <div
+              key={m.client_message_id || m.id}
+              data-message-id={m.id}
+              className={`group flex flex-col ${mine ? 'items-end' : 'items-start'} rounded-lg transition-colors ${highlight === m.id ? 'bg-indigo-500/20' : ''}`}
+            >
               <span className="text-[11px] text-slate-400">
                 {mine ? 'You' : m.sender_name} · {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
               </span>
-              <p className={`text-sm px-3 py-2 rounded-xl max-w-[85%] break-words whitespace-pre-wrap ${mine ? 'bg-indigo-600' : 'bg-slate-700'} ${m.pending ? 'opacity-60' : ''}`}>
+              <div className={`text-sm px-3 py-2 rounded-xl max-w-[85%] break-words whitespace-pre-wrap ${mine ? 'bg-indigo-600' : 'bg-slate-700'} ${m.pending ? 'opacity-60' : ''}`}>
+                {quote && (
+                  <button
+                    type="button"
+                    onClick={() => jumpTo(quote.id)}
+                    disabled={!quote.available || !loaded.has(quote.id)}
+                    className="block w-full text-left mb-1.5 pl-2 border-l-2 border-white/50 text-xs text-white/80 disabled:cursor-default"
+                    aria-label={quote.available ? `Replying to ${quote.sender_name}: ${quote.excerpt}` : 'Original message unavailable'}
+                  >
+                    {quote.available ? (
+                      <>
+                        <span className="font-semibold block">{quote.sender_name}</span>
+                        <span className="line-clamp-2">{quote.excerpt}</span>
+                      </>
+                    ) : (
+                      <span className="italic">Original message unavailable</span>
+                    )}
+                  </button>
+                )}
                 {m.content}
-              </p>
-              {m.pending && <span className="text-[11px] text-slate-500">Sending…</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                {m.pending && <span className="text-[11px] text-slate-500">Sending…</span>}
+                {m.failed && (
+                  <button type="button" onClick={() => onRetry?.(m)} className="text-[11px] text-rose-300 underline py-1">
+                    Not sent · Retry
+                  </button>
+                )}
+                {!m.pending && !m.failed && m.id && (
+                  <button
+                    type="button"
+                    onClick={() => startReply(m)}
+                    className="text-[11px] text-slate-400 hover:text-white sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 py-1"
+                    aria-label={`Reply to ${mine ? 'your message' : m.sender_name}`}
+                  >
+                    Reply
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
         <div ref={endRef} />
       </div>
-      <form onSubmit={submit} className="p-3 border-t border-slate-700 flex gap-2">
-        <input
-          aria-label="Message everyone"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          maxLength={2000}
-          placeholder="Message everyone"
-          className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
-        />
-        <button type="submit" aria-label="Send message" className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3">
-          <Send className="w-4 h-4" />
-        </button>
+      <form onSubmit={submit} className="p-3 border-t border-slate-700 space-y-2">
+        {replyTo && (
+          <div className="flex items-start gap-2 bg-slate-800 rounded-lg px-3 py-2 text-xs" data-testid="reply-preview">
+            <div className="flex-1 min-w-0 border-l-2 border-indigo-400 pl-2">
+              <span className="font-semibold text-indigo-300 block">Replying to {replyTo.sender_name}</span>
+              <span className="text-slate-300 line-clamp-2 break-words">{replyTo.excerpt}</span>
+            </div>
+            <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" className="p-1 rounded hover:bg-slate-700">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            aria-label="Message everyone"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && replyTo) {
+                e.stopPropagation();
+                setReplyTo(null);
+              }
+            }}
+            maxLength={2000}
+            placeholder={replyTo ? 'Write a reply' : 'Message everyone'}
+            className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500"
+          />
+          <button type="submit" aria-label="Send message" className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 min-w-[44px]">
+            <Send className="w-4 h-4 mx-auto" />
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -567,7 +653,12 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
       } else if (msg.type === 'reconnected') {
         loadMessages();
         // Resend chat messages that never got through (the server ignores duplicates).
-        pendingChat.current.forEach((content, id) => client.sendChat(content, id));
+        pendingChat.current.forEach((m, id) => client.sendChat(m.content, id, m.replyToId));
+      } else if (msg.type === 'error' && msg.client_message_id && pendingChat.current.has(msg.client_message_id)) {
+        // The server refused this message (rate limit): show it as not sent, with Retry.
+        pendingChat.current.delete(msg.client_message_id);
+        setMessages((prev) => prev.map((m) => (m.client_message_id === msg.client_message_id ? { ...m, pending: false, failed: true } : m)));
+        notify(msg.detail || 'Message not sent', 'error');
       } else if (msg.type === 'error') {
         notify(msg.detail || 'Meeting error', 'error');
       }
@@ -706,11 +797,19 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
     }
   };
 
-  const sendChat = (content) => {
+  const retryChat = (failed) => {
+    setMessages((prev) => prev.filter((m) => m.client_message_id !== failed.client_message_id));
+    sendChat(failed.content, failed.reply_to && failed.reply_to.available ? failed.reply_to : null);
+  };
+
+  const sendChat = (content, replyTo = null) => {
     const id = newId();
-    pendingChat.current.set(id, content);
-    addMessage({ client_message_id: id, content, sender_id: String(user?.id), sender_name: user?.name, created_at: new Date().toISOString(), pending: true });
-    client.sendChat(content, id);
+    pendingChat.current.set(id, { content, replyToId: replyTo?.id || null });
+    addMessage({
+      client_message_id: id, content, sender_id: String(user?.id), sender_name: user?.name, created_at: new Date().toISOString(), pending: true,
+      reply_to_id: replyTo?.id || null, reply_to: replyTo ? { ...replyTo, available: true } : null,
+    });
+    client.sendChat(content, id, replyTo?.id || null);
   };
 
   const toggleFullscreen = async () => {
@@ -757,14 +856,17 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
       closed: client.error || 'This meeting has ended.',
       not_found: 'This meeting no longer exists or you do not have access.',
       auth: 'Your session expired. Sign in again to rejoin.',
+      replaced: 'You joined this meeting from another tab or device, so this window left. Join again here to move back.',
+      full: client.error || 'This meeting is full.',
     }[client.endReason] || 'The meeting is over.';
+    const stillRunning = client.endReason === 'replaced' || client.endReason === 'full';
     return (
       <div className="fixed inset-0 z-50 bg-[#12151C] text-white flex items-center justify-center p-4">
         <div className="text-center space-y-4 max-w-sm" role="status">
           <PhoneOff className="w-10 h-10 mx-auto text-rose-400" />
-          <h2 className="text-xl font-bold">Meeting ended</h2>
+          <h2 className="text-xl font-bold">{client.endReason === 'replaced' ? 'Joined elsewhere' : client.endReason === 'full' ? 'Meeting is full' : 'Meeting ended'}</h2>
           <p className="text-slate-300">{text}</p>
-          <button type="button" onClick={() => onExit({ ended: true, sessionId: client.meeting?.session_id })} className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-5 py-2.5 font-bold">
+          <button type="button" onClick={() => onExit({ ended: !stillRunning, sessionId: stillRunning ? null : client.meeting?.session_id })} className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-5 py-2.5 font-bold">
             Back to meetings
           </button>
         </div>
@@ -782,7 +884,7 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
           <X className="w-4 h-4" />
         </button>
       </div>
-      {panel === 'chat' && <ChatPanel messages={messages} userId={String(user?.id)} onSend={sendChat} />}
+      {panel === 'chat' && <ChatPanel messages={messages} userId={String(user?.id)} onSend={sendChat} onRetry={retryChat} />}
       {panel === 'transcript' && (
         <TranscriptPanel
           segments={segments}

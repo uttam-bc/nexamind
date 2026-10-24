@@ -38,6 +38,7 @@ import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
 import { notify, confirmDialog } from '../context/ToastContext';
 import MarkdownDocument from './MarkdownDocument';
+import FilePreview from './FilePreview';
 
 const EMOJI_PICKER_OPTIONS = [
   '📄', '📝', '💡', '🚀', '🛠️', '📌', '🎯', '📊',
@@ -161,7 +162,29 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
 
   // Direct Notion Editor Mode
   // Default is 'direct' (write directly in preview session)
-  const [viewMode, setViewMode] = useState('direct'); // 'preview' | 'direct' | 'split' | 'code'
+  const [importProgress, setImportProgress] = useState(0);
+  const [viewMode, setViewMode] = useState('direct'); // 'original' | 'preview' | 'direct' | 'split' | 'code'
+  // Uploaded files behind pages (page id -> file). A page made from a PDF shows the PDF itself by
+  // default: the editable text is an extraction and can't keep columns, fonts or pictures.
+  const [originals, setOriginals] = useState(new Map());
+  const originalsRef = useRef(originals);
+  originalsRef.current = originals;
+  const refreshOriginals = async () => {
+    try {
+      const files = await api.listFiles(workspaceId);
+      const map = new Map((files || []).filter((f) => f.document_id).map((f) => [f.document_id, f]));
+      originalsRef.current = map;
+      setOriginals(map);
+      return map;
+    } catch {
+      return originalsRef.current;
+    }
+  };
+  useEffect(() => {
+    refreshOriginals();
+  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isPdf = (file) => !!file && /\.pdf$/i.test(file.filename || '');
+  const pdfOriginal = selectedDoc && isPdf(originals.get(selectedDoc.id)) ? originals.get(selectedDoc.id) : null;
   const [isImporting, setIsImporting] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const imageInputRef = useRef(null);
@@ -257,7 +280,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     setDocParentId(full.parent_id || null);
     setDocContent(raw);
     // Existing pages open as a readable preview; empty pages open ready to type.
-    if (!keepView) setViewMode(raw.trim() ? 'preview' : 'direct');
+    if (!keepView) setViewMode(isPdf(originalsRef.current.get(full.id)) ? 'original' : raw.trim() ? 'preview' : 'direct');
     setLastSaved(full.updated_at ? new Date(full.updated_at) : null);
     setIsLoadingDoc(false);
     pendingSelectRef.current = false;
@@ -573,14 +596,14 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
     const file = e.target.files?.[0];
     if (!file) return;
     setIsImporting(true);
+    setImportProgress(0);
     try {
       // The server extracts real content (Word headings/lists/tables, PDF text) instead of
       // reading binary files as text.
-      const created = await api.importDocument(workspaceId, file);
+      const created = await api.importDocument(workspaceId, file, null, setImportProgress);
       if (onRefreshDocuments) await onRefreshDocuments();
-      await loadDocumentTree();
+      await Promise.all([loadDocumentTree(), refreshOriginals()]);
       handleSelectDoc(created);
-      setViewMode('preview');
       notify(`Imported "${created.title}".`, 'success');
     } catch (err) {
       notify(`Could not import ${file.name}: ${err.message}`, 'error');
@@ -755,10 +778,11 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       />
 
       {/* Main Workspace Body */}
-      <div className="flex-1 flex gap-6 overflow-hidden min-h-0 pt-2">
+      <div className="flex-1 flex gap-3 xl:gap-6 overflow-hidden min-h-0 pt-2">
         {/* 1. Left Sidebar: Notion Document Tree & Quick Action Rail */}
         {!isZenMode && (
-          <div className="w-72 lg:w-80 p-4 rounded-2xl border border-slate-200 flex flex-col h-full bg-white shadow-sm flex-shrink-0">
+          // Below lg the page list and the open page take turns (the app's own sidebars use the room).
+          <div className={`${selectedDoc ? 'hidden lg:flex' : 'flex'} w-full lg:w-64 xl:w-80 p-4 rounded-2xl border border-slate-200 flex-col h-full bg-white shadow-sm flex-shrink-0`}>
             {/* Header */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -777,6 +801,9 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 >
                   {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Upload className="w-3.5 h-3.5" aria-hidden="true" />}
                 </button>
+                {isImporting && (
+                  <span className="text-xs text-slate-600 tabular-nums" role="status">{importProgress < 100 ? `${importProgress}%` : 'Importing…'}</span>
+                )}
                 <button
                   onClick={() => {
                     setCreateParentId(null);
@@ -891,15 +918,17 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
 
         {/* 2. Center Notion Canvas: Direct-Write Interactive Preview (Item 13) */}
         {selectedDoc ? (
-          <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden min-h-0">
+          <div className="flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden min-h-0">
             {/* Top Toolbar: Breadcrumb + Action Controls */}
             <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 flex-wrap gap-2">
               <div className="flex items-center gap-1.5 text-xs text-slate-500 overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setSelectedDoc(null)}
-                  className="hover:text-indigo-600 font-medium transition"
+                  className="hover:text-indigo-600 font-medium transition flex items-center gap-1"
+                  aria-label="Back to all pages"
                 >
+                  <ArrowLeft className="w-3.5 h-3.5 lg:hidden" aria-hidden="true" />
                   Workspace
                 </button>
 
@@ -923,9 +952,22 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </div>
 
               {/* View Mode & Export Tools */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
                 {/* Mode Selector */}
-                <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1 text-xs" role="group" aria-label="View mode">
+                <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1 text-xs overflow-x-auto max-w-full whitespace-nowrap" role="group" aria-label="View mode">
+                  {pdfOriginal && (
+                    <button
+                      onClick={() => setViewMode('original')}
+                      aria-pressed={viewMode === 'original'}
+                      className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                        viewMode === 'original' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="The uploaded PDF exactly as it is"
+                    >
+                      <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Original PDF</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => setViewMode('preview')}
                     aria-pressed={viewMode === 'preview'}
@@ -1062,7 +1104,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               {/* Title Input */}
               <input aria-label="Document title"
                 type="text"
-                className="text-2xl sm:text-3xl font-extrabold bg-transparent text-slate-900 focus:outline-none flex-1 placeholder-slate-300 tracking-tight"
+                className="text-2xl sm:text-3xl font-extrabold bg-transparent text-slate-900 focus:outline-none flex-1 min-w-0 placeholder-slate-300 tracking-tight"
                 value={docTitle}
                 onChange={(e) => setDocTitle(e.target.value)}
                 placeholder="Untitled Page..."
@@ -1070,7 +1112,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
 
             {/* Notion Slash Command Ribbon & Block Inserters */}
-            <div className="relative flex items-center gap-1.5 bg-slate-50 px-4 py-2 border-b border-slate-200 overflow-x-auto text-xs">
+            <div className={`relative ${viewMode === 'original' ? 'hidden' : 'flex'} items-center gap-1.5 bg-slate-50 px-4 py-2 border-b border-slate-200 overflow-x-auto text-xs`}>
               <button
                 type="button"
                 onClick={() => setShowSlashMenu(!showSlashMenu)}
@@ -1214,7 +1256,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
 
             {/* Document Statistics Footer */}
-            <div className="flex items-center justify-between text-xs text-slate-500 px-6 py-2 border-b border-slate-100 font-mono bg-slate-50/40">
+            <div className={`${viewMode === 'original' ? 'hidden' : 'flex'} flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500 px-3 sm:px-6 py-2 border-b border-slate-100 font-mono bg-slate-50/40 whitespace-nowrap`}>
               <div className="flex items-center gap-3">
                 <span>{wordCount} words</span>
                 <span>•</span>
@@ -1224,7 +1266,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 text-emerald-600 font-bold">
+                <span className="hidden md:flex items-center gap-1 text-emerald-600 font-bold">
                   <CheckCircle2 className="w-3 h-3" />
                   <span>Direct Write Active</span>
                 </span>
@@ -1234,6 +1276,18 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
 
             {/* 3. Document Workspace Canvas: Direct-Write in Preview (Item 13) */}
             <div className="flex-1 overflow-hidden p-4 sm:p-6 flex gap-4 min-h-0 bg-slate-50/30">
+              {/* ORIGINAL: the uploaded PDF, untouched (pages, fonts, images, layout) */}
+              {viewMode === 'original' && pdfOriginal && (
+                <div className="flex-1 h-full min-h-0 flex flex-col gap-2">
+                  <p className="text-xs text-slate-600">
+                    The original file, exactly as uploaded. "Edit" works on an extracted text copy; the PDF itself is never changed.
+                  </p>
+                  <div className="flex-1 min-h-[60vh]">
+                    <FilePreview workspaceId={workspaceId} file={pdfOriginal} fill />
+                  </div>
+                </div>
+              )}
+
               {/* PREVIEW MODE: the document as a formatted, read-only page */}
               {viewMode === 'preview' && (
                 <article
@@ -1354,7 +1408,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
+          <div className="hidden lg:flex flex-1 flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
             <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
               <BookOpen className="w-8 h-8" />
             </div>
@@ -1382,7 +1436,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-slate-200 px-4 py-2.5 rounded-2xl text-xs font-bold border border-slate-800 transition active:scale-95"
               >
                 <Upload className="w-4 h-4 text-indigo-400" aria-hidden="true" />
-                <span>{isImporting ? 'Importing…' : 'Import Word, PDF or Markdown'}</span>
+                <span>{isImporting ? (importProgress < 100 ? `Uploading ${importProgress}%` : 'Importing…') : 'Import Word, PDF or Markdown'}</span>
               </button>
             </div>
           </div>

@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON, Uuid
 
@@ -134,6 +134,10 @@ class MeetingMessage(Base):
     sender_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     client_message_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    # The message this one replies to (same meeting). Kept as a real reference, not quoted text.
+    reply_to_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("meeting_messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.current_timestamp(), nullable=False, index=True
     )
@@ -186,6 +190,8 @@ class Notification(Base):
     __table_args__ = (
         # The same event never notifies the same person twice (reminders, retries, regeneration).
         UniqueConstraint("user_id", "dedupe_key", name="uq_notifications_user_key"),
+        # The bell lists a user's newest notifications: one index serves the filter and the order.
+        Index("ix_notifications_user_created", "user_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)

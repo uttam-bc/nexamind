@@ -312,7 +312,7 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
                 <p className="text-xs text-slate-500">Workspace members are notified and can join.</p>
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col xl:flex-row gap-2">
               <input
                 aria-label="Meeting title"
                 value={instantTitle}

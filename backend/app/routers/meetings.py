@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
@@ -123,19 +124,42 @@ async def meeting_messages(
     workspace_id: UUID,
     meeting_id: UUID,
     limit: int = Query(200, ge=1, le=500),
+    before: datetime | None = Query(None, description="Older page: messages created before this time"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[dict]:
     meeting = await meeting_service.get_meeting(db, workspace_id, meeting_id, current_user.id)
-    rows = (await db.execute(select(MeetingMessage).where(MeetingMessage.meeting_id == meeting.id)
-                             .order_by(MeetingMessage.created_at.desc(), MeetingMessage.id.desc()).limit(limit))).scalars().all()
-    return [serialize_message(m) for m in reversed(rows)]
+    query = select(MeetingMessage).where(MeetingMessage.meeting_id == meeting.id)
+    if before is not None:
+        query = query.where(MeetingMessage.created_at < before)
+    rows = list(reversed((await db.execute(
+        query.order_by(MeetingMessage.created_at.desc(), MeetingMessage.id.desc()).limit(limit))).scalars().all()))
+    parents = await reply_parents(db, rows)
+    return [serialize_message(m, parents.get(m.reply_to_id)) for m in rows]
 
 
-def serialize_message(m: MeetingMessage) -> dict:
-    return {"id": str(m.id), "sender_id": str(m.sender_id) if m.sender_id else None, "sender_name": m.sender_name,
-            "content": m.content, "client_message_id": m.client_message_id,
-            "created_at": notification_service.iso_utc(m.created_at)}
+async def reply_parents(db: AsyncSession, messages: list[MeetingMessage]) -> dict:
+    """The messages these reply to, in one query (they may be outside the loaded page)."""
+    ids = {m.reply_to_id for m in messages if m.reply_to_id}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(MeetingMessage).where(MeetingMessage.id.in_(ids)))).scalars().all()
+    return {m.id: m for m in rows}
+
+
+REPLY_EXCERPT_CHARS = 140
+
+
+def serialize_message(m: MeetingMessage, parent: MeetingMessage | None = None) -> dict:
+    out = {"id": str(m.id), "sender_id": str(m.sender_id) if m.sender_id else None, "sender_name": m.sender_name,
+           "content": m.content, "client_message_id": m.client_message_id,
+           "reply_to_id": str(m.reply_to_id) if m.reply_to_id else None, "reply_to": None,
+           "created_at": notification_service.iso_utc(m.created_at)}
+    if m.reply_to_id:
+        out["reply_to"] = ({"id": str(parent.id), "sender_name": parent.sender_name, "available": True,
+                            "excerpt": parent.content[:REPLY_EXCERPT_CHARS]}
+                           if parent else {"id": str(m.reply_to_id), "available": False})
+    return out
 
 
 # --- transcript -----------------------------------------------------------------------------

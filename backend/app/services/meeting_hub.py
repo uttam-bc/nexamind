@@ -1,8 +1,9 @@
 """Live meeting rooms: who is connected, their media state, and targeted WebRTC signaling.
 
-Each browser tab that joins a meeting is a *client* with its own id, so the same person can join
-from two devices. Signaling messages (offers, answers, ICE candidates) are delivered only to the
-client they are addressed to — never broadcast to the workspace.
+Each connection is a *client* with its own id, but a person is in a room only once: joining again
+(a refresh, a reconnect after a network drop, another tab or device) replaces their previous
+connection, which is told and closed. Signaling messages (offers, answers, ICE candidates) are
+delivered only to the client they are addressed to — never broadcast to the workspace.
 
 State is kept in this process. NexaMind runs one API instance (see docs/OPERATIONS.md); running
 several would need these rooms in Redis and sticky routing for the meeting sockets.
@@ -57,10 +58,21 @@ class Room:
     attendance: dict[str, str] = field(default_factory=dict)  # user_id -> name
 
 
+class RoomFull(Exception):
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"This meeting is full ({limit} participants).")
+        self.limit = limit
+
+
+REPLACED_CLOSE_CODE = 4409
+FULL_CLOSE_CODE = 4429
+
+
 class MeetingHub:
     def __init__(self) -> None:
         self.rooms: dict[UUID, Room] = {}
         self._lock = asyncio.Lock()
+        self.started_at = time.time()
 
     def room(self, meeting_id: UUID) -> Room:
         if meeting_id not in self.rooms:
@@ -80,16 +92,42 @@ class MeetingHub:
         return len(room.clients) if room else 0
 
     async def join(self, meeting_id: UUID, websocket: WebSocket, user_id: UUID, name: str, is_host: bool,
-                   mic: bool = True, cam: bool = True) -> Client:
+                   mic: bool = True, cam: bool = True, limit: int | None = None, announce: bool = True) -> Client:
+        """Add a connection; the same user's older connection is replaced. Raises RoomFull."""
         async with self._lock:
             room = self.room(meeting_id)
+            replaced = [c for c in room.clients.values() if c.user_id == user_id]
+            if limit is not None and len(room.clients) - len(replaced) >= limit:
+                raise RoomFull(limit)
+            for old in replaced:
+                room.clients.pop(old.client_id, None)
+                if room.screen_owner == old.client_id:
+                    room.screen_owner = None
             client = Client(uuid.uuid4().hex, websocket, user_id, name, is_host, mic=mic, cam=cam)
             room.clients[client.client_id] = client
             room.empty_since = None
             room.attendance[str(user_id)] = name
+        for old in replaced:
+            await self.broadcast(meeting_id, {"type": "participant_left", "client_id": old.client_id},
+                                 exclude=client.client_id)
+            await self._close(old, REPLACED_CLOSE_CODE, {"type": "replaced"}, "Joined from another tab or device")
+        if announce:
+            await self.announce(meeting_id, client)
+        return client
+
+    async def announce(self, meeting_id: UUID, client: Client) -> None:
+        """Tell the others someone joined. Sent after the newcomer's welcome, so offers they
+        receive in return always come from participants listed in that welcome."""
         await self.broadcast(meeting_id, {"type": "participant_joined", "participant": client.public()},
                              exclude=client.client_id)
-        return client
+
+    @staticmethod
+    async def _close(client: Client, code: int, message: dict, reason: str) -> None:
+        try:
+            await client.websocket.send_json(message)
+            await client.websocket.close(code=code, reason=reason)
+        except Exception:
+            pass  # already gone (that is often why it was replaced)
 
     async def leave(self, meeting_id: UUID, client_id: str) -> None:
         async with self._lock:
@@ -171,10 +209,13 @@ class MeetingHub:
                 pass
 
     def empty_for(self, meeting_id: UUID) -> float | None:
-        """Seconds the room has been empty (None if someone is connected; inf if never seen)."""
+        """Seconds the room has been empty (None if someone is connected).
+
+        A room this process hasn't seen yet (just after a restart or deploy) counts from the
+        process start: the participants are still reconnecting, not gone."""
         room = self.rooms.get(meeting_id)
         if room is None:
-            return float("inf")
+            return time.time() - self.started_at
         if room.clients:
             return None
         return time.time() - (room.empty_since or time.time())

@@ -370,7 +370,7 @@ export default function SoloChat({
       {/* Main Chat Workspace Frame */}
       <div className="flex-1 flex gap-3 md:gap-5 overflow-hidden min-h-0 pt-2">
         {/* 1. Left Sidebar: Direct Conversations List */}
-        <div className={`${mobileView === 'chat' ? 'hidden md:flex' : 'flex'} w-full md:w-64 lg:w-80 bg-white rounded-2xl border border-slate-200 p-3.5 flex-col shadow-xs flex-shrink-0`}>
+        <div className={`${mobileView === 'chat' ? 'hidden lg:flex' : 'flex'} w-full lg:w-64 xl:w-80 bg-white rounded-2xl border border-slate-200 p-3.5 flex-col shadow-xs flex-shrink-0`}>
           {/* Top Bar: Search & New Chat */}
           <div className="space-y-2.5 mb-3">
             <div className="flex items-center justify-between px-1">
@@ -473,13 +473,13 @@ export default function SoloChat({
         </div>
 
         {/* 2. Right Main Panel: Active 1-on-1 User Conversation */}
-        <div className={`${mobileView === 'list' ? 'hidden md:flex' : 'flex'} flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-xs flex-col h-full overflow-hidden min-h-0`}>
+        <div className={`${mobileView === 'list' ? 'hidden lg:flex' : 'flex'} flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-xs flex-col h-full overflow-hidden min-h-0`}>
           {activeChannel && activeParticipant ? (
             <>
               {/* Chat Header */}
               <div className="p-3.5 sm:p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
                 <div className="flex items-center gap-3 min-w-0">
-                  <button type="button" onClick={() => setMobileView('list')} className="md:hidden p-2 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Back to conversations">
+                  <button type="button" onClick={() => setMobileView('list')} className="lg:hidden p-2 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Back to conversations">
                     <ArrowLeft className="w-4 h-4" />
                   </button>
                   <div className="relative">

@@ -16,6 +16,7 @@ from app.services.upload_utils import (
     sanitize_filename,
     save_upload,
     upload_root,
+    verify_signature,
 )
 from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
@@ -32,7 +33,13 @@ async def upload_file(
     original_filename = sanitize_filename(file.filename, fallback="unnamed_file")
     target_path = upload_root() / "files" / str(workspace_id) / f"{file_uuid}{safe_extension(original_filename)}"
     file_size = await save_upload(file, target_path, get_settings().max_upload_mb * 1024 * 1024)
-    mime_type = safe_content_type(file.content_type)
+    try:
+        verified = verify_signature(target_path, original_filename)
+    except AuthError:
+        delete_stored_file(str(target_path))
+        raise
+    # Browsers often send application/octet-stream; the checked content decides for known types.
+    mime_type = verified or safe_content_type(file.content_type)
     stored_path = await storage.persist_upload(
         target_path, f"files/{workspace_id}/{target_path.name}", content_type=mime_type
     )

@@ -252,7 +252,7 @@ export default function WorkspaceSettings({
       {/* Main Admin Workspace */}
       <div className="flex-1 flex flex-col lg:flex-row gap-6 p-4 sm:p-6 overflow-hidden min-h-0 bg-slate-50/50">
         {/* Navigation Sidebar */}
-        <div className="w-full lg:w-64 bg-white rounded-2xl border border-slate-200 p-3 flex lg:flex-col gap-1.5 shadow-xs flex-shrink-0">
+        <div className="w-full lg:w-64 bg-white rounded-2xl border border-slate-200 p-3 flex lg:flex-col gap-1.5 shadow-xs flex-shrink-0 overflow-x-auto lg:overflow-visible whitespace-nowrap">
           <button
             onClick={() => setActiveTab('overview')}
             className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-bold transition w-full text-left ${

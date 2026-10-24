@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Sparkles,
   Upload,
+  ArrowLeft,
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
@@ -438,9 +439,9 @@ export default function CodeWorkspace({ workspaceId, repos = [], onRefreshRepos,
         }
       />
 
-      <div className="flex-1 flex gap-5 overflow-hidden min-h-0 pt-2">
-        {/* Repos Sidebar */}
-        <div className="w-72 bg-white border border-[#E2E8F0] p-4 rounded-2xl flex flex-col h-full flex-shrink-0 shadow-sm">
+      <div className="flex-1 flex gap-3 md:gap-5 overflow-hidden min-h-0 pt-2">
+        {/* Repos Sidebar (phones: the list or the open repository, not both) */}
+        <div className={`${selectedRepo ? 'hidden lg:flex' : 'flex'} w-full lg:w-60 xl:w-72 bg-white border border-[#E2E8F0] p-4 rounded-2xl flex-col h-full flex-shrink-0 shadow-sm`}>
           <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#E2E8F0]">
             <h3 className="font-bold text-xs uppercase tracking-wider text-slate-600">
               Repositories ({repos.length})
@@ -494,12 +495,15 @@ export default function CodeWorkspace({ workspaceId, repos = [], onRefreshRepos,
         </div>
 
         {/* Main Editor & VCS Canvas */}
-        <div className="flex-1 bg-white border border-[#E2E8F0] rounded-2xl flex flex-col h-full overflow-hidden shadow-sm">
+        <div className={`${selectedRepo ? 'flex' : 'hidden lg:flex'} flex-1 min-w-0 bg-white border border-[#E2E8F0] rounded-2xl flex-col h-full overflow-hidden shadow-sm`}>
           {selectedRepo ? (
             <div className="flex flex-col h-full space-y-3 p-4">
               {/* Header: Repo Name + Subtabs */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E2E8F0] pb-3">
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button type="button" onClick={() => setSelectedRepo(null)} className="lg:hidden p-1.5 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Back to repositories">
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
                   <div className="w-8 h-8 rounded-xl bg-indigo-50 text-[#4F46E5] flex items-center justify-center font-bold">
                     <Code2 className="w-4 h-4" />
                   </div>

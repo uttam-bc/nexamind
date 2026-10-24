@@ -112,6 +112,9 @@ class Settings(BaseSettings):
         "stun:stun1.l.google.com:19302",
     ]
     webrtc_turn_urls: Annotated[list[str], NoDecode] = []
+    # Meetings are a peer-to-peer mesh: every participant sends its video to every other one,
+    # so upload bandwidth and CPU grow with the number of people (see docs/OPERATIONS.md).
+    max_meeting_participants: int = 8
     webrtc_turn_username: str | None = None
     webrtc_turn_credential: str | None = None
 

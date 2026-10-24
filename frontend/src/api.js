@@ -36,6 +36,32 @@ export function setSavedWorkspaceId(id) {
   }
 }
 
+// Multipart upload with progress (fetch cannot report upload progress). Same auth and errors as request().
+function uploadWithProgress(path, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}${path}`);
+    const token = getAuthToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onerror = () => reject(new Error('Upload interrupted. Check your connection and try again.'));
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText || '{}');
+      } catch {
+        data = {};
+      }
+      if (xhr.status === 401 && token) window.dispatchEvent(new CustomEvent('nexamind:unauthorized'));
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(typeof data.detail === 'string' ? data.detail : `Upload failed (HTTP ${xhr.status})`));
+    };
+    xhr.send(formData);
+  });
+}
+
 // Identical GETs issued at the same moment (React StrictMode double effects, two components
 // loading the same list) share one network request.
 const inFlightGets = new Map();
@@ -327,17 +353,18 @@ export const api = {
   // Files
   listFiles: (wsId) => request(`/workspaces/${wsId}/files`),
   // Word/PDF/Markdown/text files are converted to document text on the server.
-  importDocument: (wsId, file, parentId = null) => {
+  importDocument: (wsId, file, parentId = null, onProgress = null) => {
     const formData = new FormData();
     formData.append('file', file);
     if (parentId) formData.append('parent_id', parentId);
-    return request(`/workspaces/${wsId}/documents/import`, { method: 'POST', body: formData });
+    return onProgress
+      ? uploadWithProgress(`/workspaces/${wsId}/documents/import`, formData, onProgress)
+      : request(`/workspaces/${wsId}/documents/import`, { method: 'POST', body: formData });
   },
-  uploadFile: (wsId, formData) =>
-    request(`/workspaces/${wsId}/files`, {
-      method: 'POST',
-      body: formData,
-    }),
+  uploadFile: (wsId, formData, onProgress = null) =>
+    onProgress
+      ? uploadWithProgress(`/workspaces/${wsId}/files`, formData, onProgress)
+      : request(`/workspaces/${wsId}/files`, { method: 'POST', body: formData }),
   downloadFile: async (wsId, fileId, filename) => {
     const res = await fetch(`${API_BASE}/workspaces/${wsId}/files/${fileId}/download`, {
       headers: { Authorization: `Bearer ${getAuthToken()}` },

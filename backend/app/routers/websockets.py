@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database
+from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -40,6 +41,9 @@ async def _receive_json(websocket: WebSocket) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+AUTH_TIMEOUT_CLOSE_CODE = 4408
+
+
 async def _authenticate(websocket: WebSocket, query_token: str | None) -> User | None:
     """Accept the socket, then authenticate.
 
@@ -51,8 +55,13 @@ async def _authenticate(websocket: WebSocket, query_token: str | None) -> User |
     if not token:
         try:
             first = await asyncio.wait_for(_receive_json(websocket), timeout=AUTH_TIMEOUT_SECONDS)
-        except (asyncio.TimeoutError, WebSocketDisconnect):
-            first = None
+        except asyncio.TimeoutError:
+            # The auth frame didn't arrive in time (slow or interrupted network): the client may
+            # retry. 1008 is kept for real authentication failures, which clients don't retry.
+            await websocket.close(code=AUTH_TIMEOUT_CLOSE_CODE, reason="Authentication timed out")
+            return None
+        except WebSocketDisconnect:
+            return None
         if first and first.get("type") == "auth":
             token = first.get("token")
     if not token or not isinstance(token, str):
@@ -212,18 +221,15 @@ async def workspace_events_websocket(
 
 
 MAX_MEETING_CHAT_CHARS = 2000
+MEETING_IDLE_TIMEOUT_SECONDS = 90
 
 
 @router.websocket("/workspaces/{workspace_id}/meetings/{meeting_id}")
 async def meeting_websocket(websocket: WebSocket, workspace_id: UUID, meeting_id: UUID, token: str | None = Query(None)) -> None:
     """One connection per browser tab in a meeting: targeted signaling, media state, chat."""
-    from sqlalchemy import select as sa_select
-    from sqlalchemy.exc import IntegrityError
-
-    from app.models import MeetingMessage
     from app.routers.meetings import serialize_message
     from app.services import meeting_service
-    from app.services.meeting_hub import meeting_hub
+    from app.services.meeting_hub import FULL_CLOSE_CODE, RoomFull, meeting_hub
 
     user = await _authenticate(websocket, token)
     if not user:
@@ -238,7 +244,12 @@ async def meeting_websocket(websocket: WebSocket, workspace_id: UUID, meeting_id
         await websocket.close(code=4404 if exc.status_code == 404 else 4410, reason=exc.message[:120])
         return
 
-    client = await meeting_hub.join(meeting_id, websocket, user.id, user.name, is_host)
+    try:
+        client = await meeting_hub.join(meeting_id, websocket, user.id, user.name, is_host,
+                                        limit=get_settings().max_meeting_participants, announce=False)
+    except RoomFull as exc:
+        await websocket.close(code=FULL_CLOSE_CODE, reason=str(exc)[:120])
+        return
     room = meeting_hub.room(meeting_id)
     try:
         await websocket.send_json({
@@ -248,8 +259,15 @@ async def meeting_websocket(websocket: WebSocket, workspace_id: UUID, meeting_id
             "screen_owner": room.screen_owner,
             "meeting": {**meeting_info, "participant_count": meeting_hub.connected_count(meeting_id)},
         })
+        await meeting_hub.announce(meeting_id, client)
         while True:
-            payload = await _receive_json(websocket)
+            try:
+                # Clients ping every 25 s; silence means a dead (half-open) connection, which
+                # would otherwise stay in the room as a ghost participant.
+                payload = await asyncio.wait_for(_receive_json(websocket), timeout=MEETING_IDLE_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                await websocket.close(code=4408, reason="No activity")
+                break
             if payload is None:
                 continue
             kind = payload.get("type")
@@ -281,19 +299,14 @@ async def meeting_websocket(websocket: WebSocket, workspace_id: UUID, meeting_id
                 try:
                     rate_limiter.check(f"meeting-chat:{user.id}", limit=20, window_seconds=10)
                 except HTTPException:
-                    await websocket.send_json({"type": "error", "code": "rate_limited", "detail": "You are sending messages too quickly."})
+                    await websocket.send_json({"type": "error", "code": "rate_limited", "client_message_id": message_id,
+                                               "detail": "You are sending messages too quickly. Wait a moment and retry."})
                     continue
                 async with database.AsyncSessionLocal() as db:
-                    message = MeetingMessage(meeting_id=meeting_id, sender_id=user.id, sender_name=user.name,
-                                             content=content, client_message_id=message_id)
-                    db.add(message)
-                    try:
-                        await db.commit()
-                    except IntegrityError:  # resent after a reconnect: already stored
-                        await db.rollback()
-                        message = (await db.execute(sa_select(MeetingMessage).where(
-                            MeetingMessage.meeting_id == meeting_id, MeetingMessage.client_message_id == message_id))).scalar_one()
-                    out = serialize_message(message)
+                    message, parent = await meeting_service.store_chat_message(
+                        db, meeting_id, user, content, message_id, payload.get("reply_to_id"))
+                    await db.commit()
+                    out = serialize_message(message, parent)
                 await meeting_hub.broadcast(meeting_id, {"type": "chat_message", "message": out})
             elif kind == "transcription":
                 if not client.is_host:

@@ -95,6 +95,33 @@ notifications themselves are in the database and are unaffected. Background jobs
 one instance only (`RUN_BACKGROUND_JOBS=false` on the others); their notifications are
 de-duplicated, so an overlap sends nothing twice.
 
+## 6a. Meeting capacity
+
+Meetings are **peer-to-peer WebRTC in a full mesh** (no SFU/MCU, no hosted video provider). The API
+only relays signaling over WebSockets; media goes browser-to-browser (via TURN when configured).
+Every participant encodes and uploads one copy of its camera (and screen, when presenting) per
+other participant, so upload bandwidth and CPU grow linearly with the room size.
+
+- **Enforced limit:** `MAX_MEETING_PARTICIPANTS` (default 8), checked on the server when a
+  connection joins; the 9th person sees “This meeting is full”. A person rejoining (refresh, new
+  device, network drop) replaces their old connection and is never counted twice.
+- **Bandwidth budget per participant:** about 3 Mbit/s upload in total, split between viewers
+  (`encodingPlan` in `frontend/src/lib/meetingClient.js`): with 8 people each camera gets roughly
+  430 kbit/s; while someone presents, cameras drop to thumbnails and the screen gets ~70% of the
+  presenter's budget (1080p at up to 15 fps, resolution kept for legibility).
+- **Verified:** 5 participants at once (5 browser tabs on one machine) with video in every
+  direction, a 6th refused by the limit (limit set to 5 for the test), screen sharing to 2 viewers
+  at 1920×1080/~15 fps, and
+  reconnects after refreshes, a second device, an 80–90 s network black hole and server restarts.
+  Media quality for 8 real devices on real networks has **not** been measured: the test tabs shared
+  one CPU and background tabs are throttled by the browser.
+- **Beyond ~8:** a mesh does not scale (each of N people sends N−1 copies). Larger meetings need an
+  SFU (for example LiveKit or mediasoup, self-hosted or managed): each participant then uploads one
+  copy and the server forwards it. That is an infrastructure project (a media server with public
+  UDP ports or a paid plan), not a setting.
+- Live rooms are in the API process (see §6): run one API instance, or route a meeting's sockets to
+  one instance.
+
 ## 7. Monitoring (NX-REL-006)
 
 Set `SENTRY_DSN` to send unhandled errors to Sentry (or a compatible service). Authorization

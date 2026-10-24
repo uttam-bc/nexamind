@@ -115,7 +115,14 @@ class FakePC {
 }
 
 let MeetingClient;
-const flush = () => new Promise((r) => setTimeout(r, 0));
+const flush = async () => {
+  for (let i = 0; i < 30; i += 1) await Promise.resolve();
+};
+const recv = async (ws, msg) => {
+  ws.receive(msg);
+  await flush();
+  await flush();
+};
 
 beforeEach(async () => {
   sockets.length = 0;
@@ -129,10 +136,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function joined(client, participants = []) {
+async function joined(client, participants = []) {
   client.connect();
   const ws = sockets[sockets.length - 1];
-  ws.receive({ type: 'welcome', client_id: 'me', participants: [{ client_id: 'me', name: 'Me' }, ...participants], screen_owner: null, meeting: { id: 'm1' } });
+  await recv(ws, { type: 'welcome', client_id: 'me', participants: [{ client_id: 'me', user_id: 'u-me', name: 'Me' }, ...participants], screen_owner: null, meeting: { id: 'm1' } });
   return ws;
 }
 
@@ -141,10 +148,10 @@ describe('MeetingClient signaling', () => {
     const mic = new FakeTrack('audio');
     const cam = new FakeTrack('video');
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream([mic, cam]) });
-    const ws = joined(client);
+    const ws = await joined(client);
     expect(ws.frames('state')[0]).toMatchObject({ mic: true, cam: true });
 
-    ws.receive({ type: 'participant_joined', participant: { client_id: 'p2', name: 'Priya', mic: true, cam: true } });
+    await recv(ws, { type: 'participant_joined', participant: { client_id: 'p2', name: 'Priya', mic: true, cam: true } });
     await flush();
     const pc = peers[0];
     expect(pc.transceivers.map((t) => t.kind)).toEqual(['audio', 'video', 'video']);
@@ -158,13 +165,13 @@ describe('MeetingClient signaling', () => {
 
   it('answers as the newcomer and queues ICE candidates until the offer arrives', async () => {
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream([new FakeTrack('audio')]) });
-    const ws = joined(client, [{ client_id: 'host', name: 'Host' }]);
+    const ws = await joined(client, [{ client_id: 'host', name: 'Host' }]);
     expect(peers.length).toBe(0); // existing participants make the offer, not us
 
-    ws.receive({ type: 'signal', from: 'host', data: { kind: 'offer', sdp: { type: 'offer', sdp: 'x' } } });
+    await recv(ws, { type: 'signal', from: 'host', data: { kind: 'offer', sdp: { type: 'offer', sdp: 'x' } } });
     await flush();
     const pc = peers[0];
-    ws.receive({ type: 'signal', from: 'host', data: { kind: 'candidate', candidate: { candidate: 'c1' } } });
+    await recv(ws, { type: 'signal', from: 'host', data: { kind: 'candidate', candidate: { candidate: 'c1' } } });
     await flush();
     expect(pc.candidates).toEqual([{ candidate: 'c1' }]);
     expect(ws.frames('signal').at(-1)).toMatchObject({ to: 'host', data: { kind: 'answer' } });
@@ -173,8 +180,8 @@ describe('MeetingClient signaling', () => {
 
   it('restarts ICE when a connection fails', async () => {
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
-    const ws = joined(client);
-    ws.receive({ type: 'participant_joined', participant: { client_id: 'p2', name: 'P' } });
+    const ws = await joined(client);
+    await recv(ws, { type: 'participant_joined', participant: { client_id: 'p2', name: 'P' } });
     await flush();
     const pc = peers[0];
     pc.connectionState = 'failed';
@@ -186,10 +193,10 @@ describe('MeetingClient signaling', () => {
 
   it('removes a participant who leaves and closes their connection', async () => {
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
-    const ws = joined(client);
-    ws.receive({ type: 'participant_joined', participant: { client_id: 'p2', name: 'P' } });
+    const ws = await joined(client);
+    await recv(ws, { type: 'participant_joined', participant: { client_id: 'p2', name: 'P' } });
     await flush();
-    ws.receive({ type: 'participant_left', client_id: 'p2' });
+    await recv(ws, { type: 'participant_left', client_id: 'p2' });
     expect(peers[0].closed).toBe(true);
     expect(client.participants.has('p2')).toBe(false);
   });
@@ -198,14 +205,14 @@ describe('MeetingClient signaling', () => {
     const screenTrack = new FakeTrack('video');
     globalThis.navigator.mediaDevices = { getDisplayMedia: vi.fn().mockResolvedValue(new FakeStream([screenTrack])) };
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
-    const ws = joined(client);
-    ws.receive({ type: 'participant_joined', participant: { client_id: 'p2', name: 'P' } });
+    const ws = await joined(client);
+    await recv(ws, { type: 'participant_joined', participant: { client_id: 'p2', name: 'P' } });
     await flush();
 
     await client.startScreenShare();
     expect(ws.frames('screen_share').at(-1)).toEqual({ type: 'screen_share', active: true });
     expect(peers[0].transceivers[2].sender.track).toBe(null); // not before it's granted
-    ws.receive({ type: 'screen_share', client_id: 'me', active: true });
+    await recv(ws, { type: 'screen_share', client_id: 'me', active: true });
     await flush();
     expect(peers[0].transceivers[2].sender.track).toBe(screenTrack);
     expect(client.presenting).toBe(true);
@@ -221,9 +228,9 @@ describe('MeetingClient signaling', () => {
     const screenTrack = new FakeTrack('video');
     globalThis.navigator.mediaDevices = { getDisplayMedia: vi.fn().mockResolvedValue(new FakeStream([screenTrack])) };
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
-    const ws = joined(client);
+    const ws = await joined(client);
     await client.startScreenShare();
-    ws.receive({ type: 'error', code: 'screen_busy', detail: 'Priya is already presenting.' });
+    await recv(ws, { type: 'error', code: 'screen_busy', detail: 'Priya is already presenting.' });
     expect(screenTrack.stopped).toBe(true);
     expect(client.presenting).toBe(false);
   });
@@ -232,7 +239,7 @@ describe('MeetingClient signaling', () => {
     vi.useFakeTimers();
     const mic = new FakeTrack('audio');
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream([mic]) });
-    const ws = joined(client);
+    const ws = await joined(client);
     ws.close(1006);
     expect(client.status).toBe('reconnecting');
     vi.advanceTimersByTime(600);
@@ -240,9 +247,9 @@ describe('MeetingClient signaling', () => {
     expect(mic.stopped).toBe(false); // media survives a reconnect
 
     const ws2 = sockets[1];
-    ws2.receive({ type: 'welcome', client_id: 'me2', participants: [], screen_owner: null, meeting: { id: 'm1' } });
+    await recv(ws2, { type: 'welcome', client_id: 'me2', participants: [], screen_owner: null, meeting: { id: 'm1' } });
     expect(client.status).toBe('connected');
-    ws2.receive({ type: 'meeting_ended', ended_by: 'Host' });
+    await recv(ws2, { type: 'meeting_ended', ended_by: 'Host' });
     expect(client.status).toBe('ended');
     expect(client.endReason).toBe('ended');
     expect(mic.stopped).toBe(true); // every track is released
@@ -251,10 +258,43 @@ describe('MeetingClient signaling', () => {
     expect(sockets.length).toBe(2);
   });
 
-  it('leave() stops tracks and tells the server', () => {
+  it('shows a person once even when their new connection arrives before the old one leaves', async () => {
+    const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
+    const ws = await joined(client, [{ client_id: 'old', user_id: 'u-jason', name: 'Jason' }]);
+    await recv(ws, { type: 'participant_joined', participant: { client_id: 'new', user_id: 'u-jason', name: 'Jason' } });
+    expect([...client.participants.values()].map((p) => p.name)).toEqual(['Jason']);
+    expect(client.participants.has('new')).toBe(true);
+    // My own other connection is never shown as someone else.
+    await recv(ws, { type: 'participant_joined', participant: { client_id: 'me-tab2', user_id: 'u-me', name: 'Me' } });
+    expect(client.participants.has('me-tab2')).toBe(false);
+  });
+
+  it('ignores signals and state from connections that are not in the room', async () => {
+    const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
+    const ws = await joined(client);
+    await recv(ws, { type: 'signal', from: 'ghost', from_name: 'Ghost', data: { kind: 'offer', sdp: { type: 'offer', sdp: 'x' } } });
+    await recv(ws, { type: 'participant_state', participant: { client_id: 'ghost', name: 'Ghost', mic: false } });
+    expect(client.participants.size).toBe(0);
+    expect(peers.length).toBe(0);
+  });
+
+  it('does not reconnect when replaced by another tab or when the meeting is full', async () => {
+    for (const [code, reason] of [[4409, 'replaced'], [4429, 'full']]) {
+      const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream() });
+      const ws = await joined(client);
+      const count = sockets.length;
+      ws.close(code);
+      expect(client.status).toBe('ended');
+      expect(client.endReason).toBe(reason);
+      await new Promise((r) => setTimeout(r, 700));
+      expect(sockets.length).toBe(count);
+    }
+  });
+
+  it('leave() stops tracks and tells the server', async () => {
     const cam = new FakeTrack('video');
     const client = new MeetingClient({ workspaceId: 'w', meetingId: 'm1', localStream: new FakeStream([cam]) });
-    const ws = joined(client);
+    const ws = await joined(client);
     client.leave();
     expect(ws.frames('leave').length).toBe(1);
     expect(cam.stopped).toBe(true);
@@ -284,7 +324,7 @@ describe('helpers', () => {
     openDeepLink({ tab: 'meetings', meeting_id: 'm1' });
     const got = [];
     const stop = onDeepLink('meetings', (l) => got.push(l.meeting_id));
-    await flush();
+    await new Promise((r) => setTimeout(r, 0));
     openDeepLink({ tab: 'projects', task_id: 't' });
     openDeepLink({ tab: 'meetings', meeting_id: 'm2' });
     stop();
@@ -292,10 +332,26 @@ describe('helpers', () => {
   });
 
   it('merges notifications newest first', async () => {
-    const { mergeNotifications, timeAgo } = await import('../components/NotificationBell');
+    const { mergeNotifications, timeAgo } = await import('./notifications');
     const list = mergeNotifications([{ id: 'a', created_at: '2026-10-24T10:00:00Z' }], [{ id: 'b', created_at: '2026-10-24T11:00:00Z' }, { id: 'a', created_at: '2026-10-24T10:00:00Z', read_at: 'x' }]);
     expect(list.map((n) => n.id)).toEqual(['b', 'a']);
     expect(list[1].read_at).toBe('x');
     expect(timeAgo('2026-10-24T10:00:00Z', Date.parse('2026-10-24T10:05:00Z'))).toBe('5 min ago');
+  });
+});
+
+describe('encoding plan', () => {
+  it('splits the upload between viewers and favours the shared screen', async () => {
+    const { encodingPlan } = await import('./meetingClient');
+    const two = encodingPlan(2, false, false);
+    const seven = encodingPlan(7, false, false);
+    expect(two.camera.maxBitrate).toBeGreaterThan(seven.camera.maxBitrate);
+    expect(seven.camera.maxBitrate).toBeGreaterThanOrEqual(150_000);
+    expect(seven.camera.scaleResolutionDownBy).toBe(2);
+    const presenting = encodingPlan(4, true, true);
+    expect(presenting.screen.maxBitrate).toBeGreaterThan(presenting.camera.maxBitrate * 4);
+    expect(presenting.camera.scaleResolutionDownBy).toBe(4);
+    expect(presenting.screen.maxFramerate).toBe(15);
+    expect(encodingPlan(1, true, true).screen.maxBitrate).toBeLessThanOrEqual(2_500_000);
   });
 });

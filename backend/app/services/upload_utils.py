@@ -76,6 +76,36 @@ async def save_upload(file: UploadFile, target_path: Path, max_bytes: int) -> in
     return written
 
 
+# File signatures of the formats the app shows inline. A file named .pdf/.jpg/... must really be
+# one, so a renamed or truncated upload is refused with a clear message instead of a broken preview.
+SIGNATURES = {
+    ".pdf": ("application/pdf", lambda h: h.startswith(b"%PDF-")),
+    ".png": ("image/png", lambda h: h.startswith(bytes.fromhex("89504e470d0a1a0a"))),
+    ".jpg": ("image/jpeg", lambda h: h.startswith(bytes.fromhex("ffd8ff"))),
+    ".jpeg": ("image/jpeg", lambda h: h.startswith(bytes.fromhex("ffd8ff"))),
+    ".gif": ("image/gif", lambda h: h[:6] in (b"GIF87a", b"GIF89a")),
+    ".webp": ("image/webp", lambda h: h[:4] == b"RIFF" and h[8:12] == b"WEBP"),
+    ".bmp": ("image/bmp", lambda h: h.startswith(b"BM")),
+}
+
+
+def verify_signature(path: Path, filename: str) -> str | None:
+    """The real content type for formats we render, or None for others. Raises on a mismatch."""
+    expected = SIGNATURES.get(Path(filename).suffix.lower())
+    if expected is None:
+        return None
+    with open(path, "rb") as handle:
+        head = handle.read(16)
+    mime, matches = expected
+    if not matches(head):
+        raise AuthError(
+            f"“{filename}” isn't a valid {Path(filename).suffix.lower()[1:].upper()} file "
+            "(it may be damaged, incomplete or renamed). Nothing was saved.",
+            status_code=415,
+        )
+    return mime
+
+
 def delete_stored_file(path: str | None) -> None:
     """Remove a stored upload (local file inside the upload directory, or an object in the bucket)."""
     from app.services import storage
