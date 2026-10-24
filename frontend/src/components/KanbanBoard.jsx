@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -27,6 +27,7 @@ import { api } from '../api';
 
 import FeatureHeader from './FeatureHeader';
 import { notify, confirmDialog } from '../context/ToastContext';
+import { onDeepLink } from '../lib/deepLink';
 
 export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack }) {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -62,6 +63,20 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
     { id: 'review', label: 'Review', color: 'border-violet-500/50', badgeColor: 'bg-violet-500/10 text-violet-500' },
     { id: 'done', label: 'Done', color: 'border-emerald-500/50', badgeColor: 'bg-emerald-500/10 text-emerald-400' },
   ];
+
+  // A notification about a task opens it (once the task list has it).
+  const linkedTaskId = useRef(null);
+  useEffect(() => onDeepLink('projects', (link) => {
+    linkedTaskId.current = link.task_id;
+    onRefreshTasks?.();
+  }), [onRefreshTasks]);
+  useEffect(() => {
+    const task = linkedTaskId.current && tasks?.find((t) => t.id === linkedTaskId.current);
+    if (task) {
+      linkedTaskId.current = null;
+      handleOpenTaskDetail(task);
+    }
+  }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenTaskDetail = (task) => {
     setSelectedTask(task);

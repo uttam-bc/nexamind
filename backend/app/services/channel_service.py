@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -266,6 +267,7 @@ async def post_message(
     await db.refresh(message)
 
     await _set_read_state(db, channel.id, user.id, message.id)
+    await _notify_message(db, channel, message, user)
 
     return {
         "id": message.id,
@@ -342,6 +344,44 @@ async def delete_channel(db: AsyncSession, workspace_id: UUID, channel_id: UUID,
         await db.execute(delete(AiMemory).where(AiMemory.source_type == "chat", AiMemory.source_id.in_(message_ids)))
     await db.delete(channel)
     await db.flush()
+
+
+MENTION = re.compile(r"(?<![\w@])@([a-z0-9_\-]{2,50})", re.IGNORECASE)
+
+
+async def _can_read(db: AsyncSession, channel: Channel, user_id: UUID) -> bool:
+    if channel.is_direct or channel.is_private:
+        return await _is_channel_member(db, channel.id, user_id)
+    return bool(await get_workspace_membership(db, channel.workspace_id, user_id))
+
+
+async def _notify_message(db: AsyncSession, channel: Channel, message: Message, sender: User) -> None:
+    """Direct messages notify the other participants; @mentions notify people who can read the channel."""
+    from app.services import notification_service
+
+    workspace = await db.get(Workspace, channel.workspace_id)
+    tab = "solo_chat" if workspace and workspace.type == WorkspaceType.PERSONAL else "channels"
+    link = {"tab": tab, "workspace_id": str(channel.workspace_id), "channel_id": str(channel.id),
+            "message_id": str(message.id)}
+    preview = message.content[:140]
+    if channel.is_direct:
+        others = (await db.execute(select(ChannelMember.user_id).where(
+            ChannelMember.channel_id == channel.id, ChannelMember.user_id != sender.id))).scalars().all()
+        await notification_service.notify_many(
+            db, others, kind="direct_message", category="messages", workspace_id=channel.workspace_id,
+            title=f"New message from {sender.name}", body=preview, link=link,
+            dedupe_key=f"message:{message.id}", actor_id=sender.id,
+        )
+        return
+    for username in {m.lower() for m in MENTION.findall(message.content)}:
+        mentioned = await get_user_by_username(db, username)
+        if mentioned is None or mentioned.id == sender.id or not await _can_read(db, channel, mentioned.id):
+            continue
+        await notification_service.notify(
+            db, mentioned.id, kind="mention", category="messages", workspace_id=channel.workspace_id,
+            title=f"{sender.name} mentioned you in #{channel.name}", body=preview, link=link,
+            dedupe_key=f"mention:{message.id}", actor_id=sender.id,
+        )
 
 
 async def toggle_reaction(

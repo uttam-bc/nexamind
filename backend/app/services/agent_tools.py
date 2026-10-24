@@ -4,7 +4,7 @@ import math
 import json
 from pathlib import Path
 from datetime import date as date_type
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -612,9 +612,12 @@ async def create_calendar_event_tool(
     if not title.strip():
         raise ToolError("An event title is required")
     try:
-        date_type.fromisoformat(event_date)
+        day = date_type.fromisoformat(event_date)
     except (TypeError, ValueError) as exc:
         raise ToolError(f"'{event_date}' is not a valid YYYY-MM-DD date") from exc
+    # One day of slack for time zones ahead of the server.
+    if day < date_type.today() - timedelta(days=1):
+        raise ToolError(f"{event_date} is in the past; give a future date")
     try:
         e_type = CalendarEventType(event_type.lower())
     except ValueError:

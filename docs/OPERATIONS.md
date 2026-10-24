@@ -15,7 +15,8 @@ verify on a staging copy first.
 | `WEBRTC_TURN_URLS`, `WEBRTC_TURN_USERNAME`, `WEBRTC_TURN_CREDENTIAL` | Video calls on corporate/mobile networks | STUN only: calls fail behind many NATs and firewalls. Use a managed TURN service. |
 | `STORAGE_BACKEND=s3` + `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Uploads that survive deploys | Uploads live on the container disk and are **lost on every deploy** (see §4). |
 | `SENTRY_DSN` | Error reports | Errors only appear in Render's logs. |
-| `GEMINI_API_KEY` / `GROQ_API_KEY` | Server-wide AI | Users can still add their own Gemini key; without any key the copilot runs explicit commands only. |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` | Server-wide AI; meeting transcription (Groq Whisper first, Gemini audio as fallback) and drafting meeting minutes | Users can still add their own Gemini key; without any key the copilot runs explicit commands only, meetings fall back to the browser's speech recognition (Chrome/Edge), and minutes list only action items announced as "Action item: …". |
+| `RUN_BACKGROUND_JOBS` (default on) | Meeting reminders (15 min before), task due-soon/overdue notices, ending meetings left empty for 10 minutes, drafting minutes after a meeting | None of those happen; minutes are drafted only when a host presses Regenerate. |
 
 Never commit these values. `ENABLE_DEV_AUTH` and `DEBUG` are refused at startup outside
 development/test.
@@ -85,6 +86,14 @@ staging (upload, download, delete, and a recording's transcription).
 Rate limits and real-time state are per process. Before running more than one API instance, set
 `REDIS_URL` (real-time fan-out and presence move to Redis) and put rate limiting in front of the
 API (Cloudflare rules or a shared limiter), because the built-in limiter does not share counts.
+
+Live meeting rooms (`services/meeting_hub.py`: who is connected, signaling, the presenter slot)
+are held in the API process and are **not** shared through Redis. With more than one instance,
+route every connection for a meeting to the same instance (sticky sessions on the meeting id), or
+participants on different instances will not see each other. Meetings, transcripts, chat and
+notifications themselves are in the database and are unaffected. Background jobs should run on
+one instance only (`RUN_BACKGROUND_JOBS=false` on the others); their notifications are
+de-duplicated, so an overlap sends nothing twice.
 
 ## 7. Monitoring (NX-REL-006)
 

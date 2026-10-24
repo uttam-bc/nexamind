@@ -18,6 +18,8 @@ from app.routers import (
     documents,
     files,
     finance,
+    meetings,
+    notifications,
     projects,
     reports,
     sessions,
@@ -26,6 +28,7 @@ from app.routers import (
     workspaces,
 )
 from app.security import SecurityHeadersMiddleware
+from app.services import jobs
 from app.services.auth_service import AuthError
 from app.services.session_service import resume_interrupted_sessions
 from app.services.websocket_manager import ws_manager
@@ -67,7 +70,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await resume_interrupted_sessions()
         except Exception as exc:
             logger.warning("Could not resume interrupted recordings: %s", exc)
+        jobs.start()  # meeting reminders, task deadlines, ending abandoned meetings
     yield
+    await jobs.stop()
     await ws_manager.stop()
 
 
@@ -109,7 +114,8 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}
 
 
-for module in (auth, contact, workspaces, documents, projects, files, finance, channels, websockets, sessions,
+for module in (auth, contact, notifications, meetings, workspaces, documents, projects, files, finance, channels, websockets, sessions,
                ai_agent, reports, video, calendar):
     app.include_router(module.router)
 app.include_router(ai_agent.global_ai_router)
+app.include_router(meetings.mom_router)

@@ -68,6 +68,8 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._channel_connections: dict[UUID, set[WebSocket]] = defaultdict(set)
         self._workspace_connections: dict[UUID, set[WebSocket]] = defaultdict(set)
+        # Personal stream (notifications), one entry per open tab/device of the user.
+        self._user_connections: dict[UUID, set[WebSocket]] = defaultdict(set)
         self.state = SharedState()
         self._redis = None
         self._listener: asyncio.Task | None = None
@@ -107,6 +109,8 @@ class ConnectionManager:
                     target = UUID(envelope["id"])
                     if envelope["scope"] == "channel":
                         await self._deliver(self._channel_connections, target, envelope["payload"])
+                    elif envelope["scope"] == "user":
+                        await self._deliver(self._user_connections, target, envelope["payload"])
                     else:
                         await self._deliver(self._workspace_connections, target, envelope["payload"])
                 except Exception as exc:  # keep the listener alive on malformed events
@@ -144,6 +148,12 @@ class ConnectionManager:
     def disconnect_workspace(self, workspace_id: UUID, websocket: WebSocket) -> None:
         self._discard(self._workspace_connections, workspace_id, websocket)
 
+    def add_user(self, user_id: UUID, websocket: WebSocket) -> None:
+        self._user_connections[user_id].add(websocket)
+
+    def disconnect_user(self, user_id: UUID, websocket: WebSocket) -> None:
+        self._discard(self._user_connections, user_id, websocket)
+
     @staticmethod
     def _discard(registry: dict[UUID, set[WebSocket]], key: UUID, websocket: WebSocket) -> None:
         connections = registry.get(key)
@@ -160,6 +170,9 @@ class ConnectionManager:
 
     async def broadcast_to_workspace(self, workspace_id: UUID, event: dict) -> None:
         await self._publish("workspace", workspace_id, event, self._workspace_connections)
+
+    async def send_to_user(self, user_id: UUID, event: dict) -> None:
+        await self._publish("user", user_id, event, self._user_connections)
 
     async def _publish(self, scope: str, target: UUID, payload: dict, registry: dict[UUID, set[WebSocket]]) -> None:
         if self._redis is not None:

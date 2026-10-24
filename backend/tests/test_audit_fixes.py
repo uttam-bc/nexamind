@@ -242,10 +242,12 @@ async def test_sessions_reports_and_video_work_on_migrated_sqlite(migrated_clien
     report = await client.post(f"/workspaces/{wid}/reports/generate", headers=headers,
                                json={"title": "Weekly", "session_ids": [session.json()["id"]]})
     assert report.status_code == 201, report.text
-    room = await client.post(f"/workspaces/{wid}/video/rooms", headers=headers, json={"name": "Sync"})
-    assert room.status_code == 201, room.text
-    ended = await client.post(f"/workspaces/{wid}/video/rooms/{room.json()['room_id']}/end", headers=headers, json={"notes": "done"})
+    meeting = await client.post(f"/workspaces/{wid}/meetings/instant", headers=headers, json={"title": "Sync"})
+    assert meeting.status_code == 201, meeting.text
+    ended = await client.post(f"/workspaces/{wid}/meetings/{meeting.json()['id']}/end", headers=headers, json={"scope": "all"})
     assert ended.status_code == 200, ended.text
+    mom = await client.get(f"/workspaces/{wid}/sessions/{ended.json()['session_id']}/mom", headers=headers)
+    assert mom.status_code == 200 and mom.json()["mom_status"] == "draft"
 
     # Server-side defaults must work for rows inserted without explicit timestamps.
     async with client.engine.begin() as conn:

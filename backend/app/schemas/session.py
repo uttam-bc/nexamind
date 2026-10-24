@@ -51,6 +51,8 @@ class SessionResponse(BaseModel):
     action_items: list[str] | None = None
     status: SessionStatus
     error_message: str | None = None
+    meeting_id: UUID | None = None
+    mom_status: str | None = None
     created_by: UUID
     created_at: datetime
     updated_at: datetime

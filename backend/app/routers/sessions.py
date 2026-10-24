@@ -25,6 +25,7 @@ from app.services.session_service import (
     update_session,
     upload_session_file,
 )
+from app.services.auth_service import AuthError
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/sessions", tags=["sessions"])
@@ -116,22 +117,19 @@ async def generate_session_mom(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> SessionResponse:
-    from app.services.ai_service import summarize_meeting_transcript
+    """Redraft the minutes from the transcript (same grounded generator and review rules as meetings)."""
+    from app.services import mom_service
+
     session = await get_session(db, workspace_id, session_id, current_user.id)
-    transcript = session.transcript or ""
-    summary_md, action_items = await summarize_meeting_transcript(transcript, title=session.title)
-    updated_session = await update_session(
-        db,
-        workspace_id,
-        session_id,
-        current_user.id,
-        SessionUpdate(ai_summary=summary_md, action_items=action_items),
-    )
-    session_data = SessionResponse.model_validate(updated_session).model_dump(mode="json")
-    await ws_manager.broadcast_to_workspace(
-        workspace_id,
-        {"event": "session_updated", "workspace_id": str(workspace_id), "data": session_data},
-    )
+    if not await mom_service.can_review(db, session, current_user.id):
+        raise AuthError("Only the organizer or a workspace admin can regenerate the minutes", status_code=403)
+    updated_session = await mom_service.generate_mom_for_session(db, session.id)
+    if not updated_session.meeting_id:  # meeting minutes may be invite-only: not broadcast to everyone
+        session_data = SessionResponse.model_validate(updated_session).model_dump(mode="json")
+        await ws_manager.broadcast_to_workspace(
+            workspace_id,
+            {"event": "session_updated", "workspace_id": str(workspace_id), "data": session_data},
+        )
     return SessionResponse.model_validate(updated_session)
 
 

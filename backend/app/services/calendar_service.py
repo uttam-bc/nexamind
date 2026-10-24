@@ -1,3 +1,4 @@
+import re
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -150,6 +151,8 @@ async def delete_calendar_event(
 ) -> None:
     """Deletes a calendar event."""
     event = await get_calendar_event(db, workspace_id, event_id, user_id)
+    if event.meeting_id:
+        raise AuthError("This is a scheduled meeting. Cancel it from Meetings so invitees are told.", status_code=409)
     await require_author_or_manager(db, event.workspace_id, user_id, event.user_id)
     await db.delete(event)
     await db.flush()
@@ -204,6 +207,7 @@ async def detect_ai_reminders_from_context(
     # 3. LLM extraction when a provider is configured
     today_str = date.today().isoformat()
     combined_context = "\n---\n".join(c["text"] for c in context_chunks[:5])
+    normalized_context = re.sub(r"\s+", " ", combined_context).lower()
     prompt = (
         f"Today is {today_str}. Find deadlines, scheduled meetings, review dates, and milestones that are "
         "explicitly mentioned in the workspace content below. Do not invent any.\n\n"
@@ -211,7 +215,8 @@ async def detect_ai_reminders_from_context(
         'Return JSON: {"reminders": [{"title": str, "suggested_date": "YYYY-MM-DD", '
         '"suggested_time": "HH:MM AM/PM" or null, "event_type": "meeting|deadline|reminder|milestone", '
         '"priority": "low|medium|high|urgent", "source_name": str, "source_type": "meeting_mom|document", '
-        '"context_snippet": str}]}'
+        '"context_snippet": str}]}\n'
+        '"context_snippet" must be copied word for word from the content above.'
     )
     parsed = llm_client.parse_json(await llm_client.complete_text(prompt, json_mode=True))
     if isinstance(parsed, dict) and isinstance(parsed.get("reminders"), list):
@@ -219,6 +224,10 @@ async def detect_ai_reminders_from_context(
             title = str(it.get("title") or "").strip()
             suggested = str(it.get("suggested_date") or "")
             if not title or title.lower() in existing_titles:
+                continue
+            # The model must quote the source; a suggestion we can't find in the content is dropped.
+            snippet = re.sub(r"\s+", " ", str(it.get("context_snippet") or "")).strip().lower()
+            if len(snippet) < 6 or snippet not in normalized_context:
                 continue
             try:
                 date.fromisoformat(suggested)
@@ -242,41 +251,6 @@ async def detect_ai_reminders_from_context(
         if detected:
             return detected
 
-    # 4. Deterministic Heuristic Extractor (analyzes action items and sessions)
-    future_day = 1
-    for s in sessions:
-        if s.action_items:
-            for item in s.action_items[:2]:
-                if item.lower() not in existing_titles:
-                    target_date = (date.today() + timedelta(days=future_day)).isoformat()
-                    future_day += 1
-                    detected.append(
-                        DetectedReminderItem(
-                            id=f"det-{uuid.uuid4().hex[:8]}",
-                            title=f"Review: {item[:50]}",
-                            suggested_date=target_date,
-                            suggested_time="03:00 PM",
-                            event_type=CalendarEventType.TASK if "implement" in item.lower() or "build" in item.lower() else CalendarEventType.MEETING,
-                            priority=CalendarEventPriority.HIGH,
-                            source_name=s.title,
-                            source_type="meeting_mom",
-                            context_snippet=f"Action item extracted from '{s.title}' MoM.",
-                        )
-                    )
-        elif s.ai_summary and "Next Steps" in s.ai_summary and s.title.lower() not in existing_titles:
-            target_date = (date.today() + timedelta(days=1)).isoformat()
-            detected.append(
-                DetectedReminderItem(
-                    id=f"det-{uuid.uuid4().hex[:8]}",
-                    title=f"Follow-up: {s.title}",
-                    suggested_date=target_date,
-                    suggested_time="11:00 AM",
-                    event_type=CalendarEventType.MEETING,
-                    priority=CalendarEventPriority.MEDIUM,
-                    source_name=s.title,
-                    source_type="meeting_mom",
-                    context_snippet=f"Milestone follow-up from '{s.title}' Minutes of Meeting.",
-                )
-            )
-
-    return detected[:3]
+    # No AI model, or it found nothing: suggest nothing. (An earlier fallback invented
+    # "Review:"/"Follow-up:" meetings at made-up times; those showed up as fake meetings.)
+    return detected

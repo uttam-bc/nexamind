@@ -27,6 +27,7 @@ export default function CalendarView({
   sessions,
   onRefreshSessions,
   onBack,
+  onOpenMeeting,
 }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
@@ -436,12 +437,24 @@ export default function CalendarView({
                       </p>
                     </div>
 
-                    <button
-                      onClick={(e) => handleDeleteEvent(ev.id, e)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {ev.meeting_id ? (
+                      // A scheduled meeting: it's changed or cancelled from Meetings, so invitees are told.
+                      <button
+                        type="button"
+                        onClick={() => onOpenMeeting?.(ev.meeting_id)}
+                        className="px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition"
+                      >
+                        Open meeting
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => handleDeleteEvent(ev.id, e)}
+                        aria-label={`Delete ${ev.title}`}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

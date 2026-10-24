@@ -106,7 +106,7 @@ export default function AiReminderToast({
         title: currentReminder.title,
         description: `Auto-scheduled by AI from: ${currentReminder.source_name} (${currentReminder.context_snippet})`,
         event_date: currentReminder.suggested_date,
-        event_time: currentReminder.suggested_time || '02:00 PM',
+        event_time: currentReminder.suggested_time || null, // no time was mentioned: don't invent one
         event_type: currentReminder.event_type || 'meeting',
         priority: currentReminder.priority || 'high',
         source: 'ai_detected',
@@ -159,7 +159,7 @@ export default function AiReminderToast({
           <span>{currentReminder.suggested_date}</span>
           <span>•</span>
           <Clock className="w-3 h-3 text-[#4F46E5]" />
-          <span>{currentReminder.suggested_time || '02:00 PM'}</span>
+          <span>{currentReminder.suggested_time || 'No time given'}</span>
         </div>
 
         {/* Action Buttons */}

@@ -15,6 +15,7 @@ export default defineConfig({
       },
       '/health': 'http://127.0.0.1:8000',
       '/contact': 'http://127.0.0.1:8000',
+      '/notifications': 'http://127.0.0.1:8000',
     },
   },
   test: {

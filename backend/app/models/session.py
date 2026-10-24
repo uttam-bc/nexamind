@@ -61,6 +61,17 @@ class SessionRecord(Base):
         index=True,
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Live meetings: the meeting this record holds the transcript and MoM for.
+    meeting_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Minutes of Meeting review: "draft" until an authorised user approves it; approved MoM is locked.
+    mom_status: Mapped[str] = mapped_column(String(16), default="draft", server_default="draft", nullable=False)
+    mom_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    mom_approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    mom_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -82,4 +93,4 @@ class SessionRecord(Base):
     )
 
     workspace: Mapped["Workspace"] = relationship(back_populates="sessions")  # type: ignore # noqa: F821
-    creator: Mapped["User"] = relationship()  # type: ignore # noqa: F821
+    creator: Mapped["User"] = relationship(foreign_keys=[created_by])  # type: ignore # noqa: F821

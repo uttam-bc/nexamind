@@ -423,29 +423,51 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Video Meetings
-  createVideoRoom: (wsId, name) =>
-    request(`/workspaces/${wsId}/video/rooms`, {
-      method: 'POST',
-      body: JSON.stringify(typeof name === 'string' ? { name } : name),
-    }),
-  startVideoRoom: (wsId, name) =>
-    request(`/workspaces/${wsId}/video/rooms`, {
-      method: 'POST',
-      body: JSON.stringify(typeof name === 'string' ? { name } : name),
-    }),
-  listVideoRooms: (wsId) => request(`/workspaces/${wsId}/video/rooms`),
-  listActiveVideoRooms: (wsId) => request(`/workspaces/${wsId}/video/rooms`),
+  // Meetings (scheduled and instant video meetings)
+  listMeetings: (wsId, scope = 'upcoming') => request(`/workspaces/${wsId}/meetings?scope=${scope}`),
+  getMeeting: (wsId, meetingId) => request(`/workspaces/${wsId}/meetings/${meetingId}`),
+  scheduleMeeting: (wsId, data) =>
+    request(`/workspaces/${wsId}/meetings`, { method: 'POST', body: JSON.stringify(data) }),
+  startInstantMeeting: (wsId, data) =>
+    request(`/workspaces/${wsId}/meetings/instant`, { method: 'POST', body: JSON.stringify(data) }),
+  updateMeeting: (wsId, meetingId, data) =>
+    request(`/workspaces/${wsId}/meetings/${meetingId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  cancelMeeting: (wsId, meetingId) =>
+    request(`/workspaces/${wsId}/meetings/${meetingId}/cancel`, { method: 'POST' }),
+  endMeeting: (wsId, meetingId, scope) =>
+    request(`/workspaces/${wsId}/meetings/${meetingId}/end`, { method: 'POST', body: JSON.stringify({ scope }) }),
+  getMeetingMessages: (wsId, meetingId) => request(`/workspaces/${wsId}/meetings/${meetingId}/messages`),
   getIceServers: (wsId) => request(`/workspaces/${wsId}/video/ice-servers`),
-  joinVideoRoom: (wsId, roomId) =>
-    request(`/workspaces/${wsId}/video/rooms/${roomId}/join`, {
-      method: 'POST',
-    }),
-  endVideoRoom: (wsId, roomId, data) =>
-    request(`/workspaces/${wsId}/video/rooms/${roomId}/end`, {
-      method: 'POST',
-      body: JSON.stringify(typeof data === 'string' ? { notes: data } : (data || {})),
-    }),
+  getMeetingTranscript: (wsId, meetingId) => request(`/workspaces/${wsId}/meetings/${meetingId}/transcript`),
+  uploadTranscriptChunk: (wsId, meetingId, formData) =>
+    request(`/workspaces/${wsId}/meetings/${meetingId}/transcript/chunks`, { method: 'POST', body: formData }),
+  addTranscriptSegment: (wsId, meetingId, data) =>
+    request(`/workspaces/${wsId}/meetings/${meetingId}/transcript/segments`, { method: 'POST', body: JSON.stringify(data) }),
+  reportTranscriptGap: (wsId, meetingId, data) =>
+    request(`/workspaces/${wsId}/meetings/${meetingId}/transcript/gaps`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // Minutes of meeting (review, edit, approve)
+  getMom: (wsId, sessionId) => request(`/workspaces/${wsId}/sessions/${sessionId}/mom`),
+  regenerateMom: (wsId, sessionId) =>
+    request(`/workspaces/${wsId}/sessions/${sessionId}/mom/generate`, { method: 'POST' }),
+  editMom: (wsId, sessionId, markdown) =>
+    request(`/workspaces/${wsId}/sessions/${sessionId}/mom`, { method: 'PATCH', body: JSON.stringify({ markdown }) }),
+  addMomActionItem: (wsId, sessionId, data) =>
+    request(`/workspaces/${wsId}/sessions/${sessionId}/mom/action-items`, { method: 'POST', body: JSON.stringify(data) }),
+  updateMomActionItem: (wsId, sessionId, itemId, data) =>
+    request(`/workspaces/${wsId}/sessions/${sessionId}/mom/action-items/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  approveMom: (wsId, sessionId, itemIds) =>
+    request(`/workspaces/${wsId}/sessions/${sessionId}/mom/approve`, { method: 'POST', body: JSON.stringify({ item_ids: itemIds }) }),
+
+  // Notifications
+  listNotifications: (params = {}) => {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+    return request(`/notifications${q.toString() ? `?${q}` : ''}`);
+  },
+  markNotificationsRead: (ids) => request('/notifications/read', { method: 'POST', body: JSON.stringify({ ids }) }),
+  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
+  getNotificationPrefs: () => request('/notifications/preferences'),
+  setNotificationPrefs: (prefs) => request('/notifications/preferences', { method: 'PUT', body: JSON.stringify(prefs) }),
 
   // Reports
   listReports: (wsId) => request(`/workspaces/${wsId}/reports`),
