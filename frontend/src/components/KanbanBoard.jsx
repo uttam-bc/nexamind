@@ -21,7 +21,6 @@ import {
   RotateCcw,
   GripVertical,
   ArrowRight,
-  Eye,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -59,16 +58,21 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
   const columns = [
     { id: 'todo', label: 'To Do', color: 'border-indigo-500/50', badgeColor: 'bg-indigo-500/10 text-indigo-400' },
     { id: 'in_progress', label: 'In Progress', color: 'border-amber-500/50', badgeColor: 'bg-amber-500/10 text-amber-400' },
-    { id: 'review', label: 'Review', color: 'border-violet-500/50', badgeColor: 'bg-violet-500/10 text-violet-500' },
     { id: 'done', label: 'Done', color: 'border-emerald-500/50', badgeColor: 'bg-emerald-500/10 text-emerald-400' },
   ];
+
+  // Legacy "review" tasks stay visible under In Progress after the Review column was removed.
+  const matchesColumn = (task, colId) => {
+    if (colId === 'in_progress') return task.status === 'in_progress' || task.status === 'review';
+    return task.status === colId;
+  };
 
   const handleOpenTaskDetail = (task) => {
     setSelectedTask(task);
     setEditTitle(task.title);
     setEditDesc(task.description || '');
     setEditPriority(task.priority || 'medium');
-    setEditStatus(task.status || 'todo');
+    setEditStatus(task.status === 'review' ? 'in_progress' : task.status || 'todo');
 
     // Parse subtasks if stored in description or JSON
     let parsedSubtasks = [];
@@ -331,27 +335,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                 sectionFilter === 'in_progress' ? 'bg-white/20 text-white' : 'bg-amber-50 text-amber-700 font-bold'
               }`}
             >
-              {filteredTasks.filter((t) => t.status === 'in_progress').length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setSectionFilter('review')}
-            aria-pressed={sectionFilter === 'review'}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-              sectionFilter === 'review'
-                ? 'bg-violet-600 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-violet-50 hover:text-violet-800'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Review</span>
-            <span
-              className={`text-xs px-1.5 py-0.5 rounded-full ${
-                sectionFilter === 'review' ? 'bg-white/20 text-white' : 'bg-violet-50 text-violet-700 font-bold'
-              }`}
-            >
-              {filteredTasks.filter((t) => t.status === 'review').length}
+              {filteredTasks.filter((t) => t.status === 'in_progress' || t.status === 'review').length}
             </span>
           </button>
 
@@ -391,14 +375,14 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
       <div
         className={`grid gap-6 flex-1 min-h-0 ${
           sectionFilter === 'all'
-            ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4'
+            ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'
             : 'grid-cols-1 max-w-2xl mx-auto w-full'
         }`}
       >
         {columns
           .filter((col) => sectionFilter === 'all' || sectionFilter === col.id)
           .map((col) => {
-            const colTasks = filteredTasks.filter((t) => t.status === col.id);
+            const colTasks = filteredTasks.filter((t) => matchesColumn(t, col.id));
             const isDragOver = dragOverColumnId === col.id;
             return (
               <div
@@ -523,14 +507,13 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 Section:
                               </span>
                               <select aria-label="Task section"
-                                value={task.status || 'todo'}
+                                value={task.status === 'review' ? 'in_progress' : task.status || 'todo'}
                                 onChange={(e) => handleMoveStatus(task.id, e.target.value)}
                                 className="text-xs font-bold bg-[#F8FAFC] hover:bg-slate-100 border border-[#CBD5E1] rounded-lg px-2 py-0.5 text-slate-700 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                 title="Shift section"
                               >
                                 <option value="todo">📋 To Do</option>
                                 <option value="in_progress">⚡ In Progress</option>
-                                <option value="review">👀 Review</option>
                                 <option value="done">✅ Done</option>
                               </select>
                             </div>
@@ -561,7 +544,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                               </>
                             )}
 
-                            {task.status === 'in_progress' && (
+                            {(task.status === 'in_progress' || task.status === 'review') && (
                               <>
                                 <button
                                   type="button"
@@ -579,29 +562,6 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                   title="Shift task to Done section"
                                 >
                                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                  <span>Done</span>
-                                </button>
-                              </>
-                            )}
-
-                            {task.status === 'review' && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveStatus(task.id, 'in_progress')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition shadow-2xs active:scale-95"
-                                  title="Send back to In Progress"
-                                >
-                                  <RotateCcw className="w-3 h-3 text-amber-600" aria-hidden="true" />
-                                  <span>In Progress</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveStatus(task.id, 'done')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-2xs active:scale-95"
-                                  title="Approve and move to Done"
-                                >
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" aria-hidden="true" />
                                   <span>Done</span>
                                 </button>
                               </>
@@ -688,8 +648,8 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   <span className="text-xs text-slate-400 font-medium">Click to shift section</span>
                 </div>
 
-                {/* 3-Button Segmented Status Shifter */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1 bg-[#F1F5F9] rounded-xl border border-[#E2E8F0]">
+                {/* Segmented Status Shifter */}
+                <div className="grid grid-cols-3 gap-2 p-1 bg-[#F1F5F9] rounded-xl border border-[#E2E8F0]">
                   <button
                     type="button"
                     onClick={() => setEditStatus('todo')}
@@ -714,20 +674,6 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   >
                     <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
                     <span>In Progress</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setEditStatus('review')}
-                    aria-pressed={editStatus === 'review'}
-                    className={`py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                      editStatus === 'review'
-                        ? 'bg-white text-violet-800 shadow-sm border border-violet-300'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                  >
-                    <Eye className="w-3.5 h-3.5 text-violet-600" aria-hidden="true" />
-                    <span>Review</span>
                   </button>
 
                   <button
@@ -932,7 +878,6 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   >
                     <option value="todo">📋 To Do</option>
                     <option value="in_progress">⚡ In Progress</option>
-                    <option value="review">👀 Review</option>
                     <option value="done">✅ Done</option>
                   </select>
                 </div>

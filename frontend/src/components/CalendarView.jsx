@@ -33,6 +33,10 @@ export default function CalendarView({
   const [selectedDay, setSelectedDay] = useState(new Date().getDate());
   const [viewMode, setViewMode] = useState('month'); // 'month' | 'week' | 'day'
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [jumpDay, setJumpDay] = useState(String(new Date().getDate()));
+  const [jumpMonth, setJumpMonth] = useState(String(new Date().getMonth()));
+  const [jumpYear, setJumpYear] = useState(String(new Date().getFullYear()));
   const [loading, setLoading] = useState(false);
 
   // AI-detected commitments come only from the API (meeting minutes and documents).
@@ -96,15 +100,6 @@ export default function CalendarView({
     loadInsights();
   }, [workspaceId]);
 
-  // Month navigation
-  const prevMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
-  };
-
-  const nextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
-  };
-
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const monthNames = [
@@ -116,6 +111,40 @@ export default function CalendarView({
   const firstDayIndex = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const jumpDaysInMonth = new Date(
+    parseInt(jumpYear, 10) || year,
+    (parseInt(jumpMonth, 10) || 0) + 1,
+    0
+  ).getDate();
+
+  // Month navigation
+  const prevMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  };
+
+  const nextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  };
+
+  const openDatePicker = () => {
+    setJumpDay(String(selectedDay));
+    setJumpMonth(String(month));
+    setJumpYear(String(year));
+    setShowDatePicker(true);
+  };
+
+  const handleJumpToDate = (e) => {
+    e.preventDefault();
+    const y = parseInt(jumpYear, 10);
+    const m = parseInt(jumpMonth, 10);
+    const d = parseInt(jumpDay, 10);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return;
+    const maxDay = new Date(y, m + 1, 0).getDate();
+    const day = Math.min(Math.max(1, d), maxDay);
+    setCurrentDate(new Date(y, m, 1));
+    setSelectedDay(day);
+    setShowDatePicker(false);
+  };
 
   const handleAddEvent = async (e) => {
     e.preventDefault();
@@ -220,20 +249,31 @@ export default function CalendarView({
           </button>
         }
       />
-      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto bg-slate-50 font-sans antialiased text-slate-900 gap-6 pt-2">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto min-h-0 bg-slate-50 font-sans antialiased text-slate-900 gap-6 pt-2 pb-4">
         {/* 1. Main Calendar Workspace */}
-        <div className="flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
+        <div className="flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-y-auto min-h-0 p-6 space-y-6">
         {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E2E8F0] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5]">
+            <button
+              type="button"
+              onClick={openDatePicker}
+              className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5] hover:bg-indigo-100 hover:border-indigo-200 transition"
+              title="Go to a specific date"
+              aria-label="Pick a date"
+            >
               <CalendarIcon className="w-5 h-5" />
-            </div>
-            <div>
+            </button>
+            <div className="relative">
               <div className="flex items-center gap-2">
-                <h2 className="text-xl lg:text-2xl font-bold text-[#191C1E] tracking-tight">
+                <button
+                  type="button"
+                  onClick={openDatePicker}
+                  className="text-xl lg:text-2xl font-bold text-[#191C1E] tracking-tight hover:text-[#4F46E5] transition"
+                  title="Go to a specific date"
+                >
                   {monthNames[month]} {year}
-                </h2>
+                </button>
                 <div className="flex items-center gap-1 bg-[#F2F4F6] rounded-lg p-1 border border-[#E2E8F0]">
                   <button onClick={prevMonth} aria-label="Previous month" className="p-1 hover:bg-white rounded transition text-slate-600">
                     <ChevronLeft className="w-4 h-4" />
@@ -244,8 +284,70 @@ export default function CalendarView({
                 </div>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Workspace Sprint & Meeting Schedule
+                Workspace Sprint & Meeting Schedule · click month to jump
               </p>
+
+              {showDatePicker && (
+                <form
+                  onSubmit={handleJumpToDate}
+                  className="absolute left-0 top-full mt-2 z-30 bg-white border border-[#E2E8F0] rounded-xl shadow-xl p-3 space-y-3 w-72"
+                >
+                  <p className="text-xs font-bold text-slate-700">Go to date</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Day</label>
+                      <select
+                        value={jumpDay}
+                        onChange={(e) => setJumpDay(e.target.value)}
+                        className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#4F46E5]"
+                      >
+                        {Array.from({ length: jumpDaysInMonth }, (_, i) => i + 1).map((d) => (
+                          <option key={d} value={String(d)}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Month</label>
+                      <select
+                        value={jumpMonth}
+                        onChange={(e) => setJumpMonth(e.target.value)}
+                        className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#4F46E5]"
+                      >
+                        {monthNames.map((name, idx) => (
+                          <option key={name} value={String(idx)}>{name.slice(0, 3)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year</label>
+                      <select
+                        value={jumpYear}
+                        onChange={(e) => setJumpYear(e.target.value)}
+                        className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#4F46E5]"
+                      >
+                        {Array.from({ length: 21 }, (_, i) => year - 10 + i).map((y) => (
+                          <option key={y} value={String(y)}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowDatePicker(false)}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 rounded-lg"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-3 py-1.5 text-xs font-bold text-white bg-[#4F46E5] hover:bg-[#4338CA] rounded-lg"
+                    >
+                      Go
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
 
@@ -280,9 +382,9 @@ export default function CalendarView({
 
         {/* VIEW A: MONTH VIEW */}
         {viewMode === 'month' && (
-          <div className="flex-1 flex flex-col border border-[#E2E8F0] rounded-xl overflow-hidden shadow-sm min-h-[520px]">
+          <div className="flex-1 flex flex-col border border-[#E2E8F0] rounded-xl overflow-hidden shadow-sm min-h-[420px]">
             {/* Days of Week Header */}
-            <div className="grid grid-cols-7 bg-[#F8FAFC] border-b border-[#E2E8F0] text-center font-mono text-xs font-bold text-slate-500 py-2.5">
+            <div className="grid grid-cols-7 bg-[#F8FAFC] border-b border-[#E2E8F0] text-center font-mono text-xs font-bold text-slate-500 py-2.5 shrink-0">
               <span>SUN</span>
               <span>MON</span>
               <span>TUE</span>
@@ -292,8 +394,9 @@ export default function CalendarView({
               <span>SAT</span>
             </div>
 
-            {/* Month Day Grid */}
-            <div className="flex-1 grid grid-cols-7 grid-rows-5 bg-[#E2E8F0] gap-px">
+            {/* Month Day Grid — auto rows so 5- or 6-week months scroll instead of clipping */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+            <div className="grid grid-cols-7 auto-rows-[minmax(88px,1fr)] bg-[#E2E8F0] gap-px min-h-full">
               {/* Previous month padding days */}
               {Array.from({ length: firstDayIndex }).map((_, i) => {
                 const day = daysInPrevMonth - firstDayIndex + i + 1;
@@ -340,7 +443,7 @@ export default function CalendarView({
                       }
                     }}
                     data-day={dayNum}
-                    className={`bg-white p-2 flex flex-col justify-between transition group hover:bg-[#F8FAFC] cursor-pointer min-h-[90px] ${
+                    className={`bg-white p-2 flex flex-col justify-between transition group hover:bg-[#F8FAFC] cursor-pointer min-h-[88px] ${
                       isSelected ? 'ring-2 ring-[#4F46E5] ring-inset bg-indigo-50/20' : ''
                     }`}
                   >
@@ -363,16 +466,32 @@ export default function CalendarView({
                       )}
                     </div>
 
-                    {/* Event Badges */}
-                    <div className="space-y-1 mt-1 overflow-hidden">
+                    {/* Event Badges — hover shows description */}
+                    <div className="space-y-1 mt-1 overflow-visible">
                       {dayEvents.slice(0, 2).map((ev) => (
                         <div
                           key={ev.id}
-                          className={`px-1.5 py-0.5 rounded text-xs font-medium truncate shadow-xs ${getTypeStyle(
+                          className={`relative group/ev px-1.5 py-0.5 rounded text-xs font-medium truncate shadow-xs ${getTypeStyle(
                             ev.event_type || ev.type
                           )}`}
+                          title={
+                            ev.description
+                              ? `${ev.title}\n${ev.description}`
+                              : ev.title
+                          }
                         >
                           {ev.event_time ? `${ev.event_time} ` : ''}{ev.title}
+                          <div className="pointer-events-none absolute left-0 bottom-full mb-1 z-20 hidden group-hover/ev:block w-48 max-w-[14rem] rounded-lg bg-slate-900 text-white text-[10px] leading-snug px-2.5 py-2 shadow-lg whitespace-normal font-medium normal-case">
+                            <div className="font-bold mb-0.5">{ev.title}</div>
+                            {ev.event_time && (
+                              <div className="text-slate-300 mb-0.5">{ev.event_time}</div>
+                            )}
+                            {ev.description ? (
+                              <div className="text-slate-200">{ev.description}</div>
+                            ) : (
+                              <div className="text-slate-400 italic">No description</div>
+                            )}
+                          </div>
                         </div>
                       ))}
                       {dayEvents.length > 2 && (
@@ -393,6 +512,7 @@ export default function CalendarView({
                   <span>{i + 1}</span>
                 </div>
               ))}
+            </div>
             </div>
           </div>
         )}
@@ -422,8 +542,9 @@ export default function CalendarView({
                     className={`p-4 rounded-xl border flex items-center justify-between shadow-xs ${getTypeStyle(
                       ev.event_type || ev.type
                     )}`}
+                    title={ev.description || ev.title}
                   >
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-xs">{ev.title}</span>
                         <span className="text-xs font-mono px-2 py-0.5 rounded bg-white/60">
@@ -434,6 +555,9 @@ export default function CalendarView({
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
                         <span>{ev.event_time || 'All Day'}</span>
                       </p>
+                      {ev.description && (
+                        <p className="text-xs text-slate-500 leading-snug">{ev.description}</p>
+                      )}
                     </div>
 
                     <button
@@ -606,6 +730,18 @@ export default function CalendarView({
                     <option value="urgent">Urgent</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="calendar-view-field-desc" className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
+                <textarea
+                  id="calendar-view-field-desc"
+                  rows={2}
+                  placeholder="What is this event about?"
+                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none resize-none"
+                  value={newEvent.description}
+                  onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

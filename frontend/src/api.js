@@ -381,6 +381,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  deleteTransaction: (wsId, txId) =>
+    request(`/workspaces/${wsId}/finance/transactions/${txId}`, {
+      method: 'DELETE',
+    }),
   getFinanceSummary: (wsId) => request(`/workspaces/${wsId}/finance/summary`),
 
   // Sessions / Meetings

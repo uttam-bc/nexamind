@@ -22,6 +22,7 @@ import {
   Copy,
   RotateCcw,
   Sparkles,
+  Upload,
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
@@ -40,6 +41,24 @@ export default function CodeWorkspace({ workspaceId, repos = [], onRefreshRepos,
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileUploadRef = React.useRef(null);
+
+  const languageFromName = (name) => {
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+    if (ext === 'py') return 'python';
+    if (ext === 'ts' || ext === 'tsx') return 'typescript';
+    if (ext === 'js' || ext === 'jsx') return 'javascript';
+    if (ext === 'html' || ext === 'htm') return 'html';
+    if (ext === 'css') return 'css';
+    if (ext === 'json') return 'json';
+    if (ext === 'sql') return 'sql';
+    if (ext === 'md' || ext === 'markdown') return 'markdown';
+    if (ext === 'txt' || ext === 'log') return 'text';
+    if (ext === 'yml' || ext === 'yaml') return 'yaml';
+    if (ext === 'sh' || ext === 'bash') return 'shell';
+    return 'javascript';
+  };
 
   // Run & Output Console
   const [isRunning, setIsRunning] = useState(false);
@@ -155,21 +174,55 @@ export default function CodeWorkspace({ workspaceId, repos = [], onRefreshRepos,
     }
   };
 
+  const handleUploadFiles = async (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!picked.length || !selectedRepo || isUploading) return;
+
+    setIsUploading(true);
+    let uploaded = 0;
+    let lastName = null;
+    try {
+      const nextFiles = [...files];
+      for (const file of picked) {
+        const name = file.name.trim();
+        if (!name) continue;
+        // Repo files are stored as text; skip empty / oversized blobs.
+        if (file.size > 2 * 1024 * 1024) {
+          notify(`Skipped "${name}" (over 2 MB).`, 'error');
+          continue;
+        }
+        const content = await file.text();
+        const saved = await api.saveRepoFile(workspaceId, selectedRepo.id, {
+          name,
+          content,
+          language: languageFromName(name),
+        });
+        const idx = nextFiles.findIndex((f) => f.name === name);
+        if (idx >= 0) nextFiles[idx] = saved;
+        else nextFiles.push(saved);
+        uploaded += 1;
+        lastName = name;
+      }
+      setFiles(nextFiles);
+      if (lastName) setActiveFileName(lastName);
+      if (uploaded > 0) {
+        setSaveStatus(`${uploaded} file${uploaded === 1 ? '' : 's'} uploaded ✓`);
+        setTimeout(() => setSaveStatus(null), 2500);
+      }
+    } catch (err) {
+      notify(`Upload failed: ${err.message}`, 'error');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleConfirmCreateFile = async (e) => {
     e.preventDefault();
     const name = newFileNameInput.trim();
     if (!name || !selectedRepo) return;
 
-    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-    const language =
-      ext === 'py' ? 'python' :
-      ext === 'ts' || ext === 'tsx' ? 'typescript' :
-      ext === 'js' || ext === 'jsx' ? 'javascript' :
-      ext === 'html' ? 'html' :
-      ext === 'css' ? 'css' :
-      ext === 'json' ? 'json' :
-      ext === 'sql' ? 'sql' :
-      ext === 'md' ? 'markdown' : 'javascript';
+    const language = languageFromName(name);
 
     const starterContent =
       language === 'python'
@@ -542,6 +595,24 @@ export default function CodeWorkspace({ workspaceId, repos = [], onRefreshRepos,
                         <Plus className="w-3 h-3" />
                         <span>Add Code File</span>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => fileUploadRef.current?.click()}
+                        disabled={isUploading}
+                        className="flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-indigo-700 px-2.5 py-1.5 rounded-lg hover:bg-indigo-50 border border-slate-200 transition shrink-0 disabled:opacity-60"
+                        title="Upload files into this repo"
+                      >
+                        <Upload className="w-3 h-3" />
+                        <span>{isUploading ? 'Uploading…' : 'Upload Files'}</span>
+                      </button>
+                      <input
+                        ref={fileUploadRef}
+                        type="file"
+                        multiple
+                        className="sr-only"
+                        onChange={handleUploadFiles}
+                      />
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">

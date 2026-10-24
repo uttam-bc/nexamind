@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
-import { notify } from '../context/ToastContext';
+import { notify, confirmDialog } from '../context/ToastContext';
 import { formatMoney } from '../lib/format';
 
 const MAX_AMOUNT = 1_000_000_000_000;
@@ -61,6 +61,24 @@ export default function FinanceTracker({
       if (onRefreshFinance) await onRefreshFinance();
     } catch (err) {
       setTxError(err.message || 'Could not save the transaction.');
+    }
+  };
+
+  const handleDeleteTransaction = async (tx) => {
+    if (
+      !(await confirmDialog(
+        `Remove this ${tx.type} of $${Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} (${tx.category})?`,
+        { confirmLabel: 'Remove' }
+      ))
+    ) {
+      return;
+    }
+    try {
+      await api.deleteTransaction(workspaceId, tx.id);
+      if (onRefreshFinance) await onRefreshFinance();
+      notify('Transaction removed.', 'success');
+    } catch (err) {
+      notify(err.message || 'Could not remove the transaction.', 'error');
     }
   };
 
@@ -260,18 +278,19 @@ export default function FinanceTracker({
                 <th className="py-3 px-4">CATEGORY</th>
                 <th className="py-3 px-4">DATE</th>
                 <th className="py-3 px-4 text-right">AMOUNT</th>
+                <th className="py-3 px-4 text-right w-16"> </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E2E8F0] text-[#191C1E]">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-slate-400 text-xs">
+                  <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
                     No transactions recorded. Click "+ Log Transaction" to add your first expense or income item!
                   </td>
                 </tr>
               ) : (
                 filteredTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-[#F8FAFC] transition">
+                  <tr key={tx.id} className="hover:bg-[#F8FAFC] transition group">
                     <td className="py-3 px-4">
                       <span
                         className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded ${
@@ -295,6 +314,17 @@ export default function FinanceTracker({
                     >
                       {tx.type === 'income' ? '+' : '-'}$
                       {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTransaction(tx)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition opacity-70 group-hover:opacity-100"
+                        title="Remove transaction"
+                        aria-label={`Remove ${tx.category} transaction`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 ))
