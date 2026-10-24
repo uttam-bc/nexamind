@@ -45,7 +45,18 @@ async def list_sessions(
         query = query.where(SessionRecord.status == status)
     query = query.order_by(SessionRecord.created_at.desc()).limit(limit)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    return [s for s in result.scalars().all() if await _can_see(db, s, user_id)]
+
+
+async def _can_see(db: AsyncSession, session: SessionRecord, user_id: UUID) -> bool:
+    """Minutes of an invite-only meeting are only for the people who could join it."""
+    if not session.meeting_id:
+        return True
+    from app.models import Meeting
+    from app.services.meeting_service import can_access
+
+    meeting = await db.get(Meeting, session.meeting_id)
+    return meeting is None or await can_access(db, meeting, user_id)
 
 
 async def get_session(
@@ -62,7 +73,7 @@ async def get_session(
         )
     )
     session = result.scalar_one_or_none()
-    if not session:
+    if not session or not await _can_see(db, session, user_id):
         raise AuthError("Session not found", status_code=404)
     return session
 
@@ -141,6 +152,12 @@ async def update_session(
     data: SessionUpdate,
 ) -> SessionRecord:
     session = await get_session(db, workspace_id, session_id, user_id)
+    content_change = any(v is not None for v in (data.transcript, data.ai_summary, data.action_items, data.status))
+    if session.mom_status == "approved" and (content_change or data.title is not None):
+        raise AuthError("These minutes are approved and locked", status_code=409)
+    if session.meeting_id and content_change:
+        # Meeting minutes change only through the review flow (organizer/admin, grounded, audited).
+        raise AuthError("Edit meeting minutes from the minutes review", status_code=409)
     if data.title is not None:
         session.title = data.title.strip()
     if data.transcript is not None:

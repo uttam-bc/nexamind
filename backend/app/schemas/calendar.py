@@ -71,6 +71,7 @@ class CalendarEventResponse(CalendarEventBase):
     id: UUID
     workspace_id: UUID
     user_id: UUID
+    meeting_id: UUID | None = None  # set when this entry is a scheduled meeting
     created_at: datetime
     updated_at: datetime
 

@@ -60,7 +60,37 @@ async def create_task(
     db.add(task)
     await db.flush()
     await db.refresh(task)
+    await _notify_assignee(db, task, actor_id=user.id, actor_name=user.name)
     return task
+
+
+async def _notify_assignee(db: AsyncSession, task: Task, actor_id: UUID, actor_name: str | None = None) -> None:
+    from app.services import notification_service
+
+    if task.assignee_id:
+        await notification_service.notify(
+            db, task.assignee_id, kind="task_assigned", category="tasks", workspace_id=task.workspace_id,
+            title=f"{actor_name or 'Someone'} assigned you: {task.title}",
+            body=f"Due {task.due_date.date().isoformat()}" if task.due_date else None,
+            link={"tab": "projects", "task_id": str(task.id)},
+            dedupe_key=f"task_assigned:{task.id}:{task.assignee_id}", actor_id=actor_id,
+        )
+
+
+async def _notify_completed(db: AsyncSession, task: Task, actor_id: UUID, actor_name: str) -> None:
+    from app.models import Meeting
+    from app.services import notification_service
+
+    recipients = [task.created_by]
+    if task.source_meeting_id:
+        meeting = await db.get(Meeting, task.source_meeting_id)
+        if meeting:
+            recipients.append(meeting.organizer_id)
+    await notification_service.notify_many(
+        db, recipients, kind="task_completed", category="tasks", workspace_id=task.workspace_id,
+        title=f"{actor_name} completed: {task.title}", link={"tab": "projects", "task_id": str(task.id)},
+        dedupe_key=f"task_completed:{task.id}", actor_id=actor_id,
+    )
 
 
 async def get_task(
@@ -87,6 +117,7 @@ async def update_task(
     data: TaskUpdate,
 ) -> Task:
     task = await get_task(db, workspace_id, task_id, user_id)
+    previous_assignee, previous_status = task.assignee_id, task.status
     if data.title is not None:
         task.title = data.title.strip()
     if data.description is not None:
@@ -106,6 +137,11 @@ async def update_task(
 
     await db.flush()
     await db.refresh(task)
+    actor = await db.get(User, user_id)
+    if task.assignee_id and task.assignee_id != previous_assignee:
+        await _notify_assignee(db, task, actor_id=user_id, actor_name=actor.name if actor else None)
+    if task.status == TaskStatus.DONE and previous_status != TaskStatus.DONE:
+        await _notify_completed(db, task, actor_id=user_id, actor_name=actor.name if actor else "Someone")
     return task
 
 

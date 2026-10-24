@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -26,6 +26,7 @@ import { api } from '../api';
 
 import FeatureHeader from './FeatureHeader';
 import { notify, confirmDialog } from '../context/ToastContext';
+import { onDeepLink } from '../lib/deepLink';
 
 export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack }) {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -61,11 +62,27 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
     { id: 'done', label: 'Done', color: 'border-emerald-500/50', badgeColor: 'bg-emerald-500/10 text-emerald-400' },
   ];
 
+<<<<<<< HEAD
   // Legacy "review" tasks stay visible under In Progress after the Review column was removed.
   const matchesColumn = (task, colId) => {
     if (colId === 'in_progress') return task.status === 'in_progress' || task.status === 'review';
     return task.status === colId;
   };
+=======
+  // A notification about a task opens it (once the task list has it).
+  const linkedTaskId = useRef(null);
+  useEffect(() => onDeepLink('projects', (link) => {
+    linkedTaskId.current = link.task_id;
+    onRefreshTasks?.();
+  }), [onRefreshTasks]);
+  useEffect(() => {
+    const task = linkedTaskId.current && tasks?.find((t) => t.id === linkedTaskId.current);
+    if (task) {
+      linkedTaskId.current = null;
+      handleOpenTaskDetail(task);
+    }
+  }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+>>>>>>> 8122a26f7cfff0403919ae0bee1888963ac59a16
 
   const handleOpenTaskDetail = (task) => {
     setSelectedTask(task);

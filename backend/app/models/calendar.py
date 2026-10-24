@@ -71,6 +71,10 @@ class CalendarEvent(Base):
         nullable=False,
     )
     is_completed: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Calendar entry of a scheduled meeting (cancelling or rescheduling the meeting updates it).
+    meeting_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

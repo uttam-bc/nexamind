@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
 from app.models.channel import Channel, ChannelMember, ChannelReadState, Message, MessageReaction  # noqa: F401
@@ -21,6 +21,17 @@ from app.models.calendar import (  # noqa: F401
     CalendarEventSource,
 )
 from app.models.ai import AiSession, AiMessage, AiMemory, AiMemoryType, AiMemorySource  # noqa: F401
+from app.models.meeting import (  # noqa: F401
+    ActionItemStatus,
+    Meeting,
+    MeetingActionItem,
+    MeetingInvitee,
+    MeetingMessage,
+    MeetingRecurrence,
+    MeetingStatus,
+    Notification,
+    TranscriptSegment,
+)
 
 
 
@@ -56,6 +67,8 @@ class User(Base):
     # were issued with, so bumping it revokes every outstanding token for the user.
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     # Set when the account is deleted. The row is kept (anonymised) so shared content stays intact.
+    # Notification categories the user turned off, e.g. {"messages": false}.
+    notification_prefs: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

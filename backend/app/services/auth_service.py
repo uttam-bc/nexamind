@@ -60,6 +60,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
+# bcrypt is deliberately slow (~0.4 s here, more on small cloud CPUs). Run it in a worker thread
+# so one sign-in doesn't stall every other request on the event loop.
+async def hash_password_async(password: str) -> str:
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
+
+
 # ---------------------------------------------------------------------------------------------
 # Tokens
 # ---------------------------------------------------------------------------------------------
@@ -252,7 +262,7 @@ async def create_and_send_otp(db: AsyncSession, email: str, purpose: str = "regi
         purpose == "reset_password" and existing is not None and existing.deactivated_at is None)
     record = EmailVerification(
         email=valid_email,
-        otp_hash=hash_password(otp_code) if send_code else hash_password(secrets.token_urlsafe(16)),
+        otp_hash=await hash_password_async(otp_code) if send_code else await hash_password_async(secrets.token_urlsafe(16)),
         purpose=purpose,
         attempts=0,
         is_verified=False,
@@ -303,7 +313,7 @@ async def verify_otp_code(db: AsyncSession, email: str, otp: str, purpose: str =
         raise AuthError("Too many incorrect attempts. Please request a new code.", status_code=429)
 
     record.attempts += 1
-    if not verify_password(otp.strip(), record.otp_hash):
+    if not await verify_password_async(otp.strip(), record.otp_hash):
         # Commit now: the request's session rolls back when the error propagates, which would
         # otherwise discard the attempt and make the attempt limit useless.
         await db.commit()
@@ -383,7 +393,7 @@ async def register_user(db: AsyncSession, data: UserCreate) -> tuple[User, Works
     user = await _create_user_with_workspace(
         db,
         email=email,
-        password_hash=hash_password(data.password),
+        password_hash=await hash_password_async(data.password),
         name=data.name.strip(),
         username=username,
         is_email_verified=settings.require_email_verification or bool(data.otp),
@@ -395,9 +405,9 @@ async def authenticate_user(db: AsyncSession, identifier: str, password: str) ->
     clean_id = identifier.strip().lstrip("@").lower()
     user = await get_user_by_email(db, clean_id) or await get_user_by_username(db, clean_id)
     if not user or user.deactivated_at is not None:
-        verify_password(password, _DUMMY_HASH)
+        await verify_password_async(password, _DUMMY_HASH)
         raise AuthError("Invalid email/username or password", status_code=401)
-    if not verify_password(password, user.password_hash):
+    if not await verify_password_async(password, user.password_hash):
         raise AuthError("Invalid email/username or password", status_code=401)
     return user
 
@@ -412,17 +422,17 @@ async def reset_password(db: AsyncSession, email: str, otp: str, new_password: s
     user = await get_user_by_email(db, clean)
     if not user or user.deactivated_at is not None:
         raise AuthError("This code is invalid or has expired. Please request a new one.", status_code=400)
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     user.is_email_verified = True
     await revoke_sessions(db, user)
 
 
 async def change_password(db: AsyncSession, user: User, current_password: str, new_password: str) -> None:
-    if not verify_password(current_password, user.password_hash):
+    if not await verify_password_async(current_password, user.password_hash):
         raise AuthError("Current password is incorrect", status_code=400)
-    if verify_password(new_password, user.password_hash):
+    if await verify_password_async(new_password, user.password_hash):
         raise AuthError("New password must be different from the current one", status_code=400)
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     await revoke_sessions(db, user)
 
 
@@ -449,7 +459,7 @@ async def deactivate_account(db: AsyncSession, user: User, password: str) -> Non
     alongside other members block deletion until ownership is transferred. Shared content the
     user created stays, attributed to "Deleted user"; the login identity is erased.
     """
-    if not verify_password(password, user.password_hash):
+    if not await verify_password_async(password, user.password_hash):
         raise AuthError("Password is incorrect", status_code=400)
 
     memberships = (await db.execute(
@@ -501,7 +511,7 @@ async def deactivate_account(db: AsyncSession, user: User, password: str) -> Non
     user.email = f"deleted-{user.id}@deleted.invalid"
     user.username = None
     user.name = "Deleted user"
-    user.password_hash = hash_password(secrets.token_urlsafe(32))
+    user.password_hash = await hash_password_async(secrets.token_urlsafe(32))
     user.google_id = None
     user.avatar_url = None
     user.gemini_api_key_encrypted = None
@@ -590,7 +600,7 @@ async def authenticate_google_user(db: AsyncSession, credential: str) -> User:
     return await _create_user_with_workspace(
         db,
         email=email,
-        password_hash=hash_password(secrets.token_urlsafe(32)),
+        password_hash=await hash_password_async(secrets.token_urlsafe(32)),
         name=name,
         username=username,
         google_id=google_id,

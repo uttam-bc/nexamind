@@ -20,8 +20,11 @@ import {
   MoreVertical,
   X,
   User,
+  ArrowLeft,
 } from 'lucide-react';
 import { api } from '../api';
+import { connectChannel, mergeMessages } from '../lib/channelSocket';
+import { onDeepLink } from '../lib/deepLink';
 import FeatureHeader from './FeatureHeader';
 import FormattedChatMessage from './FormattedChatMessage';
 import { notify } from '../context/ToastContext';
@@ -54,7 +57,10 @@ export default function SoloChat({
   const speechRecognitionRef = useRef(null);
 
   const messagesEndRef = useRef(null);
-  const pollingRef = useRef(null);
+  const activeIdRef = useRef(null);
+  // Phones show the conversation list or one conversation, not both.
+  const [mobileView, setMobileView] = useState('list');
+  const pendingDeepLink = useRef(null);
 
   // 1. Load DM channels for this workspace
   useEffect(() => {
@@ -70,7 +76,11 @@ export default function SoloChat({
       const dmList = (allChannels || []).filter((c) => c.is_direct);
       setChannels(dmList);
 
-      if (autoSelectFirst && dmList.length > 0) {
+      const linked = pendingDeepLink.current && dmList.find((c) => c.id === pendingDeepLink.current);
+      if (linked) {
+        pendingDeepLink.current = null;
+        selectChannel(linked);
+      } else if (autoSelectFirst && dmList.length > 0) {
         if (!activeChannel || !dmList.some((c) => c.id === activeChannel.id)) {
           selectChannel(dmList[0]);
         }
@@ -82,38 +92,64 @@ export default function SoloChat({
     }
   };
 
-  // 2. Select a DM channel and load its messages
-  const selectChannel = async (channel) => {
-    if (!channel) return;
-    setActiveChannel(channel);
+  // 2. Select a DM channel and load its messages (a late response for another chat is ignored)
+  const loadLatest = async (channelId, replace) => {
     try {
-      const msgs = await api.listMessages(workspaceId, channel.id);
-      setMessages(msgs || []);
+      const msgs = (await api.listMessages(workspaceId, channelId)) || [];
+      if (activeIdRef.current !== channelId) return;
+      setMessages((prev) => mergeMessages(replace ? prev.filter((m) => m.pending) : prev, msgs));
     } catch (err) {
       console.warn('Error loading channel messages:', err);
     }
   };
 
-  // 3. Poll messages in active channel every 3 seconds for real-time live chat
-  useEffect(() => {
-    if (!workspaceId || !activeChannel) return;
+  const selectChannel = (channel) => {
+    if (!channel) return;
+    activeIdRef.current = channel.id;
+    setActiveChannel(channel);
+    setMessages([]);
+    loadLatest(channel.id, true);
+    api.markChannelRead(workspaceId, channel.id).catch(() => {});
+  };
 
-    const poll = async () => {
-      try {
-        const msgs = await api.listMessages(workspaceId, activeChannel.id);
-        if (msgs) {
-          setMessages(msgs);
+  // Notifications for a direct message open that conversation.
+  useEffect(
+    () =>
+      onDeepLink('solo_chat', (link) => {
+        const target = channels.find((c) => c.id === link.channel_id);
+        if (target) {
+          selectChannel(target);
+          setMobileView('chat');
         }
-      } catch (err) {
-        // silent polling error
-      }
-    };
+        else {
+          pendingDeepLink.current = link.channel_id;
+          loadDmChannels(false);
+        }
+      }),
+    [channels], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-    pollingRef.current = setInterval(poll, 3000);
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [workspaceId, activeChannel]);
+  // 3. Live updates for the open conversation; after a reconnect, fetch what was missed.
+  useEffect(() => {
+    if (!workspaceId || !activeChannel) return undefined;
+    const channelId = activeChannel.id;
+    return connectChannel(workspaceId, channelId, {
+      onResync: () => loadLatest(channelId, false),
+      onEvent: (payload) => {
+        if (activeIdRef.current !== channelId) return;
+        if (payload.event === 'new_message' && payload.data && !payload.data.parent_id) {
+          setMessages((prev) => mergeMessages(prev, [payload.data]));
+        } else if (payload.event === 'message_edited' && payload.data) {
+          setMessages((prev) => prev.map((m) => (m.id === payload.data.id ? { ...m, ...payload.data } : m)));
+        } else if (payload.event === 'message_deleted' && payload.message_id) {
+          setMessages((prev) => prev.filter((m) => m.id !== payload.message_id));
+        } else if (payload.event === 'reaction_updated' && payload.data) {
+          const { message_id, reactions } = payload.data;
+          setMessages((prev) => prev.map((m) => (m.id === message_id ? { ...m, reactions } : m)));
+        }
+      },
+    });
+  }, [workspaceId, activeChannel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll to bottom when messages update
   useEffect(() => {
@@ -145,11 +181,13 @@ export default function SoloChat({
 
     try {
       const sent = await api.postMessage(workspaceId, activeChannel.id, content);
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? sent : m)));
+      // The socket may have delivered it already: merge instead of swapping, so it shows once.
+      setMessages((prev) => mergeMessages(prev.filter((m) => m.id !== tempId), [sent]));
       if (onRefreshAll) onRefreshAll();
     } catch (err) {
       notify(`Could not send message: ${err.message}`, 'error');
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setInputText(content);
     } finally {
       setSending(false);
     }
@@ -240,7 +278,7 @@ export default function SoloChat({
       await api.toggleReaction(workspaceId, activeChannel.id, messageId, emoji);
       // refresh messages
       const updated = await api.listMessages(workspaceId, activeChannel.id);
-      setMessages(updated);
+      setMessages((prev) => mergeMessages(prev, updated || []));
     } catch (err) {
       console.warn('Reaction error:', err);
     }
@@ -330,9 +368,9 @@ export default function SoloChat({
       />
 
       {/* Main Chat Workspace Frame */}
-      <div className="flex-1 flex gap-5 overflow-hidden min-h-0 pt-2">
+      <div className="flex-1 flex gap-3 md:gap-5 overflow-hidden min-h-0 pt-2">
         {/* 1. Left Sidebar: Direct Conversations List */}
-        <div className="w-80 bg-white rounded-2xl border border-slate-200 p-3.5 flex flex-col shadow-xs flex-shrink-0">
+        <div className={`${mobileView === 'chat' ? 'hidden md:flex' : 'flex'} w-full md:w-64 lg:w-80 bg-white rounded-2xl border border-slate-200 p-3.5 flex-col shadow-xs flex-shrink-0`}>
           {/* Top Bar: Search & New Chat */}
           <div className="space-y-2.5 mb-3">
             <div className="flex items-center justify-between px-1">
@@ -391,7 +429,10 @@ export default function SoloChat({
                 return (
                   <button
                     key={chan.id}
-                    onClick={() => selectChannel(chan)}
+                    onClick={() => {
+                      selectChannel(chan);
+                      setMobileView('chat');
+                    }}
                     className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 border ${
                       isSelected
                         ? 'bg-indigo-50 border-indigo-200 text-indigo-900 font-bold shadow-xs'
@@ -432,12 +473,15 @@ export default function SoloChat({
         </div>
 
         {/* 2. Right Main Panel: Active 1-on-1 User Conversation */}
-        <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col h-full overflow-hidden min-h-0">
+        <div className={`${mobileView === 'list' ? 'hidden md:flex' : 'flex'} flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-xs flex-col h-full overflow-hidden min-h-0`}>
           {activeChannel && activeParticipant ? (
             <>
               {/* Chat Header */}
               <div className="p-3.5 sm:p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <button type="button" onClick={() => setMobileView('list')} className="md:hidden p-2 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Back to conversations">
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
                   <div className="relative">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
                       {activeParticipant.initial}

@@ -39,6 +39,8 @@ const AiAssistant = lazy(() => import('./components/AiAssistant'));
 const SoloChat = lazy(() => import('./components/SoloChat'));
 const CalendarView = lazy(() => import('./components/CalendarView'));
 import AiReminderToast from './components/AiReminderToast';
+import NotificationBell from './components/NotificationBell';
+import { openDeepLink } from './lib/deepLink';
 const FinanceTracker = lazy(() => import('./components/FinanceTracker'));
 import LandingPage from './pages/LandingPage';
 import CreateGroupModal from './components/CreateGroupModal';
@@ -132,9 +134,9 @@ export default function App() {
 
   const loadInitialData = async () => {
     try {
-      const userData = await api.getMe();
+      // In parallel: on a distant server each round trip costs a few hundred milliseconds.
+      const [userData, wsList] = await Promise.all([api.getMe(), api.listWorkspaces()]);
       setUser(userData);
-      const wsList = await api.listWorkspaces();
       setWorkspaces(wsList);
 
       // Prioritize saved workspace ID, otherwise default to Team/Group workspace
@@ -302,13 +304,12 @@ export default function App() {
     setCurrentWorkspace(null);
   };
 
-  const handleLogout = async () => {
-    try {
-      await api.logout();
-    } catch {
-      // Already expired or offline: the local session is cleared either way.
-    }
+  // Signing out is instant: the screen clears now and the server revokes the token in the
+  // background (an expired or offline token is fine either way).
+  const handleLogout = () => {
+    const current = getAuthToken();
     clearSession();
+    if (current) api.revokeToken(current);
   };
 
   // Any API call that comes back 401 (expired or revoked token) signs the user out.
@@ -338,6 +339,19 @@ export default function App() {
 
   const handleBackToDashboard = () => setActiveTab('dashboard');
 
+  // A notification's link: switch to its workspace, open its tab, then let the feature open the item.
+  const handleOpenLink = (link) => {
+    if (link.workspace_id && link.workspace_id !== currentWorkspace?.id) {
+      if (!workspaces.some((w) => w.id === link.workspace_id)) {
+        notify('That item is in a workspace you no longer belong to.', 'error');
+        return;
+      }
+      handleSelectWorkspace(link.workspace_id);
+    }
+    if (link.tab && isKnownTab(link.tab)) setActiveTab(link.tab);
+    openDeepLink(link);
+  };
+
   return (
     <div className="h-screen w-full flex flex-col bg-[#F8FAFC] text-[#191C1E] font-sans antialiased overflow-hidden">
       {/* TopNavBar (Exact Stitch Specification) */}
@@ -351,11 +365,11 @@ export default function App() {
             title="NexaMind Dashboard"
             aria-label="Go to dashboard"
           >
-            <img src="/logo.png" alt="" className="h-7 w-auto object-contain" />
+            <img src="/logo.png" alt="" className="h-6 sm:h-7 w-auto max-w-[6.5rem] sm:max-w-none object-contain object-left" />
           </button>
 
           {/* Global Workspace Search (Stitch Spec) */}
-          <div className="relative hidden md:block">
+          <div className="relative hidden lg:block">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input aria-label="Search across workspace"
               type="text"
@@ -371,35 +385,36 @@ export default function App() {
           <button
             type="button"
             onClick={() => handleToggleMode('personal')}
-            className={`flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${
+            className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition ${
               isSoloWorkspace
                 ? 'bg-white text-sky-600 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <User className="w-3.5 h-3.5" /> Solo
+            <User className="w-3.5 h-3.5" aria-hidden="true" /> <span className="sr-only sm:not-sr-only">Solo</span>
           </button>
           <button
             type="button"
             onClick={() => handleToggleMode('team')}
-            className={`flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${
+            className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition ${
               !isSoloWorkspace
                 ? 'bg-white text-purple-600 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Users className="w-3.5 h-3.5" /> Group
+            <Users className="w-3.5 h-3.5" aria-hidden="true" /> <span className="sr-only sm:not-sr-only">Group</span>
           </button>
         </div>
 
         {/* Top Right Action Tools */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 sm:gap-3">
+          <div className="flex items-center gap-0.5 sm:gap-1">
+            <NotificationBell onNavigate={handleOpenLink} />
             <button
               onClick={() => setActiveTab('meetings')}
               title="Start Video Meeting"
               aria-label="Start video meeting"
-              className="text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
+              className="hidden sm:inline-flex text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
             >
               <Video className="w-4 h-4" />
             </button>
@@ -407,7 +422,7 @@ export default function App() {
               onClick={() => setActiveTab('calendar')}
               title="Calendar & reminders"
               aria-label="Open calendar and reminders"
-              className="text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
+              className="hidden sm:inline-flex text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
             >
               <CalendarClock className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -549,6 +564,10 @@ export default function App() {
                 sessions={sessions}
                 onRefreshSessions={() => loadWorkspaceData(currentWorkspace?.id)}
                 onBack={handleBackToDashboard}
+                onOpenMeeting={(meetingId) => {
+                  setActiveTab('meetings');
+                  openDeepLink({ tab: 'meetings', meeting_id: meetingId });
+                }}
               />
             )}
 

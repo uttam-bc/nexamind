@@ -284,19 +284,20 @@ async def test_recordings_must_be_audio_or_video(client: AsyncClient, auth_conte
 # --- Cross-workspace isolation --------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_cannot_end_another_workspaces_video_room(client: AsyncClient) -> None:
+async def test_cannot_end_another_workspaces_meeting(client: AsyncClient) -> None:
     alice = await register(client, "alice@example.com", "Alice", "alice")
     bob = await register(client, "bob@example.com", "Bob", "bob")
-    room = await client.post(f"/workspaces/{alice['workspace_id']}/video/rooms",
-                             headers=auth_headers(alice["token"]), json={"name": "Board meeting"})
-    room_id = room.json()["room_id"]
+    meeting = await client.post(f"/workspaces/{alice['workspace_id']}/meetings/instant",
+                                headers=auth_headers(alice["token"]), json={"title": "Board meeting"})
+    meeting_id = meeting.json()["id"]
 
-    ended = await client.post(f"/workspaces/{bob['workspace_id']}/video/rooms/{room_id}/end",
-                      headers=auth_headers(bob["token"]), json={})
-    assert ended.status_code == 404
-    still_active = await client.get(f"/workspaces/{alice['workspace_id']}/video/rooms",
-                                    headers=auth_headers(alice["token"]))
-    assert [r["room_id"] for r in still_active.json()] == [room_id]
+    for path in (f"/workspaces/{bob['workspace_id']}/meetings/{meeting_id}/end",
+                 f"/workspaces/{alice['workspace_id']}/meetings/{meeting_id}/end"):
+        ended = await client.post(path, headers=auth_headers(bob["token"]), json={"scope": "all"})
+        assert ended.status_code == 404
+    still_live = await client.get(f"/workspaces/{alice['workspace_id']}/meetings/{meeting_id}",
+                                  headers=auth_headers(alice["token"]))
+    assert still_live.json()["status"] == "live"
 
 
 @pytest.mark.asyncio

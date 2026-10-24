@@ -1,1781 +1,472 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Video,
-  VideoOff,
-  Mic,
-  MicOff,
-  Monitor,
-  PhoneOff,
-  Sparkles,
-  Smile,
-  MoreVertical,
-  Activity,
+  CalendarClock,
   CalendarPlus,
-  Check,
-  User,
-  Users,
-  FileText,
-  Clock,
-  MoreHorizontal,
-  Calendar,
-  MessageSquare,
-  Share2,
-  Copy,
-  Plus,
-  Send,
-  X,
-  UserPlus,
-  Upload,
-  Play,
-  ArrowRight,
-  ExternalLink,
-  ShieldCheck,
   CheckCircle2,
+  Clock,
+  FileText,
+  Loader2,
+  Lock,
+  Pencil,
   Radio,
-  Trash2,
-  ListChecks,
+  Repeat,
+  Upload,
+  Users,
+  Video,
+  XCircle,
 } from 'lucide-react';
-import { api, openSocket } from '../api';
+import { api } from '../api';
 import FeatureHeader from './FeatureHeader';
 import { notify, confirmDialog } from '../context/ToastContext';
+import { onDeepLink } from '../lib/deepLink';
+import { newId } from '../lib/meetingClient';
+import MeetingRoom, { PreJoin } from './meetings/MeetingRoom';
+import MomReview from './meetings/MomReview';
+import ScheduleMeetingDialog from './meetings/ScheduleMeetingDialog';
+import { browserTimeZone } from '../lib/timezone';
 
-// Fallback until the server's list (which adds TURN relays when configured) has loaded.
-const DEFAULT_ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
-// Room status polling: frequent enough to show who's in a call, without a request per second.
-const ROOM_POLL_IN_CALL_MS = 5000;
-const ROOM_POLL_IDLE_MS = 15000;
+const REFRESH_MS = 20000;
 
-export default function Meetings({
-  workspaceId,
-  workspace,
-  workspaces = [],
-  onSelectWorkspace,
-  user,
-  sessions,
-  onRefreshSessions,
-  onRefreshDocuments,
-  onBack,
-}) {
-  const currentUserName = user?.name || 'You';
-  const currentUserId = String(user?.id || 'local-user');
-  const teamWorkspace = workspaces.find((w) => w.type === 'team' || w.type === 'group' || (w.id !== workspaceId && w.join_code));
+function formatWhen(meeting) {
+  if (!meeting.scheduled_start) return '';
+  const start = new Date(meeting.scheduled_start);
+  const local = start.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const viewerZone = browserTimeZone();
+  if (meeting.timezone && meeting.timezone !== viewerZone) {
+    const theirs = start.toLocaleTimeString([], { timeZone: meeting.timezone, hour: '2-digit', minute: '2-digit' });
+    return `${local} (${theirs} ${meeting.timezone})`;
+  }
+  return local;
+}
 
-  // 1. Meeting Lobby vs In-Call State
-  const [activeRoom, setActiveRoom] = useState(null);
-  const [ongoingWorkspaceMeeting, setOngoingWorkspaceMeeting] = useState(null);
-  const [meetingTitleInput, setMeetingTitleInput] = useState('');
-  const [joinCodeInput, setJoinCodeInput] = useState('');
-  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState('');
+function startsSoon(meeting) {
+  const start = new Date(meeting.scheduled_start).getTime();
+  return start - Date.now() < 15 * 60 * 1000;
+}
 
-  // 2. Past Meeting Detail Modal State
-  const [selectedPastMeeting, setSelectedPastMeeting] = useState(null);
-  const [pastMeetingTab, setPastMeetingTab] = useState('mom'); // 'mom' | 'transcript' | 'actions'
-  const [copiedPastMeeting, setCopiedPastMeeting] = useState(false);
-  const [isDeletingSession, setIsDeletingSession] = useState(false);
-  const [isRegeneratingMom, setIsRegeneratingMom] = useState(false);
+function MomBadge({ session }) {
+  if (session.status === 'summarizing' || session.status === 'transcribing' || session.status === 'uploading') {
+    return (
+      <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded flex items-center gap-1">
+        <Loader2 className="w-3 h-3 animate-spin" /> Processing
+      </span>
+    );
+  }
+  if (session.status === 'failed') {
+    return <span className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-1 rounded">Failed</span>;
+  }
+  if (session.mom_status === 'approved') {
+    return (
+      <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded flex items-center gap-1">
+        <Lock className="w-3 h-3" /> Approved
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded flex items-center gap-1">
+      <CheckCircle2 className="w-3 h-3" /> Draft
+    </span>
+  );
+}
 
-  // 3. In-Call Media & Participant State
-  const [isCameraOn, setIsCameraOn] = useState(true);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
-  const [copiedCode, setCopiedCode] = useState(false);
-
-  // Real connected participants
-  const [participants, setParticipants] = useState([
-    {
-      id: currentUserId,
-      name: currentUserName,
-      isLocal: true,
-      role: 'Host',
-      mic: true,
-      cam: true,
-    },
-  ]);
-
-  // Remote streams dictionary { [peerId]: MediaStream }
-  const [remoteStreams, setRemoteStreams] = useState({});
-
-  // In-call collaboration
-  const [activeDrawer, setActiveDrawer] = useState(null);
-  const [inCallChat, setInCallChat] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-  const [floatingReactions, setFloatingReactions] = useState([]);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-
-  // Real live transcript from speech recognition
-  const [liveTranscript, setLiveTranscript] = useState([]);
-  const [currentCaption, setCurrentCaption] = useState('');
-  const [actionItems, setActionItems] = useState([]);
-  const [syncedActionIds, setSyncedActionIds] = useState(new Set());
-  const [newActionInput, setNewActionInput] = useState('');
-  const [showAddAction, setShowAddAction] = useState(false);
-
-  // References
-  const iceConfigRef = useRef(DEFAULT_ICE_SERVERS);
-  const localVideoRef = useRef(null);
-  const screenVideoRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const screenStreamRef = useRef(null);
-  const timerRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const speechRecognitionRef = useRef(null);
+export default function Meetings({ workspaceId, workspace, workspaces = [], onSelectWorkspace, user, sessions, onRefreshSessions, onRefreshDocuments, onBack }) {
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [dialog, setDialog] = useState(null); // { mode: 'create' } | { mode: 'edit', meeting }
+  const [joining, setJoining] = useState(null); // meeting being joined (pre-join screen)
+  const [inCall, setInCall] = useState(null); // { meeting, stream, state }
+  const [momSessionId, setMomSessionId] = useState(null);
+  const [starting, setStarting] = useState(false);
+  const [instantTitle, setInstantTitle] = useState('');
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
-  const wsRef = useRef(null);
-  const peerConnectionsRef = useRef({});
+  const startingRef = useRef(false); // a double click must not start two meetings
+  const teamWorkspace = workspaces.find((w) => w.type !== 'personal' && w.id !== workspaceId);
 
-  // Query server for active room in workspace and sync participant list
-  const fetchActiveRooms = async () => {
+  const load = useCallback(async () => {
     if (!workspaceId) return;
     try {
-      const rooms = await api.listActiveVideoRooms(workspaceId).catch(() => []);
-      if (rooms && rooms.length > 0) {
-        const room = rooms[0];
-        setOngoingWorkspaceMeeting(room);
-        if (room.participants && room.participants.length > 0) {
-          setParticipants(room.participants);
-        }
-      } else {
-        setOngoingWorkspaceMeeting(null);
-      }
-    } catch (e) {
-      setOngoingWorkspaceMeeting(null);
+      setMeetings(await api.listMeetings(workspaceId, 'upcoming'));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchActiveRooms();
-    const interval = setInterval(() => {
-      if (document.visibilityState !== 'hidden') fetchActiveRooms();
-    }, activeRoom ? ROOM_POLL_IN_CALL_MS : ROOM_POLL_IDLE_MS);
-    return () => clearInterval(interval);
-  }, [workspaceId, activeRoom]);
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    api
-      .getIceServers(workspaceId)
-      .then((cfg) => {
-        if (!cancelled && Array.isArray(cfg?.iceServers) && cfg.iceServers.length > 0) {
-          iceConfigRef.current = { iceServers: cfg.iceServers };
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
   }, [workspaceId]);
 
-  // In-call timer
   useEffect(() => {
-    if (activeRoom) {
-      timerRef.current = setInterval(() => {
-        setCallDuration((prev) => prev + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setCallDuration(0);
-    }
+    setLoading(true);
+    load();
+    api.getWorkspaceMembers(workspaceId).then(setMembers).catch(() => setMembers([]));
+  }, [load, workspaceId]);
+
+  // Keep the list fresh (someone else starts, cancels or ends a meeting) while in the lobby.
+  useEffect(() => {
+    if (inCall) return undefined;
+    const timer = setInterval(load, REFRESH_MS);
+    const onNotification = (e) => {
+      if (e.detail?.category === 'meetings' || e.detail?.category === 'mom') {
+        load();
+        onRefreshSessions?.();
+      }
+    };
+    window.addEventListener('nexamind:notification', onNotification);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      clearInterval(timer);
+      window.removeEventListener('nexamind:notification', onNotification);
     };
-  }, [activeRoom]);
+  }, [inCall, load, onRefreshSessions]);
 
-  // WebRTC Helper: Create Peer Connection for remote peer
-  const createPeerConnection = (peerId, peerName) => {
-    if (peerConnectionsRef.current[peerId]) {
-      return peerConnectionsRef.current[peerId];
-    }
-
-    const pc = new RTCPeerConnection(iceConfigRef.current);
-    peerConnectionsRef.current[peerId] = pc;
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current);
-      });
-    }
-
-    pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        const stream = event.streams[0];
-        setRemoteStreams((prev) => ({ ...prev, [peerId]: stream }));
-      }
-    };
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            event: 'video_signal_ice_candidate',
-            target_id: peerId,
-            candidate: event.candidate,
-          })
-        );
-      }
-    };
-
-    return pc;
-  };
-
-  // Local media setup (Webcam / Mic / Audio Analyzer / Speech Recognition)
-  useEffect(() => {
-    let audioInterval = null;
-
-    if (activeRoom) {
-      const startLocalMedia = async () => {
-        if (navigator.mediaDevices?.getUserMedia) {
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-              video: true,
-              audio: true,
-            });
-            localStreamRef.current = stream;
-            setIsCameraOn(true);
-            if (localVideoRef.current) {
-              localVideoRef.current.srcObject = stream;
-            }
-
-            try {
-              const AudioContext = window.AudioContext || window.webkitAudioContext;
-              if (AudioContext) {
-                const audioCtx = new AudioContext();
-                audioContextRef.current = audioCtx;
-                const source = audioCtx.createMediaStreamSource(stream);
-                const analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 256;
-                source.connect(analyser);
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-                audioInterval = setInterval(() => {
-                  analyser.getByteFrequencyData(dataArray);
-                  const volume = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-                  setIsSpeaking(volume > 15);
-                }, 120);
-              }
-            } catch (audioErr) {
-              console.warn('Audio analyser error:', audioErr);
-            }
-
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(
-                JSON.stringify({
-                  event: 'video_signal_join',
-                  room_id: activeRoom.room_id,
-                })
-              );
-            }
-          } catch (err) {
-            console.warn('Camera access lock or blocked, switching to avatar mode:', err);
-            setIsCameraOn(false);
-
-            try {
-              const audioOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              localStreamRef.current = audioOnlyStream;
-            } catch (aErr) {}
-
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(
-                JSON.stringify({
-                  event: 'video_signal_join',
-                  room_id: activeRoom.room_id,
-                })
-              );
-            }
-          }
+  const openJoin = useCallback(
+    async (meetingOrId) => {
+      try {
+        const meeting = typeof meetingOrId === 'string' ? await api.getMeeting(workspaceId, meetingOrId) : meetingOrId;
+        if (meeting.status === 'ended' || meeting.status === 'cancelled') {
+          notify(`This meeting has ${meeting.status === 'ended' ? 'ended' : 'been cancelled'}.`, 'info');
+          if (meeting.session_id) setMomSessionId(meeting.session_id);
+          return;
         }
-      };
-
-      startLocalMedia();
-
-      // Real-time Speech Recognition
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        try {
-          const recognition = new SpeechRecognition();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.lang = 'en-US';
-
-          recognition.onresult = (event) => {
-            const current = event.resultIndex;
-            const transcript = event.results[current][0].transcript;
-            setCurrentCaption(transcript);
-
-            if (event.results[current].isFinal) {
-              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              const newEntry = {
-                id: `tr-${Date.now()}`,
-                speaker: currentUserName,
-                initial: currentUserName.slice(0, 2).toUpperCase(),
-                color: 'bg-indigo-100 text-indigo-700',
-                time: now,
-                text: transcript,
-              };
-
-              setLiveTranscript((prev) => [...prev, newEntry]);
-              setCurrentCaption('');
-
-              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(
-                  JSON.stringify({
-                    event: 'transcript_broadcast',
-                    entry: newEntry,
-                  })
-                );
-              }
-
-              const lower = transcript.toLowerCase();
-              if (
-                lower.includes('schedule') ||
-                lower.includes('sync') ||
-                lower.includes('by ') ||
-                lower.includes('deadline') ||
-                lower.includes('action') ||
-                lower.includes('will do') ||
-                lower.includes('need to')
-              ) {
-                const actionObj = {
-                  id: `action-${Date.now()}`,
-                  text: transcript,
-                  assignee: currentUserName,
-                  timeframe: 'Identified from speech',
-                };
-                setActionItems((prev) => [...prev, actionObj]);
-                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(
-                    JSON.stringify({
-                      event: 'action_item_broadcast',
-                      action: actionObj,
-                    })
-                  );
-                }
-              }
-            }
-          };
-
-          recognition.onerror = (e) => console.warn('Speech rec error:', e);
-          try {
-            recognition.start();
-          } catch {}
-          speechRecognitionRef.current = recognition;
-        } catch (recErr) {
-          console.warn('Speech recognition error:', recErr);
-        }
+        setJoining(meeting);
+      } catch (err) {
+        notify(err.message, 'error');
       }
-    }
+    },
+    [workspaceId],
+  );
 
-    return () => {
-      if (audioInterval) clearInterval(audioInterval);
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(() => {});
-      }
-      if (speechRecognitionRef.current) {
-        try {
-          speechRecognitionRef.current.stop();
-        } catch {}
-      }
-      Object.values(peerConnectionsRef.current).forEach((pc) => pc.close());
-      peerConnectionsRef.current = {};
-    };
-  }, [activeRoom, currentUserName]);
-
-  // WebSocket signaling and room event synchronization
-  useEffect(() => {
-    if (!workspaceId) return;
-    try {
-      const ws = openSocket(`/ws/workspaces/${workspaceId}/events`);
-
-      ws.onopen = () => {
-        if (activeRoom) {
-          ws.send(
-            JSON.stringify({
-              event: 'video_signal_join',
-              room_id: activeRoom.room_id,
-            })
+  // Notifications link straight to a meeting (join) or to its minutes.
+  useEffect(
+    () =>
+      onDeepLink('meetings', (link) => {
+        if (link.session_id) setMomSessionId(link.session_id);
+        else if (link.meeting_id && link.join) openJoin(link.meeting_id);
+        else if (link.meeting_id) {
+          api.getMeeting(workspaceId, link.meeting_id).then(
+            (m) => (m.session_id ? setMomSessionId(m.session_id) : m.status === 'live' ? setJoining(m) : null),
+            (err) => notify(err.message, 'error'),
           );
         }
-      };
+      }),
+    [openJoin, workspaceId],
+  );
 
-      ws.onmessage = async (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-
-          if (payload.event === 'video_room_started') {
-            setOngoingWorkspaceMeeting({
-              room_id: payload.room_id,
-              name: payload.room_name,
-              creator_name: payload.creator,
-              participants: payload.participants || [],
-            });
-            if (payload.participants) {
-              setParticipants(payload.participants);
-            }
-          } else if (payload.event === 'video_room_ended') {
-            setOngoingWorkspaceMeeting(null);
-            if (activeRoom && activeRoom.room_id === payload.room_id) {
-              handleEndCall();
-            }
-          } else if (payload.event === 'video_room_user_joined') {
-            if (payload.participants) {
-              setParticipants(payload.participants);
-            }
-            fetchActiveRooms();
-          } else if (payload.event === 'video_room_user_left') {
-            setParticipants((prev) => prev.filter((p) => String(p.id) !== String(payload.user_id)));
-            if (peerConnectionsRef.current[payload.user_id]) {
-              peerConnectionsRef.current[payload.user_id].close();
-              delete peerConnectionsRef.current[payload.user_id];
-            }
-            setRemoteStreams((prev) => {
-              const updated = { ...prev };
-              delete updated[payload.user_id];
-              return updated;
-            });
-            fetchActiveRooms();
-          }
-
-          // Real-time transcript broadcast sync
-          else if (payload.event === 'transcript_broadcast' && payload.entry) {
-            setLiveTranscript((prev) => {
-              if (prev.some((e) => e.id === payload.entry.id)) return prev;
-              return [...prev, payload.entry];
-            });
-          } else if (payload.event === 'action_item_broadcast' && payload.action) {
-            setActionItems((prev) => {
-              if (prev.some((a) => a.id === payload.action.id)) return prev;
-              return [...prev, payload.action];
-            });
-          }
-
-          // WebRTC P2P signaling
-          if (activeRoom && payload.sender_id && String(payload.sender_id) !== currentUserId) {
-            const peerId = payload.sender_id;
-
-            if (payload.event === 'video_signal_join') {
-              const pc = createPeerConnection(peerId, payload.sender_name);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              ws.send(
-                JSON.stringify({
-                  event: 'video_signal_offer',
-                  target_id: peerId,
-                  offer: offer,
-                })
-              );
-            } else if (payload.event === 'video_signal_offer' && (!payload.target_id || String(payload.target_id) === currentUserId)) {
-              const pc = createPeerConnection(peerId, payload.sender_name);
-              await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              ws.send(
-                JSON.stringify({
-                  event: 'video_signal_answer',
-                  target_id: peerId,
-                  answer: answer,
-                })
-              );
-            } else if (payload.event === 'video_signal_answer' && (!payload.target_id || String(payload.target_id) === currentUserId)) {
-              const pc = peerConnectionsRef.current[peerId];
-              if (pc) {
-                await pc.setRemoteDescription(new RTCSessionDescription(payload.answer));
-              }
-            } else if (payload.event === 'video_signal_ice_candidate' && (!payload.target_id || String(payload.target_id) === currentUserId)) {
-              const pc = peerConnectionsRef.current[peerId];
-              if (pc && payload.candidate) {
-                await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(() => {});
-              }
-            }
-          }
-        } catch (e) {}
-      };
-
-      wsRef.current = ws;
-      return () => {
-        if (wsRef.current) wsRef.current.close();
-      };
-    } catch (err) {}
-  }, [workspaceId, activeRoom]);
-
-  const formatDuration = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    if (hrs > 0) {
-      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-    }
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  };
-
-  // 1. Action: Start or Join Single Workspace Live Meeting
-  const handleStartInstantMeeting = async (title) => {
-    if (ongoingWorkspaceMeeting) {
-      return handleJoinOngoingMeeting(ongoingWorkspaceMeeting);
-    }
-
-    const finalTitle = title || meetingTitleInput.trim() || `${workspace?.name || 'Team'} Live Meeting`;
+  const startInstant = async () => {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
     try {
-      const room = await api.createVideoRoom(workspaceId, finalTitle);
-      setActiveRoom(room);
-      setOngoingWorkspaceMeeting(room);
-      if (room.participants && room.participants.length > 0) {
-        setParticipants(room.participants);
-      } else {
-        setParticipants([{ id: currentUserId, name: currentUserName, isLocal: true, role: 'Host', mic: true, cam: true }]);
-      }
-      setLiveTranscript([]);
-      setActionItems([]);
-      fetchActiveRooms();
+      const meeting = await api.startInstantMeeting(workspaceId, {
+        title: instantTitle.trim() || `${user?.name || 'Team'}'s meeting`,
+        client_request_id: newId(),
+      });
+      setInstantTitle('');
+      setJoining(meeting);
     } catch (err) {
-      const fallbackRoom = {
-        room_id: `room-${Date.now()}`,
-        name: finalTitle,
-        participants: [{ id: currentUserId, name: currentUserName, role: 'Host' }],
-      };
-      setActiveRoom(fallbackRoom);
-      setOngoingWorkspaceMeeting(fallbackRoom);
+      notify(err.message, 'error');
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   };
 
-  // 2. Action: Join Ongoing Workspace Meeting
-  const handleJoinOngoingMeeting = async (room) => {
+  const submitDialog = async (payload) => {
+    if (dialog.mode === 'edit') {
+      await api.updateMeeting(workspaceId, dialog.meeting.id, payload);
+      notify('Meeting updated. Invitees were told.', 'success');
+    } else {
+      const meeting = await api.scheduleMeeting(workspaceId, payload);
+      notify(`“${meeting.title}” scheduled for ${formatWhen(meeting)}.`, 'success');
+    }
+    setDialog(null);
+    load();
+  };
+
+  const cancelMeeting = async (meeting) => {
+    const ok = await confirmDialog(`Cancel “${meeting.title}” on ${formatWhen(meeting)}? Invitees are notified.`, {
+      title: 'Cancel meeting?',
+      confirmLabel: 'Cancel meeting',
+    });
+    if (!ok) return;
     try {
-      const joined = await api.joinVideoRoom(workspaceId, room.room_id).catch(() => room);
-      setActiveRoom(joined);
-      setOngoingWorkspaceMeeting(joined);
-      if (joined.participants && joined.participants.length > 0) {
-        setParticipants(joined.participants);
-      }
-      fetchActiveRooms();
+      await api.cancelMeeting(workspaceId, meeting.id);
+      notify('Meeting cancelled.', 'success');
+      load();
     } catch (err) {
-      setActiveRoom(room);
+      notify(err.message, 'error');
     }
   };
 
-  // 3. Action: Join with code
-  const handleJoinWithCode = async (e) => {
-    e.preventDefault();
-    if (!joinCodeInput.trim()) return;
-    if (ongoingWorkspaceMeeting) {
-      return handleJoinOngoingMeeting(ongoingWorkspaceMeeting);
-    }
-    handleStartInstantMeeting(`Room: ${joinCodeInput.trim().toUpperCase()}`);
-    setJoinCodeInput('');
-  };
-
-  // 4. Action: Upload audio recording for autonomous AI MoM synthesis
-  const handleUploadAudio = async (e) => {
+  const uploadRecording = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-
-    setIsUploadingAudio(true);
-    setUploadProgress(`Processing ${file.name} through AI audio pipeline...`);
-
+    setUploading(true);
     try {
       const title = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
       await api.uploadSessionFile(workspaceId, file, title);
-      setUploadProgress('AI Synthesis complete! Meeting minutes generated.');
-      setTimeout(() => {
-        setIsUploadingAudio(false);
-        setUploadProgress('');
-        if (onRefreshSessions) onRefreshSessions();
-        if (onRefreshDocuments) onRefreshDocuments();
-      }, 2000);
+      notify('Recording uploaded. The transcript and draft minutes appear below when ready.', 'success');
+      onRefreshSessions?.();
+      onRefreshDocuments?.();
     } catch (err) {
-      notify(`Upload processing error: ${err.message}`, 'error');
-      setIsUploadingAudio(false);
-      setUploadProgress('');
-    }
-  };
-
-  // 5. Action: Delete a Past Meeting Session
-  const handleDeleteSession = async (sessionId) => {
-    if (!(await confirmDialog('This permanently deletes the meeting session, its transcript and minutes.', { title: 'Delete meeting?', confirmLabel: 'Delete' }))) {
-      return;
-    }
-    setIsDeletingSession(true);
-    try {
-      if (workspaceId) {
-        await api.deleteSession(workspaceId, sessionId);
-      }
-      if (selectedPastMeeting && selectedPastMeeting.id === sessionId) {
-        setSelectedPastMeeting(null);
-      }
-      if (onRefreshSessions) onRefreshSessions();
-    } catch (err) {
-      notify(`Failed to delete meeting: ${err.message}`, 'error');
+      notify(`Upload failed: ${err.message}`, 'error');
     } finally {
-      setIsDeletingSession(false);
+      setUploading(false);
     }
   };
 
-  // 6. Action: Re-generate MoM for a Past Meeting
-  const handleRegeneratePastMeetingMom = async (sessionId) => {
-    setIsRegeneratingMom(true);
+  const deleteSession = async (sessionId) => {
+    if (!(await confirmDialog('This permanently deletes the session, its transcript and minutes.', { title: 'Delete?', confirmLabel: 'Delete' }))) return;
     try {
-      if (workspaceId) {
-        const updated = await api.generateSessionMom(workspaceId, sessionId);
-        setSelectedPastMeeting(updated);
-      }
-      if (onRefreshSessions) onRefreshSessions();
+      await api.deleteSession(workspaceId, sessionId);
+      setMomSessionId(null);
+      onRefreshSessions?.();
     } catch (err) {
-      notify(`Failed to regenerate minutes: ${err.message}`, 'error');
-    } finally {
-      setIsRegeneratingMom(false);
+      notify(err.message, 'error');
     }
   };
 
-  // 7. Action: Copy Past Meeting Content to Clipboard
-  const handleCopyPastMeetingContent = () => {
-    if (!selectedPastMeeting) return;
-    const content =
-      pastMeetingTab === 'transcript'
-        ? selectedPastMeeting.transcript || 'No transcript available.'
-        : `${selectedPastMeeting.title}\n\n${selectedPastMeeting.ai_summary || 'No summary available.'}`;
-    navigator.clipboard.writeText(content);
-    setCopiedPastMeeting(true);
-    setTimeout(() => setCopiedPastMeeting(false), 2000);
-  };
+  if (inCall) {
+    return (
+      <MeetingRoom
+        key={inCall.meeting.id}
+        workspaceId={workspaceId}
+        meeting={inCall.meeting}
+        user={user}
+        localStream={inCall.stream}
+        initialState={inCall.state}
+        onExit={({ ended, sessionId }) => {
+          setInCall(null);
+          load();
+          onRefreshSessions?.();
+          if (ended && sessionId && inCall.meeting.is_host) setMomSessionId(sessionId);
+        }}
+      />
+    );
+  }
 
-  // Media controls
-  const toggleCamera = () => {
-    if (localStreamRef.current) {
-      const track = localStreamRef.current.getVideoTracks()[0];
-      if (track) {
-        track.enabled = !track.enabled;
-        setIsCameraOn(track.enabled);
-      }
-    } else {
-      setIsCameraOn(!isCameraOn);
-    }
-  };
-
-  const toggleMic = () => {
-    if (localStreamRef.current) {
-      const track = localStreamRef.current.getAudioTracks()[0];
-      if (track) {
-        track.enabled = !track.enabled;
-        setIsMicOn(track.enabled);
-      }
-    } else {
-      setIsMicOn(!isMicOn);
-    }
-  };
-
-  const toggleScreenShare = async () => {
-    if (!isScreenSharing) {
-      if (navigator.mediaDevices?.getDisplayMedia) {
-        try {
-          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-          screenStreamRef.current = screenStream;
-          setIsScreenSharing(true);
-          if (screenVideoRef.current) {
-            screenVideoRef.current.srcObject = screenStream;
-          }
-          screenStream.getVideoTracks()[0].onended = () => {
-            setIsScreenSharing(false);
-            if (screenStreamRef.current) {
-              screenStreamRef.current.getTracks().forEach((t) => t.stop());
-            }
-          };
-        } catch (err) {
-          console.warn('Screen share canceled:', err);
-        }
-      } else {
-        setIsScreenSharing(true);
-      }
-    } else {
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((t) => t.stop());
-      }
-      setIsScreenSharing(false);
-    }
-  };
-
-  const triggerReaction = (emoji) => {
-    const id = Date.now() + Math.random();
-    setFloatingReactions((prev) => [...prev, { id, emoji, left: Math.random() * 60 + 20 }]);
-    setShowEmojiPicker(false);
-    setTimeout(() => {
-      setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
-    }, 2500);
-  };
-
-  const handleSendChat = (e) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setInCallChat((prev) => [...prev, { sender: currentUserName, text: chatInput.trim(), time: now }]);
-    setChatInput('');
-  };
-
-  const handleCopyJoinCode = () => {
-    if (workspace?.join_code) {
-      navigator.clipboard.writeText(workspace.join_code);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2500);
-    }
-  };
-
-  const handleSyncAction = async (action) => {
-    try {
-      if (workspaceId) {
-        await api.createCalendarEvent(workspaceId, {
-          title: action.text,
-          description: `Action item created during live meeting`,
-          event_date: new Date().toISOString().split('T')[0],
-          event_time: '03:00 PM',
-          event_type: 'meeting',
-          priority: 'high',
-          source: 'ai_detected',
-        });
-      }
-      setSyncedActionIds((prev) => new Set([...prev, action.id]));
-    } catch (e) {
-      setSyncedActionIds((prev) => new Set([...prev, action.id]));
-    }
-  };
-
-  const handleAddActionItem = (e) => {
-    e.preventDefault();
-    if (!newActionInput.trim()) return;
-    const actionObj = {
-      id: `action-${Date.now()}`,
-      text: newActionInput.trim(),
-      assignee: currentUserName,
-      timeframe: 'Manual Action Item',
-    };
-    setActionItems((prev) => [...prev, actionObj]);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          event: 'action_item_broadcast',
-          action: actionObj,
-        })
-      );
-    }
-    setNewActionInput('');
-    setShowAddAction(false);
-  };
-
-  const handleGenerateMinutes = async () => {
-    try {
-      const transcriptText = liveTranscript.map((t) => `${t.speaker} (${t.time}): ${t.text}`).join('\n');
-      const actionText = actionItems.map((a) => `* [ ] **${a.assignee}:** ${a.text}`).join('\n');
-
-      const momContent = `# Minutes of Meeting: ${activeRoom?.name || 'Team Sync'}\n\n**Date:** ${new Date().toLocaleDateString()}\n**Participants:** ${participants.map((p) => p.name).join(', ')}\n**Duration:** ${formatDuration(callDuration)}\n\n## 📝 Live Meeting Discussion\n${transcriptText || 'Live discussion notes captured during session.'}\n\n## ✅ Action Items & Commitments\n${actionText || '* No action items recorded.'}\n\n---\n*Synthesized autonomously by NexaMind Copilot*`;
-
-      if (workspaceId) {
-        await api.createDocument(
-          workspaceId,
-          `MoM: ${activeRoom?.name || 'Live Meeting'} (${new Date().toLocaleDateString()})`,
-          { text: momContent }
-        );
-      }
-      notify('AI Synthesis Complete: Real Meeting Minutes (MoM) saved to Documents.', 'success');
-      if (onRefreshDocuments) onRefreshDocuments();
-    } catch (err) {
-      notify(`MoM error: ${err.message}`, 'error');
-    }
-  };
-
-  const handleEndCall = async () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => t.stop());
-    }
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
-    }
-    if (activeRoom && workspaceId) {
-      await api.endVideoRoom(workspaceId, activeRoom.room_id, {
-        notes: liveTranscript.map((t) => `${t.speaker}: ${t.text}`).join('\n'),
-      }).catch(() => {});
-    }
-    setActiveRoom(null);
-    setOngoingWorkspaceMeeting(null);
-    if (onRefreshSessions) onRefreshSessions();
-  };
+  const live = meetings.filter((m) => m.status === 'live');
+  const upcoming = meetings.filter((m) => m.status === 'scheduled');
+  const card = 'bg-white border border-[#E2E8F0] rounded-2xl shadow-sm';
 
   return (
-    <div className="h-full w-full font-sans antialiased text-[#191C1E]">
-      {/* ------------------------------------------------------------- */}
-      {/* CASE A: MEETING CENTER LOBBY (SCROLLABLE PAGE)                 */}
-      {/* ------------------------------------------------------------- */}
-      {!activeRoom ? (
-        <div className="space-y-6 max-w-6xl mx-auto py-2">
-          {/* Header */}
-          <FeatureHeader
-            title="Meetings & Video Hub"
-            subtitle="Start instant video calls, join your team's ongoing meeting, or inspect recorded sessions, transcripts, and AI MoMs."
-            icon={Video}
-            onBack={onBack}
-            actions={
-              <button
-                onClick={() => handleStartInstantMeeting()}
-                style={{ backgroundColor: '#4F46E5', color: '#FFFFFF' }}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center gap-2"
-              >
-                <Video className="w-4 h-4 text-white" />
-                <span>{ongoingWorkspaceMeeting ? 'Join Team Meeting' : '+ Start Team Meeting'}</span>
-              </button>
-            }
-          />
+    <div className="h-full w-full text-[#191C1E]">
+      <div className="space-y-6 max-w-6xl mx-auto py-2">
+        <FeatureHeader
+          title="Meetings"
+          subtitle="Video meetings with live transcription, and minutes you review before they become tasks."
+          icon={Video}
+          onBack={onBack}
+          actions={
+            <button type="button" onClick={() => setDialog({ mode: 'create' })} className="px-4 py-2.5 rounded-xl text-xs font-bold bg-white border border-slate-300 hover:border-indigo-400 flex items-center gap-2">
+              <CalendarPlus className="w-4 h-4 text-indigo-600" /> Schedule
+            </button>
+          }
+        />
 
-          {/* Solo Workspace Mode Notice with Quick Switch Button */}
-          {workspace?.type === 'personal' && teamWorkspace && (
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-amber-900 shadow-sm animate-fade-in">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0 font-bold">
-                  <Users className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="font-bold text-xs">You are currently in your Solo Workspace ({workspace?.name || 'Personal Account'})</p>
-                  <p className="text-xs text-amber-800">Team video calls take place in your Team Group Workspace. Switch to "{teamWorkspace.name}" to connect with your team.</p>
-                </div>
-              </div>
-              <button
-                onClick={() => onSelectWorkspace && onSelectWorkspace(teamWorkspace.id)}
-                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition shrink-0 flex items-center gap-1.5"
-              >
-                <Users className="w-4 h-4" />
-                <span>Switch to {teamWorkspace.name}</span>
-              </button>
-            </div>
-          )}
+        {workspace?.type === 'personal' && teamWorkspace && (
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-900">
+            <p className="text-sm">
+              You're in your personal workspace. Team meetings happen in <strong>{teamWorkspace.name}</strong>.
+            </p>
+            <button type="button" onClick={() => onSelectWorkspace?.(teamWorkspace.id)} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-bold shrink-0">
+              Switch to {teamWorkspace.name}
+            </button>
+          </div>
+        )}
 
-          {/* 🔴 PROMINENT LIVE ONGOING WORKSPACE MEETING HERO BANNER */}
-          {ongoingWorkspaceMeeting && (
-            <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border-2 border-emerald-400 p-6 rounded-2xl shadow-md flex flex-col md:flex-row items-center justify-between gap-4 animate-fade-in">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 shrink-0">
-                  <Radio className="w-6 h-6 animate-pulse" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="bg-rose-500 text-white text-xs font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                      LIVE NOW
-                    </span>
-                    <span className="text-xs font-mono text-emerald-800 font-bold">
-                      {ongoingWorkspaceMeeting.participants?.length || 1} Team Member(s) Connected
-                    </span>
+        {live.length > 0 && (
+          <section className="space-y-3" aria-label="Live meetings">
+            {live.map((m) => (
+              <div key={m.id} className="bg-emerald-50 border-2 border-emerald-400 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
+                    <Radio className="w-5 h-5 animate-pulse" />
                   </div>
-                  <h3 className="font-extrabold text-base text-[#191C1E] mt-1">
-                    {ongoingWorkspaceMeeting.name || 'Workspace Live Video Conference'}
-                  </h3>
-                  <p className="text-xs text-slate-600">
-                    Host: <strong>{ongoingWorkspaceMeeting.creator_name || 'Team Member'}</strong> • One group meeting for the entire workspace.
-                  </p>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-emerald-800">
+                      LIVE · {m.participant_count} {m.participant_count === 1 ? 'person' : 'people'} in the call
+                    </p>
+                    <h3 className="font-bold truncate">{m.title}</h3>
+                    <p className="text-xs text-slate-600">Host: {m.organizer_name || 'Unknown'}</p>
+                  </div>
                 </div>
+                <button type="button" onClick={() => openJoin(m)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shrink-0 flex items-center justify-center gap-2">
+                  <Video className="w-4 h-4" /> Join
+                </button>
               </div>
+            ))}
+          </section>
+        )}
 
-              <button
-                onClick={() => handleJoinOngoingMeeting(ongoingWorkspaceMeeting)}
-                style={{ backgroundColor: '#10B981', color: '#FFFFFF' }}
-                className="px-6 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-600/30 hover:bg-emerald-600 transition flex items-center gap-2 shrink-0 active:scale-95"
-              >
-                <Video className="w-4 h-4 text-white" />
-                <span>Join Ongoing Meeting Now</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className={`${card} p-5 space-y-3`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <Video className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold">Start a meeting now</h3>
+                <p className="text-xs text-slate-500">Workspace members are notified and can join.</p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                aria-label="Meeting title"
+                value={instantTitle}
+                onChange={(e) => setInstantTitle(e.target.value)}
+                maxLength={255}
+                placeholder="Title (optional)"
+                className="flex-1 min-w-0 bg-[#F2F4F6] border border-[#E2E8F0] focus:border-indigo-500 rounded-xl px-3 py-2 text-sm focus:outline-none"
+              />
+              <button type="button" onClick={startInstant} disabled={starting} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-50">
+                {starting ? 'Starting…' : 'Start'}
               </button>
-            </div>
-          )}
-
-          {/* 3 Action Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Card 1: Start / Join Single Meeting */}
-            <div className="bg-white border border-[#E2E8F0] p-6 rounded-2xl shadow-sm hover-lift space-y-4 flex flex-col justify-between">
-              <div className="space-y-3">
-                <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4F46E5] shadow-sm">
-                  <Video className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-[#191C1E]">
-                    {ongoingWorkspaceMeeting ? 'Join Team Meeting' : 'Start Instant Meeting'}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    {ongoingWorkspaceMeeting
-                      ? 'A live call is already ongoing in your workspace. Connect directly with your team.'
-                      : 'Launch a video room for the workspace with live speech transcription and Copilot action items.'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-2">
-                {!ongoingWorkspaceMeeting && (
-                  <input aria-label="Meeting title (e.g. Sprint Sync)"
-                    type="text"
-                    placeholder="Meeting title (e.g. Sprint Sync)..."
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
-                    value={meetingTitleInput}
-                    onChange={(e) => setMeetingTitleInput(e.target.value)}
-                  />
-                )}
-                <button
-                  onClick={() => handleStartInstantMeeting()}
-                  style={{ backgroundColor: ongoingWorkspaceMeeting ? '#10B981' : '#4F46E5', color: '#FFFFFF' }}
-                  className="w-full py-2.5 rounded-xl text-xs font-bold shadow-sm hover:opacity-95 transition flex items-center justify-center gap-2"
-                >
-                  <Video className="w-4 h-4 text-white" />
-                  <span>{ongoingWorkspaceMeeting ? 'Join Ongoing Call' : 'Start Meeting Now'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Card 2: Join Meeting with Code */}
-            <div className="bg-white border border-[#E2E8F0] p-6 rounded-2xl shadow-sm hover-lift space-y-4 flex flex-col justify-between">
-              <div className="space-y-3">
-                <div className="w-12 h-12 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-[#8B5CF6] shadow-sm">
-                  <Users className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-[#191C1E]">Join with Room Code</h3>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Connect to your team's ongoing call by entering their room ID or workspace join code.
-                  </p>
-                </div>
-              </div>
-
-              <form onSubmit={handleJoinWithCode} className="space-y-2 pt-2">
-                <input aria-label="Enter code (e.g. ROOM-1234)"
-                  type="text"
-                  placeholder="Enter code (e.g. ROOM-1234)..."
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#8B5CF6] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
-                  value={joinCodeInput}
-                  onChange={(e) => setJoinCodeInput(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  disabled={!joinCodeInput.trim()}
-                  className="w-full bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-50 text-white py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                  <span>Join Room</span>
-                </button>
-              </form>
-            </div>
-
-            {/* Card 3: Upload Audio for AI MoM */}
-            <div className="bg-white border border-[#E2E8F0] p-6 rounded-2xl shadow-sm hover-lift space-y-4 flex flex-col justify-between">
-              <div className="space-y-3">
-                <div className="w-12 h-12 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center text-[#0EA5E9] shadow-sm">
-                  <Upload className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-[#191C1E]">Upload Audio for AI MoM</h3>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Upload recorded audio (.mp3, .wav) to automatically transcribe and synthesize meeting minutes.
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="audio/*,video/*"
-                  className="hidden"
-                  onChange={handleUploadAudio}
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploadingAudio}
-                  className="w-full bg-[#0EA5E9] hover:bg-[#0284C7] disabled:opacity-50 text-white py-2.5 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>{isUploadingAudio ? 'Processing Audio...' : 'Upload Audio File'}</span>
-                </button>
-                {uploadProgress && (
-                  <p className="text-xs font-mono text-slate-500 mt-1.5 text-center truncate">
-                    {uploadProgress}
-                  </p>
-                )}
-              </div>
             </div>
           </div>
-
-          {/* Past Meeting Minutes Archive */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-[#191C1E] flex items-center gap-2">
-                <FileText className="w-4 h-4 text-[#8B5CF6]" />
-                <span>Recorded Sessions & Minutes (MoM) Archive</span>
-              </h2>
-              <span className="text-xs font-mono text-slate-400">
-                {sessions?.length || 0} Recorded Session(s)
-              </span>
+          <div className={`${card} p-5 space-y-3`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                <Upload className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold">Upload a recording</h3>
+                <p className="text-xs text-slate-500">Audio or video of a meeting held elsewhere: transcript and draft minutes.</p>
+              </div>
             </div>
+            <input ref={fileInputRef} type="file" accept="audio/*,video/*" className="hidden" onChange={uploadRecording} />
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="w-full bg-sky-600 hover:bg-sky-700 text-white py-2 rounded-xl text-sm font-bold disabled:opacity-50">
+              {uploading ? 'Uploading…' : 'Choose file'}
+            </button>
+          </div>
+        </div>
 
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl divide-y divide-[#E2E8F0] overflow-hidden shadow-sm">
-              {(sessions && sessions.length > 0) ? (
-                sessions.map((s) => (
-                  <div
-                    key={s.id}
-                    onClick={() => {
-                      setSelectedPastMeeting(s);
-                      setPastMeetingTab('mom');
-                    }}
-                    className="p-4 flex items-center justify-between hover:bg-[#F8FAFC] transition cursor-pointer group"
-                  >
-                    <div className="space-y-1 pr-4 min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-xs text-[#191C1E] group-hover:text-[#4F46E5] transition truncate">
-                          {s.title}
-                        </h4>
-                        <span className="text-xs font-mono text-slate-400">
-                          {s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}
+        <section className="space-y-3">
+          <h2 className="text-base font-bold flex items-center gap-2">
+            <CalendarClock className="w-4 h-4 text-indigo-600" /> Upcoming
+          </h2>
+          <div className={`${card} divide-y divide-[#E2E8F0] overflow-hidden`}>
+            {loading ? (
+              <div className="p-6 flex justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+              </div>
+            ) : loadError ? (
+              <div className="p-6 text-center text-sm text-rose-600">
+                {loadError}{' '}
+                <button type="button" onClick={load} className="underline font-bold">
+                  Retry
+                </button>
+              </div>
+            ) : upcoming.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500 space-y-2">
+                <CalendarClock className="w-8 h-8 mx-auto text-slate-300" />
+                <p>No meetings scheduled.</p>
+                <button type="button" onClick={() => setDialog({ mode: 'create' })} className="text-indigo-600 font-bold underline">
+                  Schedule one
+                </button>
+              </div>
+            ) : (
+              upcoming.map((m) => (
+                <div key={m.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-sm truncate">{m.title}</h4>
+                    <p className="text-xs text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> {formatWhen(m)} · {m.duration_minutes} min
+                      </span>
+                      {m.recurrence !== 'none' && (
+                        <span className="flex items-center gap-1">
+                          <Repeat className="w-3 h-3" /> {m.recurrence}
                         </span>
-                      </div>
-                      <p className="text-xs text-slate-500 line-clamp-1 max-w-xl">
-                        {s.ai_summary || s.transcript || 'Click to view full transcript & generated MoM.'}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-xs font-mono text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-1 rounded font-bold flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                        <span>MoM Ready</span>
-                      </span>
-
-                      {/* Delete button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteSession(s.id);
-                        }}
-                        title="Delete this meeting session"
-                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="p-8 text-center text-slate-400 text-xs space-y-2">
-                  <FileText className="w-8 h-8 text-slate-300 mx-auto" />
-                  <p>No meeting sessions recorded yet.</p>
-                  <p className="text-xs text-slate-500">
-                    Start a video call or upload an audio file to generate automated minutes.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ------------------------------------------------------------- */}
-          {/* PAST MEETING DETAIL MODAL (TRANSCRIPT, MOM & DELETE)          */}
-          {/* ------------------------------------------------------------- */}
-          {selectedPastMeeting && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-              <div data-modal className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-scale-up">
-                {/* Modal Header */}
-                <div className="p-5 md:p-6 border-b border-[#E2E8F0] flex items-start justify-between bg-gradient-to-r from-slate-50 to-indigo-50/30">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono font-bold bg-indigo-100 text-[#4F46E5] px-2 py-0.5 rounded">
-                        Recorded Session
-                      </span>
-                      <span className="text-xs font-mono text-slate-400">
-                        {selectedPastMeeting.created_at ? new Date(selectedPastMeeting.created_at).toLocaleString() : 'Past Meeting'}
-                      </span>
-                    </div>
-                    <h2 className="text-lg md:text-xl font-bold text-[#191C1E]">
-                      {selectedPastMeeting.title}
-                    </h2>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {/* Copy Content Button */}
-                    <button aria-label="Copy to Clipboard"
-                      onClick={handleCopyPastMeetingContent}
-                      className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-600 hover:text-indigo-600 hover:border-indigo-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-                      title="Copy to Clipboard"
-                    >
-                      {copiedPastMeeting ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                      <span className="hidden sm:inline">{copiedPastMeeting ? 'Copied!' : 'Copy'}</span>
-                    </button>
-
-                    {/* Delete Session Button */}
-                    <button
-                      onClick={() => handleDeleteSession(selectedPastMeeting.id)}
-                      disabled={isDeletingSession}
-                      className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 hover:text-rose-700 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-                      title="Delete Session"
-                    >
-                      <Trash2 className="w-4 h-4 text-rose-600" />
-                      <span className="hidden sm:inline">{isDeletingSession ? 'Deleting...' : 'Delete'}</span>
-                    </button>
-
-                    {/* Close Button */}
-                    <button
-                      onClick={() => setSelectedPastMeeting(null)}
-                      className="p-2 rounded-xl bg-white border border-[#E2E8F0] text-slate-400 hover:text-[#191C1E] transition"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Modal Navigation Tabs */}
-                <div className="flex items-center gap-2 px-6 pt-3 border-b border-[#E2E8F0] bg-white">
-                  <button
-                    onClick={() => setPastMeetingTab('mom')}
-                    className={`pb-3 px-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition ${
-                      pastMeetingTab === 'mom'
-                        ? 'border-[#4F46E5] text-[#4F46E5]'
-                        : 'border-transparent text-slate-500 hover:text-[#191C1E]'
-                    }`}
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Meeting Minutes (MoM)</span>
-                  </button>
-
-                  <button
-                    onClick={() => setPastMeetingTab('transcript')}
-                    className={`pb-3 px-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition ${
-                      pastMeetingTab === 'transcript'
-                        ? 'border-[#4F46E5] text-[#4F46E5]'
-                        : 'border-transparent text-slate-500 hover:text-[#191C1E]'
-                    }`}
-                  >
-                    <Mic className="w-4 h-4" />
-                    <span>Full Transcript</span>
-                  </button>
-
-                  <button
-                    onClick={() => setPastMeetingTab('actions')}
-                    className={`pb-3 px-3 text-xs font-bold flex items-center gap-1.5 border-b-2 transition ${
-                      pastMeetingTab === 'actions'
-                        ? 'border-[#4F46E5] text-[#4F46E5]'
-                        : 'border-transparent text-slate-500 hover:text-[#191C1E]'
-                    }`}
-                  >
-                    <ListChecks className="w-4 h-4" />
-                    <span>Action Items ({selectedPastMeeting.action_items?.length || 0})</span>
-                  </button>
-                </div>
-
-                {/* Modal Tab Content */}
-                <div className="flex-1 overflow-y-auto p-6 text-sm text-[#191C1E] bg-[#FAFAFA] min-h-[260px]">
-                  {pastMeetingTab === 'mom' && (
-                    <div className="space-y-4">
-                      {selectedPastMeeting.ai_summary ? (
-                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm prose prose-sm max-w-none text-slate-800 leading-relaxed whitespace-pre-wrap font-sans">
-                          {selectedPastMeeting.ai_summary}
-                        </div>
-                      ) : (
-                        <div className="p-8 text-center bg-white border border-[#E2E8F0] rounded-2xl text-slate-400 space-y-3">
-                          <FileText className="w-8 h-8 text-slate-300 mx-auto" />
-                          <p>No meeting minutes generated yet for this recording.</p>
-                          <button
-                            onClick={() => handleRegeneratePastMeetingMom(selectedPastMeeting.id)}
-                            disabled={isRegeneratingMom}
-                            className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-2"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>{isRegeneratingMom ? 'Synthesizing with AI...' : 'Generate MoM Now'}</span>
-                          </button>
-                        </div>
                       )}
-                    </div>
-                  )}
-
-                  {pastMeetingTab === 'transcript' && (
-                    <div className="space-y-3">
-                      {selectedPastMeeting.transcript ? (
-                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm text-xs font-mono text-slate-700 leading-relaxed whitespace-pre-wrap max-h-[400px] overflow-y-auto">
-                          {selectedPastMeeting.transcript}
-                        </div>
-                      ) : (
-                        <div className="p-8 text-center bg-white border border-[#E2E8F0] rounded-2xl text-slate-400 space-y-2">
-                          <Mic className="w-8 h-8 text-slate-300 mx-auto" />
-                          <p>No speech transcript recorded for this session.</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {pastMeetingTab === 'actions' && (
-                    <div className="space-y-3">
-                      {selectedPastMeeting.action_items && selectedPastMeeting.action_items.length > 0 ? (
-                        <div className="space-y-2.5">
-                          {selectedPastMeeting.action_items.map((item, idx) => (
-                            <div
-                              key={idx}
-                              className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#F43F5E] rounded-xl p-3.5 shadow-sm flex items-start justify-between gap-3"
-                            >
-                              <div>
-                                <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-xs font-mono font-bold px-2 py-0.5 rounded">
-                                  Action Item
-                                </span>
-                                <p className="text-xs font-semibold text-[#191C1E] mt-1.5">
-                                  {typeof item === 'string' ? item : item.text || item.title || JSON.stringify(item)}
-                                </p>
-                              </div>
-
-                              <button
-                                onClick={() => handleSyncAction({ id: `item-${idx}`, text: typeof item === 'string' ? item : item.text || item.title })}
-                                className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1 shrink-0"
-                              >
-                                <CalendarPlus className="w-3.5 h-3.5" />
-                                <span>Sync to Cal</span>
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="p-8 text-center bg-white border border-[#E2E8F0] rounded-2xl text-slate-400 space-y-2">
-                          <ListChecks className="w-8 h-8 text-slate-300 mx-auto" />
-                          <p>No individual action items detected for this meeting.</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Modal Footer */}
-                <div className="p-4 border-t border-[#E2E8F0] bg-white flex items-center justify-between">
-                  <span className="text-xs font-mono text-slate-500">
-                    Status: <strong className="text-emerald-600 uppercase">{selectedPastMeeting.status || 'Completed'}</strong>
-                  </span>
-
-                  <button
-                    onClick={() => setSelectedPastMeeting(null)}
-                    className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#191C1E] text-xs font-bold transition"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        /* ------------------------------------------------------------- */
-        /* CASE B: ACTIVE LIVE MEETING ROOM (FULL SCREEN DARK STAGE)     */
-        /* ------------------------------------------------------------- */
-        <div className="fixed inset-0 z-50 flex bg-[#181C24] text-white overflow-hidden">
-          {/* Main Video Room Area */}
-          <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#181C24]">
-            {/* Top Bar */}
-            <div className="h-14 px-6 border-b border-slate-800/80 bg-[#12151C] flex items-center justify-between flex-shrink-0 z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#F43F5E] animate-pulse"></div>
-                <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
-                  {activeRoom.name || 'Live Video Meeting'}
-                </h2>
-                <span className="text-xs font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
-                  {formatDuration(callDuration)}
-                </span>
-                <span className="text-xs font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-2 py-0.5 rounded">
-                  {participants.length} {participants.length === 1 ? 'Person (You)' : 'People Connected'}
-                </span>
-              </div>
-
-              {/* Invite Code Quick Link */}
-              <div className="flex items-center gap-2">
-                {workspace?.join_code && (
-                  <button
-                    onClick={handleCopyJoinCode}
-                    className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 transition"
-                  >
-                    {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-indigo-400" />}
-                    <span>{copiedCode ? 'Code Copied!' : `Join Code: ${workspace.join_code}`}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Video Streams & Participants Grid */}
-            <div className="flex-1 p-4 md:p-6 overflow-hidden flex flex-col gap-4 min-h-0 relative">
-              {/* Floating Emojis Burst */}
-              <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
-                {floatingReactions.map((r) => (
-                  <div
-                    key={r.id}
-                    className="absolute text-4xl animate-bounce transition-all duration-1000"
-                    style={{ left: `${r.left}%`, bottom: '20%' }}
-                  >
-                    {r.emoji}
+                      <span className="flex items-center gap-1">
+                        <Users className="w-3 h-3" /> {m.invitees.length ? `${m.invitees.length} invited` : 'Whole workspace'}
+                      </span>
+                      <span>Host: {m.organizer_name || 'Unknown'}</span>
+                    </p>
                   </div>
-                ))}
-              </div>
-
-              {/* Dynamic Video Layout based on Real Participant Count */}
-              <div className="flex-1 flex flex-col gap-4 min-h-0">
-                {isScreenSharing ? (
-                  /* Screen Sharing Spotlight View */
-                  <div className="flex-1 rounded-2xl overflow-hidden bg-black border border-slate-700/80 shadow-2xl relative flex items-center justify-center min-h-0">
-                    <video
-                      ref={screenVideoRef}
-                      autoPlay
-                      playsInline
-                      className="w-full h-full object-contain bg-black"
-                    />
-                    <div className="absolute bottom-4 left-4 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-xl flex items-center gap-2 border border-white/10 text-xs font-mono">
-                      <Monitor className="w-4 h-4 text-indigo-400" />
-                      <span>{currentUserName} (Screen Sharing)</span>
-                    </div>
-                  </div>
-                ) : (
-                  /* Real Connected Participants Video Grid */
-                  <div
-                    className={`grid gap-4 flex-1 min-h-0 ${
-                      participants.length === 1
-                        ? 'grid-cols-1 max-w-4xl mx-auto w-full'
-                        : participants.length === 2
-                        ? 'grid-cols-1 md:grid-cols-2'
-                        : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-                    }`}
-                  >
-                    {participants.map((p) => {
-                      const isMe = p.isLocal || (user?.id && String(p.id) === String(user.id)) || p.name === currentUserName;
-                      const remoteStream = remoteStreams[p.id];
-
-                      return (
-                        <div
-                          key={p.id}
-                          className={`relative rounded-2xl overflow-hidden bg-black border shadow-2xl flex items-center justify-center group ${
-                            isMe && isSpeaking
-                              ? 'border-emerald-500 ring-2 ring-emerald-500/50'
-                              : 'border-slate-800'
-                          }`}
-                        >
-                          {isMe ? (
-                            /* Local User Real Camera Feed or Avatar */
-                            <>
-                              <video
-                                ref={localVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className={`w-full h-full object-cover ${isCameraOn ? '' : 'hidden'}`}
-                              />
-                              {!isCameraOn && (
-                                <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 text-white space-y-3 p-6">
-                                  <div className="w-24 h-24 rounded-full bg-indigo-600 border-2 border-indigo-400 flex items-center justify-center text-3xl font-bold shadow-xl">
-                                    {p.name.slice(0, 2).toUpperCase()}
-                                  </div>
-                                  <div className="text-center">
-                                    <h3 className="font-bold text-base">{p.name} (You)</h3>
-                                    <p className="text-xs text-slate-400 font-mono">Live In Meeting</p>
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            /* Remote Real Participant Feed with WebRTC Stream or Avatar */
-                            remoteStream ? (
-                              <video
-                                autoPlay
-                                playsInline
-                                ref={(el) => {
-                                  if (el && el.srcObject !== remoteStream) {
-                                    el.srcObject = remoteStream;
-                                  }
-                                }}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 text-white space-y-3 p-6">
-                                <div className="w-24 h-24 rounded-full bg-purple-600 border-2 border-purple-400 flex items-center justify-center text-3xl font-bold shadow-xl animate-pulse">
-                                  {p.name.slice(0, 2).toUpperCase()}
-                                </div>
-                                <div className="text-center">
-                                  <h3 className="font-bold text-base text-white">{p.name}</h3>
-                                  <span className="text-xs bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
-                                    Connected Live
-                                  </span>
-                                </div>
-                              </div>
-                            )
-                          )}
-
-                          {/* Participant Status Badge */}
-                          <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-md px-3 py-1 rounded-xl flex items-center gap-2 border border-white/10 text-xs font-mono z-20">
-                            {isMe ? (
-                              isMicOn ? (
-                                <Activity className={`w-3.5 h-3.5 ${isSpeaking ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
-                              ) : (
-                                <MicOff className="w-3.5 h-3.5 text-rose-400" />
-                              )
-                            ) : (
-                              <Mic className="w-3.5 h-3.5 text-emerald-400" />
-                            )}
-                            <span className="font-medium text-white">{p.name} {isMe ? '(You)' : ''}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Real-time Join Invitation Banner when alone */}
-                {participants.length === 1 && (
-                  <div className="bg-[#12151C] border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
-                    <div className="flex items-center gap-3 text-xs text-slate-300">
-                      <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
-                        <UserPlus className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="font-bold text-white">Waiting for other team members to join...</p>
-                        <p className="text-slate-400 text-xs">Share your workspace join code so your real team members can join this call.</p>
-                      </div>
-                    </div>
-
-                    {workspace?.join_code && (
-                      <button
-                        onClick={handleCopyJoinCode}
-                        className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 shrink-0"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>{copiedCode ? 'Copied to Clipboard!' : `Copy Join Code (${workspace.join_code})`}</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Bottom In-Call Controls Bar */}
-            <div className="h-18 px-6 bg-[#12151C] border-t border-slate-800/80 flex items-center justify-between flex-shrink-0 z-20">
-              {/* Left: Mic and Cam Toggles */}
-              <div className="flex items-center gap-2.5">
-                <button
-                  onClick={toggleMic}
-                  style={isMicOn ? { backgroundColor: '#2D3748', color: '#FFFFFF' } : { backgroundColor: '#EF4444', color: '#FFFFFF' }}
-                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
-                  title={isMicOn ? 'Mute Mic' : 'Unmute Mic'}
-                >
-                  {isMicOn ? <Mic className="w-4 h-4 text-white" /> : <MicOff className="w-4 h-4 text-white" />}
-                </button>
-                <button
-                  onClick={toggleCamera}
-                  style={isCameraOn ? { backgroundColor: '#2D3748', color: '#FFFFFF' } : { backgroundColor: '#EF4444', color: '#FFFFFF' }}
-                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
-                  title={isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
-                >
-                  {isCameraOn ? <Video className="w-4 h-4 text-white" /> : <VideoOff className="w-4 h-4 text-white" />}
-                </button>
-              </div>
-
-              {/* Center: Share Screen, Reactions, In-Call Chat, Participants */}
-              <div className="flex items-center gap-2.5 relative">
-                <button
-                  onClick={toggleScreenShare}
-                  style={isScreenSharing ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : { backgroundColor: '#2D3748', color: '#FFFFFF' }}
-                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
-                  title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
-                >
-                  <Monitor className="w-4 h-4 text-white" />
-                </button>
-
-                {/* Emoji Reaction Popover */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    style={{ backgroundColor: '#2D3748', color: '#FFFFFF' }}
-                    className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
-                    title="Send Reaction"
-                  >
-                    <Smile className="w-4 h-4 text-white" />
-                  </button>
-
-                  {showEmojiPicker && (
-                    <div className="absolute bottom-14 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded-2xl p-2 flex gap-2 shadow-2xl z-50 animate-fade-in">
-                      {['👏', '🔥', '❤️', '🎉', '👍', '💡'].map((em) => (
-                        <button
-                          key={em}
-                          onClick={() => triggerReaction(em)}
-                          className="text-xl p-1.5 hover:bg-slate-800 rounded-xl transition hover:scale-125"
-                        >
-                          {em}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {m.is_host && (
+                      <>
+                        <button type="button" onClick={() => setDialog({ mode: 'edit', meeting: m })} aria-label={`Edit ${m.title}`} className="p-2 rounded-xl text-slate-500 hover:bg-slate-100">
+                          <Pencil className="w-4 h-4" />
                         </button>
-                      ))}
-                    </div>
-                  )}
+                        <button type="button" onClick={() => cancelMeeting(m)} aria-label={`Cancel ${m.title}`} className="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => openJoin(m)}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold ${startsSoon(m) ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                    >
+                      {m.is_host ? 'Start' : 'Join'}
+                    </button>
+                  </div>
                 </div>
-
-                <button
-                  onClick={() => setActiveDrawer(activeDrawer === 'chat' ? null : 'chat')}
-                  style={activeDrawer === 'chat' ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : { backgroundColor: '#2D3748', color: '#FFFFFF' }}
-                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95 relative"
-                  title="In-call Chat"
-                >
-                  <MessageSquare className="w-4 h-4 text-white" />
-                  {inCallChat.length > 0 && (
-                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#4F46E5]"></span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => setActiveDrawer(activeDrawer === 'participants' ? null : 'participants')}
-                  style={activeDrawer === 'participants' ? { backgroundColor: '#4F46E5', color: '#FFFFFF' } : { backgroundColor: '#2D3748', color: '#FFFFFF' }}
-                  className="p-3 rounded-full transition shadow-md hover:scale-105 active:scale-95"
-                  title="Participants"
-                >
-                  <Users className="w-4 h-4 text-white" />
-                </button>
-              </div>
-
-              {/* Right: End Call */}
-              <button
-                onClick={handleEndCall}
-                style={{ backgroundColor: '#F43F5E', color: '#FFFFFF' }}
-                className="px-6 py-2.5 rounded-full font-bold text-xs shadow-lg shadow-rose-600/40 hover:bg-rose-600 transition flex items-center gap-2 active:scale-95"
-              >
-                <PhoneOff className="w-4 h-4 text-white" />
-                <span>End Call</span>
-              </button>
-            </div>
+              ))
+            )}
           </div>
+        </section>
 
-          {/* In-Call Side Drawers */}
-          {activeDrawer && (
-            <div className="w-72 bg-[#12151C] border-l border-slate-800 flex flex-col h-full flex-shrink-0 z-20 text-white animate-fade-in">
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="font-bold text-xs uppercase tracking-wider text-slate-300">
-                  {activeDrawer === 'chat' ? 'In-Call Chat' : `Participants (${participants.length})`}
-                </h3>
-                <button onClick={() => setActiveDrawer(null)} className="text-slate-400 hover:text-white">
-                  <X className="w-4 h-4" />
+        <section className="space-y-3">
+          <h2 className="text-base font-bold flex items-center gap-2">
+            <FileText className="w-4 h-4 text-violet-600" /> Past meetings & minutes
+          </h2>
+          <div className={`${card} divide-y divide-[#E2E8F0] overflow-hidden`}>
+            {sessions?.length ? (
+              sessions.map((s) => (
+                <button key={s.id} type="button" onClick={() => setMomSessionId(s.id)} className="w-full text-left p-4 flex items-center justify-between gap-3 hover:bg-[#F8FAFC]">
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-sm truncate">{s.title}</h4>
+                    <p className="text-xs text-slate-500">
+                      {s.created_at ? new Date(s.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''}
+                      {s.meeting_id ? ' · Meeting' : ' · Uploaded recording'}
+                    </p>
+                  </div>
+                  <MomBadge session={s} />
                 </button>
-              </div>
+              ))
+            ) : (
+              <p className="p-8 text-center text-sm text-slate-500">Minutes appear here after a meeting ends or a recording is processed.</p>
+            )}
+          </div>
+        </section>
+      </div>
 
-              {activeDrawer === 'chat' ? (
-                <div className="flex-1 flex flex-col p-4 space-y-3 min-h-0">
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                    {inCallChat.length === 0 ? (
-                      <div className="text-center text-slate-500 py-12 text-xs italic">
-                        No messages yet in this meeting.
-                      </div>
-                    ) : (
-                      inCallChat.map((m, i) => (
-                        <div key={i} className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1">
-                          <div className="flex justify-between text-xs text-slate-400 font-mono">
-                            <span className="font-bold text-indigo-400">{m.sender}</span>
-                            <span>{m.time}</span>
-                          </div>
-                          <p className="text-slate-200">{m.text}</p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <form onSubmit={handleSendChat} className="flex gap-1.5 pt-2 border-t border-slate-800">
-                    <input aria-label="Send a message"
-                      type="text"
-                      placeholder="Send a message..."
-                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                    />
-                    <button type="submit" className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl">
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-                  </form>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
-                  {participants.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xs">
-                          {p.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="font-bold text-white">{p.name} {(user?.id && String(p.id) === String(user.id)) || p.name === currentUserName ? '(You)' : ''}</div>
-                          <div className="text-xs text-slate-400">{p.role || 'Member'}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-slate-400">
-                        {p.mic !== false ? <Mic className="w-3.5 h-3.5 text-emerald-400" /> : <MicOff className="w-3.5 h-3.5 text-rose-400" />}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+      {dialog && (
+        <ScheduleMeetingDialog
+          meeting={dialog.mode === 'edit' ? dialog.meeting : null}
+          members={members}
+          currentUserId={user?.id}
+          onSubmit={submitDialog}
+          onClose={() => setDialog(null)}
+        />
+      )}
 
-          {/* Right Sidebar: Real Copilot Speech & Audio Pipeline */}
-          <aside className="w-[360px] bg-[#F8FAFC] text-[#191C1E] border-l border-[#E2E8F0] h-full flex flex-col shadow-[-4px_0_24px_rgba(0,0,0,0.05)] flex-shrink-0 font-sans z-20">
-            {/* Header */}
-            <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between bg-white">
-              <h2 className="text-base font-bold text-[#191C1E] flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-[#8B5CF6] ai-pulse rounded-full" />
-                <span>Copilot</span>
-              </h2>
-              <span className="bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20 px-2 py-0.5 rounded text-xs font-mono font-bold flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
-                Listening
-              </span>
-            </div>
+      {joining && (
+        <PreJoin
+          meeting={joining}
+          user={user}
+          onCancel={() => setJoining(null)}
+          onJoin={(stream, state) => {
+            setInCall({ meeting: joining, stream, state });
+            setJoining(null);
+          }}
+        />
+      )}
 
-            {/* Pipeline Body */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
-              {/* REAL LIVE TRANSCRIPT */}
-              <div>
-                <h3 className="text-xs font-mono uppercase font-bold text-slate-500 mb-3 tracking-wider flex items-center justify-between">
-                  <span>Live Transcript</span>
-                  <span className="text-xs text-slate-400 font-normal">Real Speech Capture</span>
-                </h3>
-
-                {liveTranscript.length === 0 && !currentCaption ? (
-                  <div className="p-4 bg-white border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs space-y-2">
-                    <Mic className="w-6 h-6 text-[#4F46E5] mx-auto animate-pulse" />
-                    <p className="font-semibold text-slate-700">Copilot is listening...</p>
-                    <p className="text-xs">Speak into your microphone and words will be transcribed here and synced to all participants live.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {liveTranscript.map((entry) => (
-                      <div key={entry.id} className="flex gap-2.5 text-xs bg-white border border-[#E2E8F0] p-2.5 rounded-xl shadow-sm">
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${entry.color}`}
-                        >
-                          {entry.initial}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-2">
-                            <span className="font-bold text-[#191C1E] text-xs">{entry.speaker}</span>
-                            <span className="text-xs font-mono text-slate-400">{entry.time}</span>
-                          </div>
-                          <p className="text-slate-700 text-xs mt-1 leading-relaxed">{entry.text}</p>
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Current Live Word Buffer */}
-                    {currentCaption && (
-                      <div className="flex gap-2.5 text-xs bg-indigo-50 border border-indigo-200 p-2.5 rounded-xl">
-                        <div className="w-7 h-7 rounded-full bg-[#4F46E5] text-white flex items-center justify-center shrink-0">
-                          <Mic className="w-3.5 h-3.5 animate-pulse" />
-                        </div>
-                        <div className="flex-1 pt-0.5">
-                          <p className="text-xs italic text-[#4F46E5] font-medium leading-relaxed">
-                            "{currentCaption}..."
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Divider */}
-              <div className="h-px bg-[#E2E8F0] w-full"></div>
-
-              {/* REAL ACTION ITEMS PREVIEW */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-mono uppercase font-bold text-slate-500 tracking-wider">
-                    Action Items ({actionItems.length})
-                  </h3>
-                  <button
-                    onClick={() => setShowAddAction(!showAddAction)}
-                    className="text-xs font-bold text-[#4F46E5] hover:underline flex items-center gap-1"
-                  >
-                    <Plus className="w-3 h-3" /> Add Item
-                  </button>
-                </div>
-
-                {showAddAction && (
-                  <form onSubmit={handleAddActionItem} className="mb-3 flex gap-1.5">
-                    <input aria-label="Follow up on database migration"
-                      type="text"
-                      autoFocus
-                      placeholder="e.g. Follow up on database migration..."
-                      className="flex-1 bg-white border border-[#E2E8F0] rounded-xl px-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
-                      value={newActionInput}
-                      onChange={(e) => setNewActionInput(e.target.value)}
-                    />
-                    <button type="submit" className="bg-[#4F46E5] text-white px-3 py-1.5 rounded-xl text-xs font-bold">
-                      Add
-                    </button>
-                  </form>
-                )}
-
-                {actionItems.length === 0 ? (
-                  <div className="p-3 bg-white border border-[#E2E8F0] rounded-xl text-center text-slate-400 text-xs italic">
-                    Action items detected from your speech will appear here.
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {actionItems.map((action) => {
-                      const isSynced = syncedActionIds.has(action.id);
-
-                      return (
-                        <div
-                          key={action.id}
-                          className="bg-white border border-[#E2E8F0] border-l-4 border-l-[#F43F5E] rounded-xl p-3.5 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between mb-1.5">
-                            <span className="bg-[#F43F5E]/10 text-[#F43F5E] text-xs font-mono font-bold px-2 py-0.5 rounded">
-                              Action Item
-                            </span>
-                            <span className="text-xs font-mono text-slate-400">{action.timeframe}</span>
-                          </div>
-
-                          <p className="text-xs font-semibold text-[#191C1E] mb-2 leading-snug">
-                            {action.text}
-                          </p>
-
-                          <div className="flex items-center justify-between pt-2 border-t border-[#E2E8F0]">
-                            <span className="text-xs text-slate-500 flex items-center gap-1 font-mono">
-                              <User className="w-3 h-3 text-slate-400" /> {action.assignee}
-                            </span>
-
-                            <button
-                              onClick={() => handleSyncAction(action)}
-                              className="bg-[#4F46E5]/10 hover:bg-[#4F46E5]/20 text-[#4F46E5] transition-colors px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1"
-                            >
-                              {isSynced ? (
-                                <>
-                                  <Check className="w-3.5 h-3.5 text-[#10B981]" />
-                                  <span>Synced</span>
-                                </>
-                              ) : (
-                                <>
-                                  <CalendarPlus className="w-3.5 h-3.5" />
-                                  <span>Sync to Cal</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Bottom Generate Minutes Button */}
-            <div className="p-4 border-t border-[#E2E8F0] bg-white">
-              <button
-                onClick={handleGenerateMinutes}
-                className="w-full flex items-center justify-center gap-2 border border-[#E2E8F0] bg-white hover:bg-[#F2F4F6] transition-colors py-2.5 rounded-xl text-xs font-bold text-[#191C1E] shadow-sm active:scale-95"
-              >
-                <FileText className="w-4 h-4 text-[#4F46E5]" />
-                <span>Generate & Save Minutes (MoM)</span>
-              </button>
-            </div>
-          </aside>
-        </div>
+      {momSessionId && (
+        <MomReview
+          workspaceId={workspaceId}
+          sessionId={momSessionId}
+          onClose={() => setMomSessionId(null)}
+          onDelete={() => deleteSession(momSessionId)}
+          onChanged={onRefreshSessions}
+        />
       )}
     </div>
   );

@@ -19,3 +19,4 @@ redis==5.2.1
 pypdf==6.21.1
 boto3==1.43.90
 sentry-sdk==2.70.0
+tzdata==2026.5
