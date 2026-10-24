@@ -142,6 +142,14 @@ export const api = {
   deleteAccount: (password) => request('/auth/me', { method: 'DELETE', body: JSON.stringify({ password }) }),
   // Revokes every token for this account on the server, not just the local copy.
   logout: () => request('/auth/logout', { method: 'POST' }),
+  // Fire-and-forget revocation for a token that is no longer stored locally. `keepalive` lets
+  // the request finish even if the page navigates or closes right after signing out.
+  revokeToken: (token) =>
+    fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      keepalive: true,
+    }).catch(() => {}),
   changePassword: (currentPassword, newPassword) =>
     request('/auth/change-password', {
       method: 'POST',

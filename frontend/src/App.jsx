@@ -132,9 +132,9 @@ export default function App() {
 
   const loadInitialData = async () => {
     try {
-      const userData = await api.getMe();
+      // In parallel: on a distant server each round trip costs a few hundred milliseconds.
+      const [userData, wsList] = await Promise.all([api.getMe(), api.listWorkspaces()]);
       setUser(userData);
-      const wsList = await api.listWorkspaces();
       setWorkspaces(wsList);
 
       // Prioritize saved workspace ID, otherwise default to Team/Group workspace
@@ -302,13 +302,12 @@ export default function App() {
     setCurrentWorkspace(null);
   };
 
-  const handleLogout = async () => {
-    try {
-      await api.logout();
-    } catch {
-      // Already expired or offline: the local session is cleared either way.
-    }
+  // Signing out is instant: the screen clears now and the server revokes the token in the
+  // background (an expired or offline token is fine either way).
+  const handleLogout = () => {
+    const current = getAuthToken();
     clearSession();
+    if (current) api.revokeToken(current);
   };
 
   // Any API call that comes back 401 (expired or revoked token) signs the user out.

@@ -327,3 +327,26 @@ def test_client_ip_resolution(monkeypatch) -> None:
     assert client_ip(request({"X-Forwarded-For": "1.2.3.4, 203.0.113.9"})) == "203.0.113.9"
     monkeypatch.setattr(settings, "client_ip_header", "cf-connecting-ip")
     assert client_ip(request({"cf-connecting-ip": "192.0.2.1", "X-Forwarded-For": "1.2.3.4"})) == "192.0.2.1"
+
+
+@pytest.mark.asyncio
+async def test_password_hashing_does_not_block_other_requests(client: AsyncClient, auth_context: dict, monkeypatch) -> None:
+    """bcrypt runs in a worker thread: while a sign-in hashes, other requests are still served."""
+    import asyncio
+    import time
+
+    real_verify = auth_service.verify_password
+
+    def slow_verify(plain: str, hashed: str) -> bool:
+        time.sleep(0.6)  # stands in for bcrypt on a slow CPU
+        return real_verify(plain, hashed)
+
+    monkeypatch.setattr(auth_service, "verify_password", slow_verify)
+    login = asyncio.create_task(client.post("/auth/login", json={"email": "testuser@example.com", "password": "securepass123"}))
+    await asyncio.sleep(0.05)
+    started = time.perf_counter()
+    health = await client.get("/health")
+    health_seconds = time.perf_counter() - started
+    assert health.status_code == 200
+    assert health_seconds < 0.3, f"health waited {health_seconds:.2f}s behind the sign-in"
+    assert (await login).status_code == 200
