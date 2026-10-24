@@ -1,5 +1,5 @@
 # NexaMind
-
+https://nexamind-web.onrender.com/
 **NexaMind** is an Agentic AI-powered collaborative workspace operating system that fuses the structured knowledge & document workflows of **Notion** with the communication & collaboration workflows of **Microsoft Teams**.
 
 Built for modern teams and individual creators, NexaMind delivers real-time messaging, hierarchical block-based knowledge bases, agile Kanban tracking, live video/meeting recordings with automated AI transcription and summarization, finance tracking, file management, and an omnipresent AI Copilot.
