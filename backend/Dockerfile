@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
-    UPLOAD_DIR=/data/uploads \n    REPO_DIR=/data/repos
+    UPLOAD_DIR=/data/uploads \
+    REPO_DIR=/data/repos
 
 WORKDIR /app
 
