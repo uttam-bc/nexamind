@@ -46,3 +46,5 @@ backend/tests/.test_uploads/
 # Evaluation scratch output
 backend/eval/.eval_uploads/
 backend/eval/*.log
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
