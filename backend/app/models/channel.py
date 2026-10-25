@@ -87,6 +87,10 @@ class ChannelMember(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        # A resent message (retry after a timeout) is stored once.
+        UniqueConstraint("channel_id", "client_message_id", name="uq_messages_channel_client_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -118,6 +122,7 @@ class Message(Base):
         index=True,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    client_message_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now,
@@ -131,6 +136,9 @@ class Message(Base):
     parent: Mapped["Message | None"] = relationship("Message", remote_side=[id], back_populates="replies")
     replies: Mapped[list["Message"]] = relationship("Message", back_populates="parent", cascade="all, delete-orphan")
     reactions: Mapped[list["MessageReaction"]] = relationship(back_populates="message", cascade="all, delete-orphan")
+    attachments: Mapped[list["MessageAttachment"]] = relationship(
+        back_populates="message", cascade="all, delete-orphan", order_by="MessageAttachment.position"
+    )
 
 
 class MessageReaction(Base):
@@ -203,3 +211,48 @@ class ChannelReadState(Base):
         nullable=False,
     )
 
+
+
+class AttachmentKind:
+    UPLOAD = "upload"      # a file sent in this conversation (stored scoped to it)
+    FILE = "file"          # a reference to a file already in the workspace library
+    DOCUMENT = "document"  # a reference to a Docs page
+
+
+class MessageAttachment(Base):
+    """A file or page attached to a chat message (channel/DM or meeting chat).
+
+    Shared library files and pages are references, not copies: opening one checks the viewer's
+    access to the original. The name/type/size are kept so a deleted original still shows what it was.
+    """
+
+    __tablename__ = "message_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    meeting_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("meeting_messages.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Workspace of the original (shared files/pages can come from another workspace than the chat).
+    source_workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size: Mapped[int | None] = mapped_column(nullable=True)
+    position: Mapped[int] = mapped_column(default=0, nullable=False)
+    shared_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now, server_default=func.current_timestamp(), nullable=False
+    )
+
+    message: Mapped["Message | None"] = relationship(back_populates="attachments")

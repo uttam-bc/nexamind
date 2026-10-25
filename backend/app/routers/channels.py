@@ -1,13 +1,18 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User
+from app.models import Message, MessageAttachment, User
+from app.security import check_identity_limit
+from app.services import attachment_service, storage
+from app.services.auth_service import AuthError
+from app.services.upload_utils import safe_content_type
 from app.schemas.channel import (
     ChannelCreate,
     ChannelResponse,
@@ -240,3 +245,85 @@ async def mark_channel_as_read(
     return {"status": "ok"}
 
 
+
+
+# --- attachments -----------------------------------------------------------------------------
+
+@router.post("/{channel_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_channel_attachment(
+    workspace_id: UUID,
+    channel_id: UUID,
+    file: UploadFile = File(...),
+    client_upload_id: str | None = Form(None, min_length=8, max_length=80),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Upload one file to send in this conversation; send the message with its id afterwards.
+    Retrying with the same `client_upload_id` returns the stored file instead of a copy."""
+    channel = await get_channel(db, workspace_id, channel_id, current_user.id)
+    check_identity_limit("chat-upload", str(current_user.id), 60, 60)
+    record = await attachment_service.store_upload(
+        db, workspace_id=channel.workspace_id, user=current_user, upload=file,
+        client_upload_id=client_upload_id, channel_id=channel.id,
+    )
+    return {"id": str(record.id), "filename": record.filename, "size": record.file_size, "mime_type": record.mime_type}
+
+
+@router.get("/{channel_id}/attachments/{attachment_id}/download")
+async def download_channel_attachment(
+    workspace_id: UUID,
+    channel_id: UUID,
+    attachment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    """The original file. Readers of the conversation only; shared library files also need access
+    to their workspace. Always served as a download (never rendered in our origin)."""
+    channel = await get_channel(db, workspace_id, channel_id, current_user.id)
+    attachment = (await db.execute(
+        select(MessageAttachment).join(Message, MessageAttachment.message_id == Message.id).where(
+            MessageAttachment.id == attachment_id, Message.channel_id == channel.id)
+    )).scalar_one_or_none()
+    if attachment is None:
+        raise AuthError("Attachment not found", status_code=404)
+    record = await attachment_service.file_for_viewer(db, attachment, current_user)
+    return storage.download_response(record.file_path, record.filename, safe_content_type(record.mime_type))
+
+
+# --- Calls from direct messages ---------------------------------------------------------------
+
+class CallStart(BaseModel):
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=64)
+
+
+@router.get("/{channel_id}/call")
+async def get_live_call(
+    workspace_id: UUID,
+    channel_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """The call running in this conversation, if any (shown as "Join call")."""
+    from app.services import channel_service, meeting_service
+
+    channel = await channel_service.get_channel(db, workspace_id, channel_id, current_user.id)
+    meeting = await meeting_service.live_call(db, channel.id)
+    return {"call": await meeting_service.serialize(db, meeting, current_user.id) if meeting else None}
+
+
+@router.post("/{channel_id}/call")
+async def start_call(
+    workspace_id: UUID,
+    channel_id: UUID,
+    data: CallStart,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Start a video call from a direct message (or join the one already running) and ring the others."""
+    from app.services import meeting_service
+
+    check_identity_limit("call", str(current_user.id), 20, 60)
+    meeting, created = await meeting_service.start_call(db, workspace_id, channel_id, current_user, data.client_request_id)
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return {"call": await meeting_service.serialize(db, meeting, current_user.id), "created": created}

@@ -221,6 +221,17 @@ async def workspace_events_websocket(
 
 
 MAX_MEETING_CHAT_CHARS = 2000
+
+
+def _uuid_list(value) -> list[UUID]:
+    """At most ten valid ids from a client-supplied list; anything malformed is dropped."""
+    out = []
+    for item in value if isinstance(value, list) else []:
+        try:
+            out.append(UUID(str(item)))
+        except ValueError:
+            continue
+    return out[:10]
 MEETING_IDLE_TIMEOUT_SECONDS = 90
 
 
@@ -294,7 +305,8 @@ async def meeting_websocket(websocket: WebSocket, workspace_id: UUID, meeting_id
             elif kind == "chat":
                 content = str(payload.get("content") or "").strip()[:MAX_MEETING_CHAT_CHARS]
                 message_id = str(payload.get("client_message_id") or "")[:80]
-                if not content or len(message_id) < 8:
+                files = {key: _uuid_list(payload.get(key)) for key in ("attachment_ids", "shared_file_ids", "shared_document_ids")}
+                if (not content and not any(files.values())) or len(message_id) < 8:
                     continue
                 try:
                     rate_limiter.check(f"meeting-chat:{user.id}", limit=20, window_seconds=10)
@@ -303,10 +315,18 @@ async def meeting_websocket(websocket: WebSocket, workspace_id: UUID, meeting_id
                                                "detail": "You are sending messages too quickly. Wait a moment and retry."})
                     continue
                 async with database.AsyncSessionLocal() as db:
-                    message, parent = await meeting_service.store_chat_message(
-                        db, meeting_id, user, content, message_id, payload.get("reply_to_id"))
+                    try:
+                        message, parent = await meeting_service.store_chat_message(
+                            db, meeting_id, user, content, message_id, payload.get("reply_to_id"),
+                            upload_ids=files["attachment_ids"], file_ids=files["shared_file_ids"],
+                            document_ids=files["shared_document_ids"])
+                    except AuthError as exc:  # e.g. a shared file the sender can't access
+                        await websocket.send_json({"type": "error", "code": "chat_rejected",
+                                                   "client_message_id": message_id, "detail": exc.message})
+                        continue
                     await db.commit()
-                    out = serialize_message(message, parent)
+                    attached = await meeting_service.meeting_message_attachments(db, [message.id])
+                    out = serialize_message(message, parent, attached.get(message.id, []))
                 await meeting_hub.broadcast(meeting_id, {"type": "chat_message", "message": out})
             elif kind == "transcription":
                 if not client.is_host:

@@ -1,21 +1,11 @@
-import secrets
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CodeRepo, Commit, Issue, RepoFile, Task, User
-from app.models.project import IssueStatus, TaskStatus
-from app.schemas.project import (
-    CodeRepoCreate,
-    CommitCreate,
-    IssueCreate,
-    IssueUpdate,
-    RepoFileCreate,
-    RepoFileUpdate,
-    TaskCreate,
-    TaskUpdate,
-)
+from app.models import Task, User
+from app.models.project import TaskStatus
+from app.schemas.project import TaskCreate, TaskUpdate
 from app.services.auth_service import AuthError
 from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
@@ -142,6 +132,10 @@ async def update_task(
         await _notify_assignee(db, task, actor_id=user_id, actor_name=actor.name if actor else None)
     if task.status == TaskStatus.DONE and previous_status != TaskStatus.DONE:
         await _notify_completed(db, task, actor_id=user_id, actor_name=actor.name if actor else "Someone")
+    if (task.status == TaskStatus.DONE) != (previous_status == TaskStatus.DONE):
+        from app.services import issue_service
+
+        await issue_service.sync_from_task(db, task, actor)  # a linked issue closes/reopens with its task
     return task
 
 
@@ -155,228 +149,6 @@ async def delete_task(
     await require_author_or_manager(db, task.workspace_id, user_id, task.created_by)
     await db.delete(task)
     await db.flush()
-
-
-# --- Code Repositories ---
-
-async def list_repos(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user_id: UUID,
-) -> list[CodeRepo]:
-    await _require_workspace_access(db, workspace_id, user_id)
-    result = await db.execute(
-        select(CodeRepo)
-        .where(CodeRepo.workspace_id == workspace_id)
-        .order_by(CodeRepo.created_at.desc())
-    )
-    return list(result.scalars().all())
-
-
-async def create_repo(
-    db: AsyncSession,
-    workspace_id: UUID,
-    user: User,
-    data: CodeRepoCreate,
-) -> CodeRepo:
-    await _require_workspace_access(db, workspace_id, user.id)
-    repo = CodeRepo(
-        workspace_id=workspace_id,
-        name=data.name.strip(),
-        description=data.description.strip() if data.description else None,
-        created_by=user.id,
-    )
-    db.add(repo)
-    await db.flush()
-    await db.refresh(repo)
-    return repo
-
-
-async def get_repo(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user_id: UUID,
-) -> CodeRepo:
-    await _require_workspace_access(db, workspace_id, user_id)
-    result = await db.execute(
-        select(CodeRepo).where(CodeRepo.id == repo_id, CodeRepo.workspace_id == workspace_id)
-    )
-    repo = result.scalar_one_or_none()
-    if not repo:
-        raise AuthError("Repository not found", status_code=404)
-    return repo
-
-
-# --- Commits ---
-
-async def list_commits(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user_id: UUID,
-) -> list[Commit]:
-    await get_repo(db, workspace_id, repo_id, user_id)
-    result = await db.execute(
-        select(Commit).where(Commit.repo_id == repo_id).order_by(Commit.created_at.desc())
-    )
-    return list(result.scalars().all())
-
-
-async def create_commit(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user: User,
-    data: CommitCreate,
-) -> Commit:
-    await get_repo(db, workspace_id, repo_id, user.id)
-    commit_hash = data.hash or secrets.token_hex(20)
-    commit = Commit(
-        repo_id=repo_id,
-        message=data.message.strip(),
-        hash=commit_hash,
-        author_id=user.id,
-    )
-    db.add(commit)
-    await db.flush()
-    await db.refresh(commit)
-    return commit
-
-
-# --- Issues ---
-
-async def list_issues(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user_id: UUID,
-    status: IssueStatus | None = None,
-) -> list[Issue]:
-    await get_repo(db, workspace_id, repo_id, user_id)
-    query = select(Issue).where(Issue.repo_id == repo_id)
-    if status is not None:
-        query = query.where(Issue.status == status)
-    query = query.order_by(Issue.created_at.desc())
-    result = await db.execute(query)
-    return list(result.scalars().all())
-
-
-async def create_issue(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user: User,
-    data: IssueCreate,
-) -> Issue:
-    await get_repo(db, workspace_id, repo_id, user.id)
-    issue = Issue(
-        repo_id=repo_id,
-        title=data.title.strip(),
-        description=data.description.strip() if data.description else None,
-        status=data.status,
-        created_by=user.id,
-    )
-    db.add(issue)
-    await db.flush()
-    await db.refresh(issue)
-    return issue
-
-
-async def update_issue(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    issue_id: UUID,
-    user_id: UUID,
-    data: IssueUpdate,
-) -> Issue:
-    await get_repo(db, workspace_id, repo_id, user_id)
-    result = await db.execute(
-        select(Issue).where(Issue.id == issue_id, Issue.repo_id == repo_id)
-    )
-    issue = result.scalar_one_or_none()
-    if not issue:
-        raise AuthError("Issue not found", status_code=404)
-
-    if data.title is not None:
-        issue.title = data.title.strip()
-    if data.description is not None:
-        issue.description = data.description.strip() if data.description else None
-    if data.status is not None:
-        issue.status = data.status
-
-    await db.flush()
-    await db.refresh(issue)
-    return issue
-
-
-# --- Code Repository Files ---
-
-async def list_repo_files(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user_id: UUID,
-) -> list[RepoFile]:
-    await get_repo(db, workspace_id, repo_id, user_id)
-    result = await db.execute(
-        select(RepoFile)
-        .where(RepoFile.repo_id == repo_id)
-        .order_by(RepoFile.name.asc())
-    )
-    return list(result.scalars().all())
-
-
-async def save_repo_file(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    user: User,
-    data: RepoFileCreate,
-) -> RepoFile:
-    await get_repo(db, workspace_id, repo_id, user.id)
-    clean_name = data.name.strip()
-    result = await db.execute(
-        select(RepoFile).where(RepoFile.repo_id == repo_id, RepoFile.name == clean_name)
-    )
-    existing = result.scalar_one_or_none()
-    if existing:
-        existing.content = data.content
-        if data.language:
-            existing.language = data.language
-        await db.flush()
-        await db.refresh(existing)
-        return existing
-
-    file_record = RepoFile(
-        repo_id=repo_id,
-        name=clean_name,
-        content=data.content,
-        language=data.language or ("python" if clean_name.endswith(".py") else "javascript"),
-    )
-    db.add(file_record)
-    await db.flush()
-    await db.refresh(file_record)
-    return file_record
-
-
-async def delete_repo_file(
-    db: AsyncSession,
-    workspace_id: UUID,
-    repo_id: UUID,
-    file_id: UUID,
-    user_id: UUID,
-) -> None:
-    repo = await get_repo(db, workspace_id, repo_id, user_id)
-    await require_author_or_manager(db, repo.workspace_id, user_id, repo.created_by)
-    result = await db.execute(
-        select(RepoFile).where(RepoFile.repo_id == repo_id, RepoFile.id == file_id)
-    )
-    file_record = result.scalar_one_or_none()
-    if file_record:
-        await db.delete(file_record)
-        await db.flush()
 
 
 async def _require_workspace_access(

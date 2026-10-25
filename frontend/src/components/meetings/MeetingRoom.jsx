@@ -25,6 +25,11 @@ import { api } from '../../api';
 import { MeetingClient, newId } from '../../lib/meetingClient';
 import { MeetingTranscriber } from '../../lib/meetingTranscriber';
 import { notify } from '../../context/ToastContext';
+import { navigateTo } from '../../lib/deepLink';
+import { useAttachmentDraft } from '../../lib/chatAttachments';
+import { AttachButton, AttachmentTray, DropZone } from '../chat/AttachmentComposer';
+import FilePickerDialog from '../chat/FilePickerDialog';
+import MessageAttachments from '../chat/MessageAttachments';
 
 const FALLBACK_ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -394,8 +399,12 @@ export function EndDialog({ isHost, busy, onEndForMe, onEndForAll, onCancel }) {
   );
 }
 
-export function ChatPanel({ messages, userId, onSend, onRetry }) {
+export function ChatPanel({ messages, userId, onSend, onRetry, base, workspaceId }) {
   const [text, setText] = useState('');
+  const draft = useAttachmentDraft(base);
+  const [picking, setPicking] = useState(false);
+  const addFiles = (files) => draft.addFiles(files).forEach((problem) => notify(problem, 'error'));
+  const openPage = (att) => navigateTo({ tab: 'documents', workspace_id: att.workspace_id, document_id: att.document_id });
   const [replyTo, setReplyTo] = useState(null);
   const [highlight, setHighlight] = useState(null);
   const endRef = useRef(null);
@@ -407,13 +416,23 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
   const submit = (e) => {
     e.preventDefault();
     const value = text.trim();
-    if (!value) return;
-    onSend(value, replyTo);
+    if (!value && !draft.hasItems) return;
+    if (draft.busy) {
+      notify('Wait for the files to finish uploading.', 'info');
+      return;
+    }
+    if (draft.failed) {
+      notify('Some files failed to upload: retry or remove them first.', 'error');
+      return;
+    }
+    onSend(value, replyTo, draft.hasItems ? { payload: draft.payload(), items: draft.items } : null);
     setText('');
     setReplyTo(null);
+    draft.clear();
   };
   const startReply = (m) => {
-    setReplyTo({ id: m.id, sender_name: m.sender_name, excerpt: m.content.slice(0, 140) });
+    const files = (m.attachments || []).map((a) => a.name).join(', ');
+    setReplyTo({ id: m.id, sender_name: m.sender_name, excerpt: (m.content || (files ? `📎 ${files}` : '')).slice(0, 140) });
     inputRef.current?.focus();
   };
   const jumpTo = (id) => {
@@ -426,6 +445,7 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
   const loaded = new Set(messages.map((m) => m.id));
   return (
     <div className="flex flex-col h-full min-h-0">
+      <DropZone onFiles={addFiles} className="flex-1 min-h-0 flex flex-col">
       <div ref={listRef} className="flex-1 overflow-y-auto space-y-3 p-4 min-h-0">
         {messages.length === 0 && <p className="text-sm text-slate-400 text-center mt-8">No messages yet. Messages are kept with the meeting.</p>}
         {messages.map((m) => {
@@ -440,6 +460,7 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
               <span className="text-[11px] text-slate-400">
                 {mine ? 'You' : m.sender_name} · {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
               </span>
+              {(m.content || quote) && (
               <div className={`text-sm px-3 py-2 rounded-xl max-w-[85%] break-words whitespace-pre-wrap ${mine ? 'bg-indigo-600' : 'bg-slate-700'} ${m.pending ? 'opacity-60' : ''}`}>
                 {quote && (
                   <button
@@ -461,6 +482,14 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
                 )}
                 {m.content}
               </div>
+              )}
+              {m.pending && m.localFiles?.length ? (
+                <p className="text-[11px] text-slate-400">📎 {m.localFiles.map((f) => f.name).join(', ')}</p>
+              ) : (
+                <div className="max-w-[85%]">
+                  <MessageAttachments attachments={m.attachments} base={base} tone="dark" onOpenPage={openPage} />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 {m.pending && <span className="text-[11px] text-slate-500">Sending…</span>}
                 {m.failed && (
@@ -484,7 +513,13 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
         })}
         <div ref={endRef} />
       </div>
-      <form onSubmit={submit} className="p-3 border-t border-slate-700 space-y-2">
+      </DropZone>
+      <form
+        onSubmit={submit}
+        onPaste={(e) => e.clipboardData?.files?.length && addFiles(e.clipboardData.files)}
+        className="p-3 border-t border-slate-700 space-y-2"
+      >
+        <AttachmentTray draft={draft} tone="dark" />
         {replyTo && (
           <div className="flex items-start gap-2 bg-slate-800 rounded-lg px-3 py-2 text-xs" data-testid="reply-preview">
             <div className="flex-1 min-w-0 border-l-2 border-indigo-400 pl-2">
@@ -497,6 +532,7 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
           </div>
         )}
         <div className="flex gap-2">
+          <AttachButton onFiles={addFiles} onShareExisting={workspaceId ? () => setPicking(true) : null} tone="dark" />
           <input
             ref={inputRef}
             aria-label="Message everyone"
@@ -512,11 +548,12 @@ export function ChatPanel({ messages, userId, onSend, onRetry }) {
             placeholder={replyTo ? 'Write a reply' : 'Message everyone'}
             className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500"
           />
-          <button type="submit" aria-label="Send message" className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 min-w-[44px]">
+          <button type="submit" aria-label="Send message" disabled={draft.busy} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-3 min-w-[44px]">
             <Send className="w-4 h-4 mx-auto" />
           </button>
         </div>
       </form>
+      {picking && <FilePickerDialog workspaceId={workspaceId} onPick={draft.addShared} onClose={() => setPicking(false)} />}
     </div>
   );
 }
@@ -566,7 +603,7 @@ function TranscriptPanel({ segments, enabled, status, isHost, onToggle, onRetry 
   );
 }
 
-export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user, localStream, initialState, onExit }) {
+export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user, localStream, initialState, onExit, isCall = false, libraryWorkspaceId }) {
   const [meeting, setMeeting] = useState(initialMeeting);
   const [panel, setPanel] = useState(null); // 'chat' | 'people' | 'transcript'
   const [messages, setMessages] = useState([]);
@@ -653,7 +690,7 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
       } else if (msg.type === 'reconnected') {
         loadMessages();
         // Resend chat messages that never got through (the server ignores duplicates).
-        pendingChat.current.forEach((m, id) => client.sendChat(m.content, id, m.replyToId));
+        pendingChat.current.forEach((m, id) => client.sendChat(m.content, id, m.replyToId, m.files));
       } else if (msg.type === 'error' && msg.client_message_id && pendingChat.current.has(msg.client_message_id)) {
         // The server refused this message (rate limit): show it as not sent, with Retry.
         pendingChat.current.delete(msg.client_message_id);
@@ -799,17 +836,19 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
 
   const retryChat = (failed) => {
     setMessages((prev) => prev.filter((m) => m.client_message_id !== failed.client_message_id));
-    sendChat(failed.content, failed.reply_to && failed.reply_to.available ? failed.reply_to : null);
+    sendChat(failed.content, failed.reply_to && failed.reply_to.available ? failed.reply_to : null,
+      failed.filesPayload ? { payload: failed.filesPayload, items: failed.localFiles || [] } : null);
   };
 
-  const sendChat = (content, replyTo = null) => {
+  const sendChat = (content, replyTo = null, files = null) => {
     const id = newId();
-    pendingChat.current.set(id, { content, replyToId: replyTo?.id || null });
+    pendingChat.current.set(id, { content, replyToId: replyTo?.id || null, files: files?.payload || null });
     addMessage({
       client_message_id: id, content, sender_id: String(user?.id), sender_name: user?.name, created_at: new Date().toISOString(), pending: true,
       reply_to_id: replyTo?.id || null, reply_to: replyTo ? { ...replyTo, available: true } : null,
+      attachments: [], localFiles: files?.items || [], filesPayload: files?.payload || null,
     });
-    client.sendChat(content, id, replyTo?.id || null);
+    client.sendChat(content, id, replyTo?.id || null, files?.payload || null);
   };
 
   const toggleFullscreen = async () => {
@@ -852,7 +891,7 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
 
   if (client.status === 'ended' && client.endReason !== 'left') {
     const text = {
-      ended: client.error || 'The host ended the meeting.',
+      ended: isCall ? (client.error || 'The call ended.').replace('ended the meeting', 'ended the call') : client.error || 'The host ended the meeting.',
       closed: client.error || 'This meeting has ended.',
       not_found: 'This meeting no longer exists or you do not have access.',
       auth: 'Your session expired. Sign in again to rejoin.',
@@ -864,10 +903,10 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
       <div className="fixed inset-0 z-50 bg-[#12151C] text-white flex items-center justify-center p-4">
         <div className="text-center space-y-4 max-w-sm" role="status">
           <PhoneOff className="w-10 h-10 mx-auto text-rose-400" />
-          <h2 className="text-xl font-bold">{client.endReason === 'replaced' ? 'Joined elsewhere' : client.endReason === 'full' ? 'Meeting is full' : 'Meeting ended'}</h2>
+          <h2 className="text-xl font-bold">{client.endReason === 'replaced' ? 'Joined elsewhere' : client.endReason === 'full' ? 'Meeting is full' : isCall ? 'Call ended' : 'Meeting ended'}</h2>
           <p className="text-slate-300">{text}</p>
           <button type="button" onClick={() => onExit({ ended: !stillRunning, sessionId: stillRunning ? null : client.meeting?.session_id })} className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-5 py-2.5 font-bold">
-            Back to meetings
+            {isCall ? 'Close' : 'Back to meetings'}
           </button>
         </div>
       </div>
@@ -884,7 +923,8 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
           <X className="w-4 h-4" />
         </button>
       </div>
-      {panel === 'chat' && <ChatPanel messages={messages} userId={String(user?.id)} onSend={sendChat} onRetry={retryChat} />}
+      {panel === 'chat' && <ChatPanel messages={messages} userId={String(user?.id)} onSend={sendChat} onRetry={retryChat}
+        base={`/workspaces/${workspaceId}/meetings/${initialMeeting.id}`} workspaceId={libraryWorkspaceId || workspaceId} />}
       {panel === 'transcript' && (
         <TranscriptPanel
           segments={segments}

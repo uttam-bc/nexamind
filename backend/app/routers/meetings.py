@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Meeting, MeetingMessage, SessionRecord, User
+from app.models import Meeting, MeetingMessage, MessageAttachment, SessionRecord, User
 from app.schemas.meeting import MeetingEnd, MeetingInstant, MeetingSchedule, MeetingUpdate
 from app.security import check_identity_limit
-from app.services import meeting_service, mom_service, notification_service, transcription_service
+from app.services import attachment_service, meeting_service, mom_service, notification_service, storage, transcription_service
 from app.services.auth_service import AuthError
+from app.services.upload_utils import safe_content_type
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/meetings", tags=["meetings"])
 mom_router = APIRouter(prefix="/workspaces/{workspace_id}/sessions/{session_id}/mom", tags=["meetings"])
@@ -119,6 +120,19 @@ async def end_meeting(
             "meeting": await _out(db, meeting, current_user)}
 
 
+@router.post("/{meeting_id}/decline")
+async def decline_call(
+    workspace_id: UUID,
+    meeting_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Decline an incoming call: the caller is told, and a two-person call ends."""
+    meeting = await meeting_service.get_meeting(db, workspace_id, meeting_id, current_user.id)
+    await meeting_service.decline_call(db, meeting, current_user)
+    return {"status": "declined", "meeting": await _out(db, meeting, current_user)}
+
+
 @router.get("/{meeting_id}/messages")
 async def meeting_messages(
     workspace_id: UUID,
@@ -135,7 +149,8 @@ async def meeting_messages(
     rows = list(reversed((await db.execute(
         query.order_by(MeetingMessage.created_at.desc(), MeetingMessage.id.desc()).limit(limit))).scalars().all()))
     parents = await reply_parents(db, rows)
-    return [serialize_message(m, parents.get(m.reply_to_id)) for m in rows]
+    files = await meeting_service.meeting_message_attachments(db, [m.id for m in rows])
+    return [serialize_message(m, parents.get(m.reply_to_id), files.get(m.id, [])) for m in rows]
 
 
 async def reply_parents(db: AsyncSession, messages: list[MeetingMessage]) -> dict:
@@ -150,8 +165,9 @@ async def reply_parents(db: AsyncSession, messages: list[MeetingMessage]) -> dic
 REPLY_EXCERPT_CHARS = 140
 
 
-def serialize_message(m: MeetingMessage, parent: MeetingMessage | None = None) -> dict:
-    out = {"id": str(m.id), "sender_id": str(m.sender_id) if m.sender_id else None, "sender_name": m.sender_name,
+def serialize_message(m: MeetingMessage, parent: MeetingMessage | None = None,
+                      attachments: list[dict] | None = None) -> dict:
+    out = {"id": str(m.id), "attachments": attachments or [], "sender_id": str(m.sender_id) if m.sender_id else None, "sender_name": m.sender_name,
            "content": m.content, "client_message_id": m.client_message_id,
            "reply_to_id": str(m.reply_to_id) if m.reply_to_id else None, "reply_to": None,
            "created_at": notification_service.iso_utc(m.created_at)}
@@ -234,6 +250,44 @@ class Gap(BaseModel):
     client_segment_id: str = Field(min_length=8, max_length=80)
     offset_ms: int = Field(ge=0)
     duration_ms: int = Field(default=0, ge=0, le=120000)
+
+
+@router.post("/{meeting_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_meeting_attachment(
+    workspace_id: UUID,
+    meeting_id: UUID,
+    file: UploadFile = File(...),
+    client_upload_id: str | None = Form(None, min_length=8, max_length=80),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """Upload one file for the in-call chat; send its id in the next chat frame."""
+    meeting = await meeting_service.get_meeting(db, workspace_id, meeting_id, current_user.id)
+    check_identity_limit("chat-upload", str(current_user.id), 60, 60)
+    record = await attachment_service.store_upload(
+        db, workspace_id=meeting.workspace_id, user=current_user, upload=file,
+        client_upload_id=client_upload_id, meeting_id=meeting.id,
+    )
+    return {"id": str(record.id), "filename": record.filename, "size": record.file_size, "mime_type": record.mime_type}
+
+
+@router.get("/{meeting_id}/attachments/{attachment_id}/download")
+async def download_meeting_attachment(
+    workspace_id: UUID,
+    meeting_id: UUID,
+    attachment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+):
+    meeting = await meeting_service.get_meeting(db, workspace_id, meeting_id, current_user.id)
+    attachment = (await db.execute(
+        select(MessageAttachment).join(MeetingMessage, MessageAttachment.meeting_message_id == MeetingMessage.id).where(
+            MessageAttachment.id == attachment_id, MeetingMessage.meeting_id == meeting.id)
+    )).scalar_one_or_none()
+    if attachment is None:
+        raise AuthError("Attachment not found", status_code=404)
+    record = await attachment_service.file_for_viewer(db, attachment, current_user)
+    return storage.download_response(record.file_path, record.filename, safe_content_type(record.mime_type))
 
 
 @router.post("/{meeting_id}/transcript/gaps", status_code=204)

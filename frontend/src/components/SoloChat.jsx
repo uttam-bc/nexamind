@@ -24,9 +24,15 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { connectChannel, mergeMessages } from '../lib/channelSocket';
-import { onDeepLink } from '../lib/deepLink';
+import { navigateTo, onDeepLink } from '../lib/deepLink';
+import { useAttachmentDraft } from '../lib/chatAttachments';
+import { newId } from '../lib/meetingClient';
 import FeatureHeader from './FeatureHeader';
 import FormattedChatMessage from './FormattedChatMessage';
+import { AttachButton, AttachmentTray, DropZone } from './chat/AttachmentComposer';
+import FilePickerDialog from './chat/FilePickerDialog';
+import { startCall } from './calls/CallManager';
+import MessageAttachments from './chat/MessageAttachments';
 import { notify } from '../context/ToastContext';
 
 export default function SoloChat({
@@ -58,6 +64,29 @@ export default function SoloChat({
 
   const messagesEndRef = useRef(null);
   const activeIdRef = useRef(null);
+  const channelBase = activeChannel ? `/workspaces/${workspaceId}/channels/${activeChannel.id}` : null;
+  const draft = useAttachmentDraft(channelBase);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const pendingSendId = useRef(null);
+
+  // A call running in this conversation turns "Start call" into "Join call".
+  const [liveCall, setLiveCall] = useState(null);
+  useEffect(() => {
+    if (!activeChannel?.id) return undefined;
+    let cancelled = false;
+    const check = () => api.getLiveCall(workspaceId, activeChannel.id)
+      .then((r) => !cancelled && setLiveCall(r.call))
+      .catch(() => !cancelled && setLiveCall(null));
+    check();
+    const onCall = (e) => e.detail?.channel_id === activeChannel.id && setTimeout(check, 300);
+    window.addEventListener('nexamind:call', onCall);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('nexamind:call', onCall);
+    };
+  }, [workspaceId, activeChannel?.id, activeChannel?.is_direct]);
+  const addFiles = (files) => draft.addFiles(files).forEach((problem) => notify(problem, 'error'));
+  const openPage = (att) => navigateTo({ tab: 'documents', workspace_id: att.workspace_id, document_id: att.document_id });
   // Phones show the conversation list or one conversation, not both.
   const [mobileView, setMobileView] = useState('list');
   const pendingDeepLink = useRef(null);
@@ -108,6 +137,8 @@ export default function SoloChat({
     activeIdRef.current = channel.id;
     setActiveChannel(channel);
     setMessages([]);
+    draft.clear();
+    pendingSendId.current = null;
     loadLatest(channel.id, true);
     api.markChannelRead(workspaceId, channel.id).catch(() => {});
   };
@@ -160,8 +191,17 @@ export default function SoloChat({
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
     const content = inputText.trim();
-    if (!content || !activeChannel || sending) return;
-
+    if ((!content && !draft.hasItems) || !activeChannel || sending) return;
+    if (draft.busy) {
+      notify('Wait for the files to finish uploading.', 'info');
+      return;
+    }
+    if (draft.failed) {
+      notify('Some files failed to upload: retry or remove them first.', 'error');
+      return;
+    }
+    const files = draft.payload();
+    pendingSendId.current = pendingSendId.current || newId();
     setInputText('');
     setSending(true);
 
@@ -175,19 +215,26 @@ export default function SoloChat({
       sender_username: user?.username || 'you',
       created_at: new Date().toISOString(),
       reactions: [],
+      attachments: [],
       pending: true,
     };
     setMessages((prev) => [...prev, optimisticMsg]);
 
     try {
-      const sent = await api.postMessage(workspaceId, activeChannel.id, content);
+      const sent = await api.postMessage(workspaceId, activeChannel.id, {
+        content,
+        ...files,
+        client_message_id: pendingSendId.current,
+      });
+      pendingSendId.current = null;
+      draft.clear();
       // The socket may have delivered it already: merge instead of swapping, so it shows once.
       setMessages((prev) => mergeMessages(prev.filter((m) => m.id !== tempId), [sent]));
       if (onRefreshAll) onRefreshAll();
     } catch (err) {
       notify(`Could not send message: ${err.message}`, 'error');
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      setInputText(content);
+      setInputText(content); // text and files stay; a resend reuses the same message id
     } finally {
       setSending(false);
     }
@@ -506,19 +553,21 @@ export default function SoloChat({
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      if (onNavigateTab) onNavigateTab('meetings');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-xs font-bold text-slate-700 transition"
-                    title="Start Video Meeting with user"
+                    type="button"
+                    onClick={() => startCall({ workspaceId, channelId: activeChannel.id, peerName: activeParticipant.name })}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition ${
+                      liveCall ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
+                    }`}
+                    aria-label={liveCall ? `Join the call with ${activeParticipant.name}` : `Start a video call with ${activeParticipant.name}`}
                   >
-                    <Video className="w-3.5 h-3.5 text-indigo-600" />
-                    <span className="hidden sm:inline">Start Call</span>
+                    <Video className={`w-3.5 h-3.5 ${liveCall ? 'text-emerald-700' : 'text-indigo-600'}`} />
+                    <span className="hidden sm:inline">{liveCall ? 'Join call' : 'Start Call'}</span>
                   </button>
                 </div>
               </div>
 
               {/* Message Stream */}
+              <DropZone onFiles={addFiles} className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/20">
                 {messages.length === 0 ? (
                   <div className="text-center py-16 space-y-3">
@@ -566,8 +615,9 @@ export default function SoloChat({
                           )}
 
                           {/* Message Bubble */}
+                          {msg.content && (
                           <div
-                            className={`p-3.5 px-4 rounded-2xl text-sm leading-relaxed ${
+                            className={`p-3.5 px-4 rounded-2xl text-sm leading-relaxed break-words ${
                               isOutgoing
                                 ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm font-medium whitespace-pre-wrap'
                                 : 'bg-white border border-slate-200 text-slate-900 rounded-tl-none shadow-xs font-normal'
@@ -579,6 +629,8 @@ export default function SoloChat({
                               <FormattedChatMessage content={msg.content} isUser={false} />
                             )}
                           </div>
+                          )}
+                          <MessageAttachments attachments={msg.attachments} base={channelBase} onOpenPage={openPage} />
 
                           {/* Time & Reactions */}
                           <div
@@ -639,12 +691,20 @@ export default function SoloChat({
                 )}
                 <div ref={messagesEndRef} />
               </div>
+              </DropZone>
 
               {/* Message Input Bar */}
               <form
                 onSubmit={handleSendMessage}
-                className="p-3 sm:p-4 border-t border-slate-200 bg-white flex items-center gap-2"
+                onPaste={(e) => e.clipboardData?.files?.length && addFiles(e.clipboardData.files)}
+                className="p-3 sm:p-4 border-t border-slate-200 bg-white flex flex-wrap items-center gap-2"
               >
+                {draft.hasItems && (
+                  <div className="w-full">
+                    <AttachmentTray draft={draft} />
+                  </div>
+                )}
+                <AttachButton onFiles={addFiles} onShareExisting={() => setShowFilePicker(true)} disabled={sending} />
                 <button
                   type="button"
                   onClick={toggleVoiceInput}
@@ -665,17 +725,21 @@ export default function SoloChat({
                   onKeyDown={handleKeyDown}
                   placeholder={`Message @${activeParticipant.username}... (Press Enter to send)`}
                   disabled={sending}
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 shadow-xs"
+                  className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 shadow-xs"
                 />
 
                 <button
                   type="submit"
-                  disabled={!inputText.trim() || sending}
+                  aria-label="Send message"
+                  disabled={(!inputText.trim() && !draft.hasItems) || sending || draft.busy}
                   className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white rounded-xl transition shadow-sm active:scale-95"
                 >
                   <Send className="w-4 h-4" />
                 </button>
               </form>
+              {showFilePicker && (
+                <FilePickerDialog workspaceId={workspaceId} onPick={draft.addShared} onClose={() => setShowFilePicker(false)} />
+              )}
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 max-w-md mx-auto">

@@ -70,64 +70,28 @@ async def test_task_crud(client: AsyncClient, auth_context: dict) -> None:
 
 
 @pytest.mark.asyncio
-async def test_code_repo_commits_and_issues(client: AsyncClient, auth_context: dict) -> None:
+async def test_code_repo_commits_are_real_and_issues_are_numbered(client: AsyncClient, auth_context: dict) -> None:
     workspace_id = auth_context["workspace_id"]
-    token = auth_context["token"]
-
-    # Create repo
-    repo_res = await client.post(
-        f"/workspaces/{workspace_id}/repos",
-        headers=auth_headers(token),
-        json={"name": "nexamind-backend", "description": "FastAPI Core Backend"},
-    )
-    assert repo_res.status_code == 201
-    repo = repo_res.json()
+    headers = auth_headers(auth_context["token"])
+    repo = (await client.post(f"/workspaces/{workspace_id}/repos", headers=headers,
+                              json={"name": "nexamind-backend", "description": "FastAPI Core Backend"})).json()
     repo_id = repo["id"]
-    assert repo["name"] == "nexamind-backend"
+    assert repo["name"] == "nexamind-backend" and repo["commit_count"] == 1
+    assert len((await client.get(f"/workspaces/{workspace_id}/repos", headers=headers)).json()) == 1
 
-    # List repos
-    list_repos_res = await client.get(
-        f"/workspaces/{workspace_id}/repos",
-        headers=auth_headers(token),
-    )
-    assert list_repos_res.status_code == 200
-    assert len(list_repos_res.json()) == 1
+    # A commit can't be "logged" with a made-up hash any more: it must change files.
+    fake = await client.post(f"/workspaces/{workspace_id}/repos/{repo_id}/commits", headers=headers,
+                             json={"message": "feat: add projects module", "hash": "abc123456789"})
+    assert fake.status_code == 422
+    real = await client.post(f"/workspaces/{workspace_id}/repos/{repo_id}/commits", headers=headers, json={
+        "branch": "main", "message": "feat: add projects module",
+        "changes": [{"op": "put", "path": "projects.py", "content": "pass\n"}]})
+    assert real.status_code == 201 and len(real.json()["sha"]) == 40
+    log = (await client.get(f"/workspaces/{workspace_id}/repos/{repo_id}/commits", headers=headers)).json()
+    assert log["commits"][0]["sha"] == real.json()["sha"]
 
-    # Create commit
-    commit_res = await client.post(
-        f"/workspaces/{workspace_id}/repos/{repo_id}/commits",
-        headers=auth_headers(token),
-        json={"message": "feat: add projects module", "hash": "abc123456789"},
-    )
-    assert commit_res.status_code == 201
-    commit = commit_res.json()
-    assert commit["message"] == "feat: add projects module"
-    assert commit["hash"] == "abc123456789"
-
-    # List commits
-    list_commits_res = await client.get(
-        f"/workspaces/{workspace_id}/repos/{repo_id}/commits",
-        headers=auth_headers(token),
-    )
-    assert list_commits_res.status_code == 200
-    assert len(list_commits_res.json()) == 1
-
-    # Create issue
-    issue_res = await client.post(
-        f"/workspaces/{workspace_id}/repos/{repo_id}/issues",
-        headers=auth_headers(token),
-        json={"title": "Fix JWT token expiration bug", "status": "open"},
-    )
-    assert issue_res.status_code == 201
-    issue = issue_res.json()
-    issue_id = issue["id"]
-    assert issue["status"] == "open"
-
-    # Update issue
-    update_issue_res = await client.patch(
-        f"/workspaces/{workspace_id}/repos/{repo_id}/issues/{issue_id}",
-        headers=auth_headers(token),
-        json={"status": "closed"},
-    )
-    assert update_issue_res.status_code == 200
-    assert update_issue_res.json()["status"] == "closed"
+    issue = (await client.post(f"/workspaces/{workspace_id}/repos/{repo_id}/issues", headers=headers,
+                               json={"title": "Fix JWT token expiration bug"})).json()
+    assert issue["number"] == 1 and issue["state"] == "open"
+    closed = await client.patch(f"/workspaces/{workspace_id}/repos/{repo_id}/issues/1", headers=headers, json={"state": "closed"})
+    assert closed.status_code == 200 and closed.json()["state"] == "closed"

@@ -18,6 +18,7 @@ os.environ.update({
     "SMTP_HOST": "",
     "GOOGLE_CLIENT_ID": "",
     "UPLOAD_DIR": os.path.join(os.path.dirname(__file__), ".test_uploads"),
+    "REPO_DIR": os.path.join(os.path.dirname(__file__), ".test_repos"),
 })
 
 import pytest

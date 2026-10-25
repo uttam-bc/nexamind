@@ -7,11 +7,28 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
-from app.models.channel import Channel, ChannelMember, ChannelReadState, Message, MessageReaction  # noqa: F401
+from app.models.channel import (  # noqa: F401
+    AttachmentKind,
+    Channel,
+    ChannelMember,
+    ChannelReadState,
+    Message,
+    MessageAttachment,
+    MessageReaction,
+)
 from app.models.document import Document  # noqa: F401
 from app.models.file import FileRecord  # noqa: F401
 from app.models.finance import FinanceTransaction  # noqa: F401
 from app.models.project import CodeRepo, Commit, Issue, RepoFile, Task  # noqa: F401
+from app.models.repository import (  # noqa: F401
+    BranchRule,
+    GitAccessToken,
+    PullRequest,
+    PullRequestReview,
+    RepoCollaborator,
+    RepoComment,
+    RepoEvent,
+)
 from app.models.report import ReportRecord, ReportType  # noqa: F401
 from app.models.session import SessionRecord, SessionSource, SessionStatus  # noqa: F401
 from app.models.calendar import (  # noqa: F401

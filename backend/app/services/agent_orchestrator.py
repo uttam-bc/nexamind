@@ -101,12 +101,10 @@ async def _dispatch(name: str, a: dict, db: AsyncSession, ws: UUID, user: User) 
         files = await tools.list_files_tool(db, ws, str(a.get("query", "")), bool(a.get("images_only")))
         return {"files": files, "count": len(files)}
     if name == "list_repos":
-        repos = await tools.list_repos_tool(db, ws)
+        repos = await tools.list_repos_tool(db, ws, user)
         return {"repos": repos, "count": len(repos)}
     if name == "create_repo":
         return await tools.create_repo_tool(db, ws, user, str(a["name"]), a.get("description"))
-    if name == "create_commit":
-        return await tools.create_commit_tool(db, ws, user, str(a["repo_id"]), str(a["message"]))
     if name == "create_issue":
         return await tools.create_issue_tool(db, ws, user, str(a["repo_id"]), str(a["title"]), a.get("description"))
     if name == "search_finance":

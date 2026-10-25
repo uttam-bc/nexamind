@@ -36,10 +36,12 @@ export function setSavedWorkspaceId(id) {
   }
 }
 
-// Multipart upload with progress (fetch cannot report upload progress). Same auth and errors as request().
-function uploadWithProgress(path, formData, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
+// Multipart upload with progress and cancel (fetch can't report upload progress). Same auth and
+// errors as request(). Returns { promise, abort }; an aborted upload rejects with err.aborted = true.
+export function startUpload(path, formData, onProgress) {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise((resolve, reject) => {
+    xhr.onabort = () => reject(Object.assign(new Error('Upload cancelled'), { aborted: true }));
     xhr.open('POST', `${API_BASE}${path}`);
     const token = getAuthToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
@@ -56,10 +58,49 @@ function uploadWithProgress(path, formData, onProgress) {
       }
       if (xhr.status === 401 && token) window.dispatchEvent(new CustomEvent('nexamind:unauthorized'));
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(typeof data.detail === 'string' ? data.detail : `Upload failed (HTTP ${xhr.status})`));
+      else reject(Object.assign(new Error(typeof data.detail === 'string' ? data.detail : `Upload failed (HTTP ${xhr.status})`), { status: xhr.status, data }));
     };
     xhr.send(formData);
   });
+  return { promise, abort: () => xhr.abort() };
+}
+
+function uploadWithProgress(path, formData, onProgress) {
+  return startUpload(path, formData, onProgress).promise;
+}
+
+// Query string without empty values.
+function qs(params) {
+  return new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
+}
+
+const encodePath = (value) => value.split('/').map(encodeURIComponent).join('/');
+
+// Fetch a protected file as a Blob with a type we choose (never rendered as HTML). Errors carry the
+// server's explanation, e.g. "You don't have access to this file…".
+async function fetchProtectedBlob(path, type) {
+  const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${getAuthToken()}` } });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json()).detail;
+    } catch {
+      detail = '';
+    }
+    throw Object.assign(new Error(typeof detail === 'string' && detail ? detail : `Could not open the file (HTTP ${res.status})`), { status: res.status });
+  }
+  return new Blob([await res.arrayBuffer()], type ? { type } : undefined);
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'download';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // Identical GETs issued at the same moment (React StrictMode double effects, two components
@@ -130,7 +171,7 @@ async function sendRequest(path, options = {}) {
     } else {
       errorMsg = `Request failed (HTTP ${res.status})`;
     }
-    throw new Error(errorMsg);
+    throw Object.assign(new Error(errorMsg), { status: res.status, data });
   }
   return data;
 }
@@ -265,40 +306,93 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Code Repos
+  // Git repositories (real Git storage: every change is a commit)
   listRepos: (wsId) => request(`/workspaces/${wsId}/repos`),
-  createRepo: (wsId, data) =>
-    request(`/workspaces/${wsId}/repos`, {
-      method: 'POST',
-      body: JSON.stringify(data),
+  repoTemplates: (wsId) => request(`/workspaces/${wsId}/repo-templates`),
+  repoActivity: (wsId, limit = 20) => request(`/workspaces/${wsId}/repo-activity?limit=${limit}`),
+  createRepo: (wsId, data) => request(`/workspaces/${wsId}/repos`, { method: 'POST', body: JSON.stringify(data) }),
+  importRepo: (wsId, data) => request(`/workspaces/${wsId}/repos/import`, { method: 'POST', body: JSON.stringify(data) }),
+  startRepoUpload: (wsId) => request(`/workspaces/${wsId}/repo-uploads`, { method: 'POST' }),
+  uploadRepoFiles: (wsId, uploadId, entries, onProgress) => {
+    const form = new FormData();
+    entries.forEach(({ file, path }) => {
+      form.append('files', file, file.name);
+      form.append('paths', path);
+    });
+    return startUpload(`/workspaces/${wsId}/repo-uploads/${uploadId}/files`, form, onProgress);
+  },
+  discardRepoUpload: (wsId, uploadId) => request(`/workspaces/${wsId}/repo-uploads/${uploadId}`, { method: 'DELETE' }),
+  getRepo: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}`),
+  updateRepo: (wsId, repoId, data) => request(`/workspaces/${wsId}/repos/${repoId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteRepo: (wsId, repoId, confirmName) =>
+    request(`/workspaces/${wsId}/repos/${repoId}`, { method: 'DELETE', body: JSON.stringify({ confirm_name: confirmName }) }),
+  repoEvents: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/activity`),
+  repoTree: (wsId, repoId, ref, path = '') => request(`/workspaces/${wsId}/repos/${repoId}/tree?${qs({ ref, path })}`),
+  repoBlob: (wsId, repoId, ref, path) => request(`/workspaces/${wsId}/repos/${repoId}/blob?${qs({ ref, path })}`),
+  downloadRepoFile: async (wsId, repoId, ref, path) =>
+    saveBlob(await fetchProtectedBlob(`/workspaces/${wsId}/repos/${repoId}/raw?${qs({ ref, path })}`, 'application/octet-stream'), path.split('/').pop()),
+  downloadRepoArchive: async (wsId, repoId, ref, filename) =>
+    saveBlob(await fetchProtectedBlob(`/workspaces/${wsId}/repos/${repoId}/archive?${qs({ ref })}`, 'application/zip'), filename),
+  fetchRepoRaw: (wsId, repoId, ref, path, type) => fetchProtectedBlob(`/workspaces/${wsId}/repos/${repoId}/raw?${qs({ ref, path })}`, type),
+  searchRepo: (wsId, repoId, q, ref) => request(`/workspaces/${wsId}/repos/${repoId}/search?${qs({ q, ref })}`),
+  repoCommits: (wsId, repoId, { ref = '', path = '', page = 1 } = {}) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/commits?${qs({ ref, path, page })}`),
+  repoCommit: (wsId, repoId, sha) => request(`/workspaces/${wsId}/repos/${repoId}/commits/${sha}`),
+  commitChanges: (wsId, repoId, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/commits`, { method: 'POST', body: JSON.stringify(data) }),
+  compareRefs: (wsId, repoId, base, head) => request(`/workspaces/${wsId}/repos/${repoId}/compare?${qs({ base, head })}`),
+  repoBranches: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/branches`),
+  createBranch: (wsId, repoId, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/branches`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteBranch: (wsId, repoId, name) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/branches/${encodePath(name)}`, { method: 'DELETE' }),
+  repoTags: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/tags`),
+  createTag: (wsId, repoId, data) => request(`/workspaces/${wsId}/repos/${repoId}/tags`, { method: 'POST', body: JSON.stringify(data) }),
+  repoCollaborators: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/collaborators`),
+  setCollaborator: (wsId, repoId, userId, role) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/collaborators`, { method: 'PUT', body: JSON.stringify({ user_id: userId, role }) }),
+  removeCollaborator: (wsId, repoId, userId) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/collaborators/${userId}`, { method: 'DELETE' }),
+  branchRules: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/branch-rules`),
+  setBranchRule: (wsId, repoId, branch, requiredApprovals) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/branch-rules`, {
+      method: 'PUT', body: JSON.stringify({ branch, required_approvals: requiredApprovals }),
     }),
-  listCommits: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/commits`),
-  createCommit: (wsId, repoId, data) =>
-    request(`/workspaces/${wsId}/repos/${repoId}/commits`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  listIssues: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/issues`),
+  deleteBranchRule: (wsId, repoId, branch) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/branch-rules/${encodePath(branch)}`, { method: 'DELETE' }),
+  listIssues: (wsId, repoId, params = {}) => request(`/workspaces/${wsId}/repos/${repoId}/issues?${qs(params)}`),
+  getIssue: (wsId, repoId, number) => request(`/workspaces/${wsId}/repos/${repoId}/issues/${number}`),
   createIssue: (wsId, repoId, data) =>
-    request(`/workspaces/${wsId}/repos/${repoId}/issues`, {
-      method: 'POST',
-      body: JSON.stringify(data),
+    request(`/workspaces/${wsId}/repos/${repoId}/issues`, { method: 'POST', body: JSON.stringify(data) }),
+  updateIssue: (wsId, repoId, number, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/issues/${number}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  commentIssue: (wsId, repoId, number, body) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/issues/${number}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+  linkIssueTask: (wsId, repoId, number, taskId = null) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/issues/${number}/task`, { method: 'PUT', body: JSON.stringify({ task_id: taskId }) }),
+  unlinkIssueTask: (wsId, repoId, number) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/issues/${number}/task`, { method: 'DELETE' }),
+  issueFromActionItem: (wsId, repoId, actionItemId) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/issues/from-action-item`, {
+      method: 'POST', body: JSON.stringify({ action_item_id: actionItemId }),
     }),
-  updateIssue: (wsId, repoId, issueId, data) =>
-    request(`/workspaces/${wsId}/repos/${repoId}/issues/${issueId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    }),
-  listRepoFiles: (wsId, repoId) => request(`/workspaces/${wsId}/repos/${repoId}/files`),
-  saveRepoFile: (wsId, repoId, data) =>
-    request(`/workspaces/${wsId}/repos/${repoId}/files`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  deleteRepoFile: (wsId, repoId, fileId) =>
-    request(`/workspaces/${wsId}/repos/${repoId}/files/${fileId}`, {
-      method: 'DELETE',
-    }),
+  listPulls: (wsId, repoId, state = 'open', page = 1) => request(`/workspaces/${wsId}/repos/${repoId}/pulls?${qs({ state, page })}`),
+  getPull: (wsId, repoId, number) => request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}`),
+  createPull: (wsId, repoId, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/pulls`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePull: (wsId, repoId, number, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  pullFiles: (wsId, repoId, number) => request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}/files`),
+  pullCommits: (wsId, repoId, number) => request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}/commits`),
+  commentPull: (wsId, repoId, number, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}/comments`, { method: 'POST', body: JSON.stringify(data) }),
+  reviewPull: (wsId, repoId, number, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}/reviews`, { method: 'POST', body: JSON.stringify(data) }),
+  mergePull: (wsId, repoId, number, data) =>
+    request(`/workspaces/${wsId}/repos/${repoId}/pulls/${number}/merge`, { method: 'POST', body: JSON.stringify(data) }),
+  listGitTokens: () => request('/auth/git-tokens'),
+  createGitToken: (data) => request('/auth/git-tokens', { method: 'POST', body: JSON.stringify(data) }),
+  revokeGitToken: (id) => request(`/auth/git-tokens/${id}`, { method: 'DELETE' }),
 
   // Channels (Teams-Style)
   listChannels: (wsId) => request(`/workspaces/${wsId}/channels`),
@@ -380,6 +474,16 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   getFilePreview: (wsId, fileId) => request(`/workspaces/${wsId}/files/${fileId}/preview`),
+  // Chat attachments. `base` is a conversation: /workspaces/{w}/channels/{c} or /workspaces/{w}/meetings/{m}.
+  uploadChatAttachment: (base, file, clientUploadId, onProgress) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (clientUploadId) form.append('client_upload_id', clientUploadId);
+    return startUpload(`${base}/attachments`, form, onProgress);
+  },
+  fetchAttachmentBlob: (base, attachmentId, type) => fetchProtectedBlob(`${base}/attachments/${attachmentId}/download`, type),
+  downloadAttachment: async (base, attachmentId, filename) =>
+    saveBlob(await fetchProtectedBlob(`${base}/attachments/${attachmentId}/download`), filename),
   // The raw bytes as a Blob with a type we choose, so the browser never treats an upload as HTML.
   fetchFileBlob: async (wsId, fileId, type) => {
     const res = await fetch(`${API_BASE}/workspaces/${wsId}/files/${fileId}/download`, {
@@ -457,6 +561,11 @@ export const api = {
   // Meetings (scheduled and instant video meetings)
   listMeetings: (wsId, scope = 'upcoming') => request(`/workspaces/${wsId}/meetings?scope=${scope}`),
   getMeeting: (wsId, meetingId) => request(`/workspaces/${wsId}/meetings/${meetingId}`),
+  // Calls from a direct message: a live meeting of the conversation that rings the other person.
+  getLiveCall: (wsId, channelId) => request(`/workspaces/${wsId}/channels/${channelId}/call`),
+  startCall: (wsId, channelId, clientRequestId) =>
+    request(`/workspaces/${wsId}/channels/${channelId}/call`, { method: 'POST', body: JSON.stringify({ client_request_id: clientRequestId }) }),
+  declineCall: (wsId, meetingId) => request(`/workspaces/${wsId}/meetings/${meetingId}/decline`, { method: 'POST' }),
   scheduleMeeting: (wsId, data) =>
     request(`/workspaces/${wsId}/meetings`, { method: 'POST', body: JSON.stringify(data) }),
   startInstantMeeting: (wsId, data) =>

@@ -21,6 +21,12 @@ from app.services.upload_utils import (
 from app.services.workspace_service import get_workspace_membership, require_author_or_manager
 
 
+def _library_only():
+    from app.services.attachment_service import library_only
+
+    return library_only()
+
+
 async def upload_file(
     db: AsyncSession,
     workspace_id: UUID,
@@ -104,7 +110,7 @@ async def list_files(
     await _require_workspace_access(db, workspace_id, user_id)
     result = await db.execute(
         select(FileRecord)
-        .where(FileRecord.workspace_id == workspace_id)
+        .where(FileRecord.workspace_id == workspace_id, _library_only())
         .order_by(FileRecord.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -123,6 +129,7 @@ async def get_file_record(
         select(FileRecord).where(
             FileRecord.id == file_id,
             FileRecord.workspace_id == workspace_id,
+            _library_only(),  # files sent in a chat open only through that conversation
         )
     )
     record = result.scalar_one_or_none()

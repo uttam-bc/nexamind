@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Channel,
-    CodeRepo,
     Document,
     FileRecord,
     FinanceTransaction,
@@ -27,14 +26,14 @@ from app.models.project import TaskPriority, TaskStatus
 from app.schemas.channel import ChannelCreate, MessageCreate
 from app.schemas.document import DocumentCreate
 from app.schemas.finance import MAX_AMOUNT, TransactionCreate
-from app.schemas.project import CodeRepoCreate, CommitCreate, IssueCreate, TaskCreate, TaskUpdate
+from app.schemas.project import TaskCreate, TaskUpdate
 from app.schemas.report import ReportGenerateRequest
-from app.services.auth_service import escape_like
+from app.services.auth_service import AuthError, escape_like
 from app.services.channel_service import create_channel, list_channels, post_message
 from app.services.document_service import create_document
 from app.services.finance_service import calculate_runway, create_transaction
 from app.services.memory_engine import extract_text_from_document, schedule_document_ingestion
-from app.services.project_service import create_commit, create_issue, create_repo, create_task, update_task
+from app.services.project_service import create_task, update_task
 from app.services.report_service import generate_report
 from app.services.websocket_manager import ws_manager
 from app.services.workspace_service import list_user_workspaces
@@ -395,7 +394,10 @@ IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 async def list_files_tool(db: AsyncSession, workspace_id: UUID, query: str = "", images_only: bool = False) -> list[dict]:
     """Uploaded files (newest first). Images can be placed in a page with ![alt](file:<id>)."""
     files = (await db.execute(
-        select(FileRecord).where(FileRecord.workspace_id == workspace_id).order_by(FileRecord.created_at.desc())
+        select(FileRecord).where(
+            FileRecord.workspace_id == workspace_id,
+            FileRecord.channel_id.is_(None), FileRecord.meeting_id.is_(None),  # never private chat files
+        ).order_by(FileRecord.created_at.desc())
     )).scalars().all()
     needle = query.strip().lower()
     items = []
@@ -414,38 +416,42 @@ async def list_files_tool(db: AsyncSession, workspace_id: UUID, query: str = "",
     return items
 
 
-async def list_repos_tool(db: AsyncSession, workspace_id: UUID) -> list[dict]:
-    repos = (await db.execute(select(CodeRepo).where(CodeRepo.workspace_id == workspace_id))).scalars().all()
-    return [{"id": str(r.id), "name": r.name, "description": r.description} for r in repos]
+async def list_repos_tool(db: AsyncSession, workspace_id: UUID, user: User) -> list[dict]:
+    from app.services import repo_service
+
+    repos = await repo_service.visible_repos(db, workspace_id, user.id)
+    return [{"id": str(r.id), "name": r.name, "description": r.description, "default_branch": r.default_branch}
+            for r in repos]
 
 
 async def create_repo_tool(db: AsyncSession, workspace_id: UUID, user: User, name: str, description: str | None = None) -> dict:
+    """A real Git repository with a README as its first commit."""
+    from app.services import repo_service
+
     if not name.strip():
         raise ToolError("A repository name is required")
-    repo = await create_repo(db, workspace_id, user, CodeRepoCreate(name=name.strip()[:255], description=description))
+    try:
+        repo = await repo_service.create_repository(db, workspace_id, user, name=name.strip()[:100],
+                                                    description=description, readme=True)
+    except AuthError as exc:
+        raise ToolError(exc.message) from exc
     await db.commit()
-    return {"id": str(repo.id), "name": repo.name, "message": f"Created repository '{repo.name}'."}
-
-
-async def create_commit_tool(db: AsyncSession, workspace_id: UUID, user: User, repo_id: str, message: str) -> dict:
-    commit = await create_commit(db, workspace_id, _uuid(repo_id, "repository"), user, CommitCreate(message=message))
-    await db.commit()
-    return {
-        "id": str(commit.id),
-        "hash": commit.hash,
-        "message": f"Logged commit {commit.hash[:7]}: '{commit.message}'.",
-    }
+    return {"id": str(repo.id), "name": repo.name, "message": f"Created repository '{repo.name}' with a README."}
 
 
 async def create_issue_tool(
     db: AsyncSession, workspace_id: UUID, user: User, repo_id: str, title: str, description: str | None = None
 ) -> dict:
-    issue = await create_issue(
-        db, workspace_id, _uuid(repo_id, "repository"), user, IssueCreate(title=title[:255], description=description)
-    )
+    from app.services import issue_service, repo_service
+
+    try:
+        repo, role = await repo_service.get_repo_for(db, workspace_id, _uuid(repo_id, "repository"), user.id)
+        issue = await issue_service.create_issue(db, repo, role, user, title=title[:255], body=description)
+    except AuthError as exc:
+        raise ToolError(exc.message) from exc
     await db.commit()
-    return {"id": str(issue.id), "title": issue.title, "status": issue.status.value,
-            "message": f"Opened issue '{issue.title}'."}
+    return {"id": str(issue.id), "number": issue.number, "title": issue.title, "status": issue.status.value,
+            "message": f"Opened issue #{issue.number} '{issue.title}' in {repo.name}."}
 
 
 # -------------------------------------------------------------------------------------------
@@ -698,9 +704,7 @@ AVAILABLE_TOOLS = [
         {"query": {**STRING, "description": "Filename keyword (optional)"},
          "images_only": {"type": "boolean"}}),
     _fn("list_repos", "List code repositories in the workspace."),
-    _fn("create_repo", "Create a code repository.", {"name": STRING, "description": STRING}, ["name"]),
-    _fn("create_commit", "Log a commit to a repository. Use list_repos to find the id.",
-        {"repo_id": STRING, "message": STRING}, ["repo_id", "message"]),
+    _fn("create_repo", "Create a Git repository (with a README as the first commit).", {"name": STRING, "description": STRING}, ["name"]),
     _fn("create_issue", "Open an issue in a repository. Use list_repos to find the id.",
         {"repo_id": STRING, "title": STRING, "description": STRING}, ["repo_id", "title"]),
     _fn("search_finance", "Get cash balance, monthly burn, runway, and recent transactions.",

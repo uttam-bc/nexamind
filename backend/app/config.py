@@ -142,6 +142,15 @@ class Settings(BaseSettings):
     max_upload_mb: int = 25
     max_recording_mb: int = 200
 
+    # Git repositories (bare repositories on local disk; backed up to the bucket with STORAGE_BACKEND=s3)
+    repo_dir: str = "repos"
+    git_binary: str = "git"
+    repo_max_file_mb: int = 25  # one file added through the web
+    repo_max_upload_mb: int = 300  # one upload batch (folder import) in total
+    repo_max_upload_files: int = 5000
+    git_max_push_mb: int = 300  # one `git push` (pack size, enforced by git and by the request body limit)
+    git_timeout_seconds: int = 300
+
     # Real-time fan-out across multiple API instances (optional)
     redis_url: str | None = None
 

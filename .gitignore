@@ -39,6 +39,8 @@ node_modules/
 Thumbs.db
 
 backend/tests/.test_uploads/
+backend/tests/.test_repos/
+backend/repos/
 
 # Local tooling
 .claude/

@@ -4,15 +4,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
-    UPLOAD_DIR=/data/uploads
+    UPLOAD_DIR=/data/uploads \n    REPO_DIR=/data/repos
 
 WORKDIR /app
+
+# git serves and stores repositories (clone/push over HTTPS, merges with merge-tree: git >= 2.38).
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Run as an unprivileged user; uploads go to /data (mount a persistent disk there).
-RUN useradd --create-home --uid 10001 nexamind && mkdir -p /data/uploads && chown -R nexamind /data
+RUN useradd --create-home --uid 10001 nexamind && mkdir -p /data/uploads /data/repos && chown -R nexamind /data
 COPY --chown=nexamind . .
 USER nexamind
 

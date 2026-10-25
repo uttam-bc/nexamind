@@ -18,7 +18,7 @@ from app.services.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
-CATEGORIES = ("meetings", "tasks", "messages", "mom")
+CATEGORIES = ("meetings", "tasks", "messages", "mom", "repos")
 
 
 def iso_utc(value: datetime | None) -> str | None:

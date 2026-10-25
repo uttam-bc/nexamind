@@ -59,6 +59,9 @@ export default function NotificationBell({ onNavigate }) {
           attempt = 0;
           setUnread(msg.unread_count);
           refresh();
+        } else if (msg.type === 'call') {
+          // Incoming call, answered, declined or ended: the call manager reacts.
+          window.dispatchEvent(new CustomEvent('nexamind:call', { detail: msg }));
         } else if (msg.type === 'notification') {
           const n = msg.notification;
           if (knownIds.current.has(n.id)) return;

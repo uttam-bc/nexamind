@@ -97,9 +97,19 @@ async def _membership(db: AsyncSession, workspace_id: UUID, user_id: UUID):
     return membership
 
 
+async def _call_member_ids(db: AsyncSession, meeting: Meeting) -> list[UUID]:
+    from app.models import ChannelMember
+
+    return list((await db.execute(
+        select(ChannelMember.user_id).where(ChannelMember.channel_id == meeting.channel_id)
+    )).scalars())
+
+
 async def is_host(db: AsyncSession, meeting: Meeting, user_id: UUID) -> bool:
     if meeting.organizer_id == user_id:
         return True
+    if meeting.channel_id:  # in a direct call both people can end it
+        return user_id in await _call_member_ids(db, meeting)
     membership = await get_workspace_membership(db, meeting.workspace_id, user_id)
     return bool(membership and membership.role in (WorkspaceRole.OWNER, WorkspaceRole.ADMIN))
 
@@ -109,6 +119,9 @@ async def _invitee_ids(db: AsyncSession, meeting_id: UUID) -> list[UUID]:
 
 
 async def can_access(db: AsyncSession, meeting: Meeting, user_id: UUID) -> bool:
+    if meeting.channel_id:
+        # A call from a direct message belongs to its participants, like the conversation itself.
+        return user_id in await _call_member_ids(db, meeting)
     membership = await get_workspace_membership(db, meeting.workspace_id, user_id)
     if not membership:
         return False
@@ -337,6 +350,8 @@ async def prepare_join(db: AsyncSession, meeting: Meeting, user_id: UUID) -> boo
         meeting.status = MeetingStatus.LIVE
         meeting.started_at = datetime.now(UTC)
         await db.flush()
+    if meeting.channel_id:  # someone picked up: every device of every participant stops ringing
+        await _call_event(db, meeting, {"event": "answered", "user_id": str(user_id)})
     return await is_host(db, meeting, user_id)
 
 
@@ -376,6 +391,13 @@ async def end_for_all(db: AsyncSession, meeting: Meeting, user: User | None, rea
     meeting.ended_by = user.id if user else None
     segments = await transcript_segments(db, meeting.id)
     transcript = format_transcript(segments)
+    if meeting.channel_id:
+        await _finish_call(db, meeting, attendance)
+        if not any(seg.source != "gap" for seg in segments):
+            # A call with nothing said (missed, declined, or transcription off) gets no minutes.
+            await db.flush()
+            await meeting_hub.end(meeting.id, user.name if user else "NexaMind")
+            return None
     creator = meeting.organizer_id or (user.id if user else None)
     if creator is None and attendance:
         creator = UUID(next(iter(attendance)))
@@ -399,7 +421,9 @@ async def end_for_all(db: AsyncSession, meeting: Meeting, user: User | None, rea
 
 
 async def store_chat_message(db: AsyncSession, meeting_id: UUID, user: User, content: str, client_message_id: str,
-                             reply_to_id=None) -> tuple[MeetingMessage, MeetingMessage | None]:
+                             reply_to_id=None, *, upload_ids: list[UUID] | None = None,
+                             file_ids: list[UUID] | None = None, document_ids: list[UUID] | None = None,
+                             ) -> tuple[MeetingMessage, MeetingMessage | None]:
     """Save an in-call chat message. Resending the same client id (after a reconnect) returns the
     stored one. A reply must point at a message of the same meeting; anything else is sent as a
     plain message rather than linked to the wrong conversation."""
@@ -412,11 +436,27 @@ async def store_chat_message(db: AsyncSession, meeting_id: UUID, user: User, con
         parent = await db.get(MeetingMessage, parent_id)
         if parent is None or parent.meeting_id != meeting_id:
             parent = None
+    existing = (await db.execute(select(MeetingMessage).where(
+        MeetingMessage.meeting_id == meeting_id, MeetingMessage.client_message_id == client_message_id))).scalar_one_or_none()
+    if existing is not None:  # a resend after a reconnect: already stored, attachments included
+        return existing, (await db.get(MeetingMessage, existing.reply_to_id) if existing.reply_to_id else None)
+    from app.services import attachment_service
+
+    attachments = await attachment_service.collect(
+        db, user, upload_ids=upload_ids or [], file_ids=file_ids or [], document_ids=document_ids or [],
+        meeting_id=meeting_id,
+    )
+    if not content and not attachments:
+        raise AuthError("A message needs text or at least one file", status_code=400)
     message = MeetingMessage(meeting_id=meeting_id, sender_id=user.id, sender_name=user.name, content=content,
                              client_message_id=client_message_id, reply_to_id=parent.id if parent else None)
     try:
         async with db.begin_nested():
             db.add(message)
+            await db.flush()
+            for attachment in attachments:
+                attachment.meeting_message_id = message.id
+                db.add(attachment)
             await db.flush()
     except IntegrityError:
         if message in db:
@@ -425,6 +465,21 @@ async def store_chat_message(db: AsyncSession, meeting_id: UUID, user: User, con
             MeetingMessage.meeting_id == meeting_id, MeetingMessage.client_message_id == client_message_id))).scalar_one()
         parent = await db.get(MeetingMessage, message.reply_to_id) if message.reply_to_id else None
     return message, parent
+
+
+async def meeting_message_attachments(db: AsyncSession, message_ids: list[UUID]) -> dict[UUID, list[dict]]:
+    """Serialized attachments of meeting chat messages, in one query."""
+    from app.models import MessageAttachment
+    from app.services import attachment_service
+
+    if not message_ids:
+        return {}
+    out: dict[UUID, list[dict]] = {}
+    rows = (await db.execute(select(MessageAttachment).where(MessageAttachment.meeting_message_id.in_(message_ids))
+                             .order_by(MessageAttachment.position))).scalars()
+    for row in rows:
+        out.setdefault(row.meeting_message_id, []).append(attachment_service.serialize(row))
+    return out
 
 
 def schedule_mom_generation(session_id: UUID) -> None:
@@ -470,3 +525,131 @@ async def end_abandoned_meetings(db: AsyncSession) -> int:
                 await db.commit()
                 schedule_mom_generation(session.id)
     return ended
+
+
+# --------------------------------------------------------------------------------------------
+# Calls from direct messages: a live meeting tied to the conversation, ringing the other person
+# --------------------------------------------------------------------------------------------
+
+CALL_RING_SECONDS = 45
+
+
+async def _call_event(db: AsyncSession, meeting: Meeting, event: dict, exclude: UUID | None = None) -> None:
+    from app.services.websocket_manager import ws_manager
+
+    payload = {"type": "call", "meeting_id": str(meeting.id), "channel_id": str(meeting.channel_id), **event}
+    for uid in await _call_member_ids(db, meeting):
+        if uid != exclude:
+            await ws_manager.send_to_user(uid, payload)
+
+
+async def live_call(db: AsyncSession, channel_id: UUID) -> Meeting | None:
+    return (await db.execute(
+        select(Meeting).where(Meeting.channel_id == channel_id, Meeting.status == MeetingStatus.LIVE)
+        .order_by(Meeting.created_at.desc())
+    )).scalars().first()
+
+
+async def start_call(db: AsyncSession, workspace_id: UUID, channel_id: UUID, user: User,
+                     client_request_id: str | None = None) -> tuple[Meeting, bool]:
+    """Start (or join the running) call of a direct message and ring the other participants."""
+    from app.models import ChannelMember
+    from app.services import channel_service
+
+    channel = await channel_service.get_channel(db, workspace_id, channel_id, user.id)
+    if not channel.is_direct:
+        raise AuthError("Calls start from a direct message. Use Meetings for channel calls.", status_code=400)
+    running = await live_call(db, channel.id)
+    if running is not None:
+        return running, False
+    existing = await _existing_request(db, user.id, client_request_id)
+    if existing:
+        return existing, False
+    member_ids = list((await db.execute(
+        select(ChannelMember.user_id).where(ChannelMember.channel_id == channel.id))).scalars())
+    others = [uid for uid in member_ids if uid != user.id]
+    if not others:
+        raise AuthError("Nobody else is in this conversation to call", status_code=400)
+    names = [u.name for u in (await db.execute(select(User).where(User.id.in_(member_ids)))).scalars()]
+    now = datetime.now(UTC)
+    meeting = Meeting(
+        workspace_id=channel.workspace_id, channel_id=channel.id, title=f"Call: {' & '.join(sorted(names))}"[:255],
+        organizer_id=user.id, status=MeetingStatus.LIVE, scheduled_start=now, started_at=now, timezone="UTC",
+        client_request_id=client_request_id,
+    )
+    try:
+        async with db.begin_nested():
+            db.add(meeting)
+            await db.flush()
+    except IntegrityError:
+        if meeting in db:
+            db.expunge(meeting)
+        original = await _existing_request(db, user.id, client_request_id)
+        if original:
+            return original, False
+        raise
+    for uid in others:
+        db.add(MeetingInvitee(meeting_id=meeting.id, user_id=uid))
+    await db.flush()
+    await ring(db, meeting, user)
+    return meeting, True
+
+
+async def ring(db: AsyncSession, meeting: Meeting, caller: User) -> None:
+    """Make the other participants' open apps ring, and leave a notification in case they miss it."""
+    data = await serialize(db, meeting)
+    others = [uid for uid in await _call_member_ids(db, meeting) if uid != caller.id]
+    await _call_event(db, meeting, {
+        "event": "ring", "call": data, "ring_seconds": CALL_RING_SECONDS,
+        "caller": {"id": str(caller.id), "name": caller.name, "avatar_url": caller.avatar_url},
+    }, exclude=caller.id)
+    await notification_service.notify_many(
+        db, others, kind="call_incoming", category="meetings",
+        title=f"{caller.name} called you", body="Video call",
+        link={"tab": "solo_chat", "channel_id": str(meeting.channel_id), "meeting_id": str(meeting.id)},
+        dedupe_key=f"call:{meeting.id}", actor_id=caller.id,
+    )
+
+
+async def decline_call(db: AsyncSession, meeting: Meeting, user: User) -> None:
+    """The other person declined: in a two-person call that ends it; otherwise the others carry on."""
+    if not meeting.channel_id:
+        raise AuthError("Only calls can be declined", status_code=400)
+    if meeting.status != MeetingStatus.LIVE:
+        return
+    await _call_event(db, meeting, {"event": "declined", "user_id": str(user.id), "name": user.name})
+    others_connected = [uid for uid in meeting_hub.attendance(meeting.id) if uid != str(user.id)]
+    if len(await _call_member_ids(db, meeting)) <= 2 or not others_connected:
+        await end_for_all(db, meeting, None, reason="declined")
+
+
+async def _finish_call(db: AsyncSession, meeting: Meeting, attendance: dict) -> None:
+    """Stop any ringing and leave a line in the conversation: a missed call, or how long it lasted."""
+    from app.models import Channel
+    from app.schemas.channel import MessageCreate, MessageResponse
+    from app.services import channel_service
+    from app.services.websocket_manager import ws_manager
+
+    await _call_event(db, meeting, {"event": "ended"})
+    channel = await db.get(Channel, meeting.channel_id)
+    caller = await db.get(User, meeting.organizer_id) if meeting.organizer_id else None
+    if channel is None or caller is None:
+        return
+    if len(attendance) >= 2:
+        seconds = int((_aware(meeting.ended_at) - _aware(meeting.started_at)).total_seconds()) if meeting.started_at else 0
+        minutes, secs = divmod(max(seconds, 0), 60)
+        text = f"📞 Video call · {minutes} min {secs:02d} s" if minutes else f"📞 Video call · {secs} s"
+    else:
+        text = "📞 Missed video call"
+    try:
+        async with db.begin_nested():
+            message = await channel_service.post_message(
+                db, channel.workspace_id, channel.id, caller,
+                MessageCreate(content=text, client_message_id=f"call-{meeting.id.hex}"),
+            )
+        await ws_manager.broadcast_to_channel(channel.id, {
+            "event": "new_message", "channel_id": str(channel.id),
+            "data": MessageResponse.model_validate(message).model_dump(mode="json"),
+        })
+    except Exception:  # noqa: BLE001 - ending the call must not fail because of the summary line
+        logger.exception("Could not post the call summary for meeting %s", meeting.id)

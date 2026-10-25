@@ -594,9 +594,10 @@ export class MeetingClient {
     this._emit();
   }
 
-  sendChat(content, clientMessageId = newId(), replyToId = null) {
+  sendChat(content, clientMessageId = newId(), replyToId = null, files = null) {
     const frame = { type: 'chat', content, client_message_id: clientMessageId };
     if (replyToId) frame.reply_to_id = replyToId;
+    if (files) Object.assign(frame, files); // attachment_ids, shared_file_ids, shared_document_ids
     return this._send(frame) ? clientMessageId : null;
   }
 

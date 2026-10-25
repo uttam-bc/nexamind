@@ -32,3 +32,8 @@ export function onDeepLink(tab, handler) {
   window.addEventListener(EVENT, listener);
   return () => window.removeEventListener(EVENT, listener);
 }
+
+/** Ask the app to open a link from anywhere (switches workspace/tab, then the tab handles the rest). */
+export function navigateTo(link) {
+  window.dispatchEvent(new CustomEvent('nexamind:open-link', { detail: link }));
+}

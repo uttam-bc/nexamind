@@ -18,6 +18,7 @@ from app.models import (
     WorkspaceType,
 )
 from app.schemas.channel import ChannelCreate, MessageCreate
+from app.services import attachment_service
 from app.services.auth_service import AuthError, get_user_by_username
 from app.services.workspace_service import MANAGER_ROLES, get_workspace_membership
 
@@ -219,6 +220,7 @@ async def list_messages(
             selectinload(Message.sender),
             selectinload(Message.reactions),
             selectinload(Message.replies),
+            selectinload(Message.attachments),
         )
         .where(Message.channel_id == channel.id)
     )
@@ -248,6 +250,14 @@ async def post_message(
 ) -> dict:
     channel = await get_channel(db, workspace_id, channel_id, user.id)
 
+    if data.client_message_id:
+        # A retried send (timeout, reconnect): return the message that was already stored.
+        existing = (await db.execute(select(Message.id).where(
+            Message.channel_id == channel.id, Message.client_message_id == data.client_message_id,
+            Message.sender_id == user.id))).scalar_one_or_none()
+        if existing is not None:
+            return format_message_dict(await _get_message(db, channel, existing), user.id)
+
     if data.parent_id:
         parent_result = await db.execute(
             select(Message).where(Message.id == data.parent_id, Message.channel_id == channel.id)
@@ -255,19 +265,28 @@ async def post_message(
         if parent_result.scalar_one_or_none() is None:
             raise AuthError("Parent message not found in this channel", status_code=404)
 
+    attachments = await attachment_service.collect(
+        db, user, upload_ids=data.attachment_ids, file_ids=data.shared_file_ids,
+        document_ids=data.shared_document_ids, channel_id=channel.id,
+    )
     message = Message(
         workspace_id=channel.workspace_id,
         channel_id=channel.id,
         sender_id=user.id,
         parent_id=data.parent_id,
         content=data.content.strip(),
+        client_message_id=data.client_message_id,
     )
     db.add(message)
+    await db.flush()
+    for attachment in attachments:
+        attachment.message_id = message.id
+        db.add(attachment)
     await db.flush()
     await db.refresh(message)
 
     await _set_read_state(db, channel.id, user.id, message.id)
-    await _notify_message(db, channel, message, user)
+    await _notify_message(db, channel, message, user, [a.name for a in attachments])
 
     return {
         "id": message.id,
@@ -281,13 +300,16 @@ async def post_message(
         "created_at": message.created_at,
         "reply_count": 0,
         "reactions": [],
+        "attachments": [attachment_service.serialize(a) for a in attachments],
+        "client_message_id": message.client_message_id,
     }
 
 
 async def _get_message(db: AsyncSession, channel: Channel, message_id: UUID) -> Message:
     result = await db.execute(
         select(Message)
-        .options(selectinload(Message.sender), selectinload(Message.reactions), selectinload(Message.replies))
+        .options(selectinload(Message.sender), selectinload(Message.reactions), selectinload(Message.replies),
+                 selectinload(Message.attachments))
         .where(Message.id == message_id, Message.channel_id == channel.id)
     )
     message = result.scalar_one_or_none()
@@ -355,7 +377,8 @@ async def _can_read(db: AsyncSession, channel: Channel, user_id: UUID) -> bool:
     return bool(await get_workspace_membership(db, channel.workspace_id, user_id))
 
 
-async def _notify_message(db: AsyncSession, channel: Channel, message: Message, sender: User) -> None:
+async def _notify_message(db: AsyncSession, channel: Channel, message: Message, sender: User,
+                          attachment_names: list[str] | None = None) -> None:
     """Direct messages notify the other participants; @mentions notify people who can read the channel."""
     from app.services import notification_service
 
@@ -363,7 +386,8 @@ async def _notify_message(db: AsyncSession, channel: Channel, message: Message, 
     tab = "solo_chat" if workspace and workspace.type == WorkspaceType.PERSONAL else "channels"
     link = {"tab": tab, "workspace_id": str(channel.workspace_id), "channel_id": str(channel.id),
             "message_id": str(message.id)}
-    preview = message.content[:140]
+    files = f"📎 {', '.join(attachment_names)}" if attachment_names else ""
+    preview = (message.content or files)[:140]
     if channel.is_direct:
         others = (await db.execute(select(ChannelMember.user_id).where(
             ChannelMember.channel_id == channel.id, ChannelMember.user_id != sender.id))).scalars().all()
@@ -507,6 +531,8 @@ def format_message_dict(msg: Message, current_user_id: UUID) -> dict:
         "edited_at": msg.edited_at,
         "reply_count": len(msg.replies) if msg.replies else 0,
         "reactions": build_reaction_summaries(msg.reactions or [], current_user_id),
+        "attachments": [attachment_service.serialize(a) for a in msg.attachments or []],
+        "client_message_id": msg.client_message_id,
     }
 
 

@@ -26,11 +26,18 @@ import {
   AtSign,
   Pencil,
   Trash2,
+  Video,
 } from 'lucide-react';
 import { api } from '../api';
 import { connectChannel, mergeMessages } from '../lib/channelSocket';
-import { onDeepLink } from '../lib/deepLink';
+import { navigateTo, onDeepLink } from '../lib/deepLink';
+import { useAttachmentDraft } from '../lib/chatAttachments';
+import { newId } from '../lib/meetingClient';
 import FormattedChatMessage from './FormattedChatMessage';
+import { AttachButton, AttachmentTray, DropZone } from './chat/AttachmentComposer';
+import FilePickerDialog from './chat/FilePickerDialog';
+import { startCall } from './calls/CallManager';
+import MessageAttachments from './chat/MessageAttachments';
 import { notify, confirmDialog } from '../context/ToastContext';
 
 const PAGE_SIZE = 100;
@@ -88,6 +95,13 @@ export default function Channels({
   const [presenceList, setPresenceList] = useState([]);
 
   const [connection, setConnection] = useState('connected');
+  // Files for the next message, and the id of a send that failed (reused on retry, so it's stored once).
+  const channelBase = activeChannel ? `/workspaces/${workspaceId}/channels/${activeChannel.id}` : null;
+  const draft = useAttachmentDraft(channelBase);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const pendingSendId = useRef(null);
+  const addFiles = (files) => draft.addFiles(files).forEach((problem) => notify(problem, 'error'));
+  const openPage = (att) => navigateTo({ tab: 'documents', workspace_id: att.workspace_id, document_id: att.document_id });
   // Phones show the channel list or the open conversation, not both.
   const [mobileView, setMobileView] = useState('list');
   const openChannel = (channel) => {
@@ -164,6 +178,8 @@ export default function Channels({
     const channelId = activeChannel.id;
     let current = true;
     setMessages([]);
+    draft.clear();
+    pendingSendId.current = null;
     setThreadRootMessage(null);
     setThreadReplies([]);
     seenReplies.current = new Set();
@@ -245,18 +261,30 @@ export default function Channels({
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputText.trim() || !activeChannel || isSending) return;
     const textToSend = inputText.trim();
-    setInputText('');
+    if ((!textToSend && !draft.hasItems) || !activeChannel || isSending) return;
+    if (draft.busy) {
+      notify('Wait for the files to finish uploading.', 'info');
+      return;
+    }
+    if (draft.failed) {
+      notify('Some files failed to upload: retry or remove them first.', 'error');
+      return;
+    }
+    pendingSendId.current = pendingSendId.current || newId();
     setIsSending(true);
-
     try {
       const created = await api.postMessage(workspaceId, activeChannel.id, {
         content: textToSend,
+        ...draft.payload(),
+        client_message_id: pendingSendId.current,
       });
       setMessages((prev) => mergeMessages(prev, [created]));
+      setInputText('');
+      draft.clear();
+      pendingSendId.current = null;
     } catch (err) {
-      setInputText(textToSend); // keep what was typed so it can be sent again
+      // Text and files stay as they were; sending again reuses the same message id.
       notify(`Send failed: ${err.message}`, 'error');
     } finally {
       setIsSending(false);
@@ -721,6 +749,17 @@ export default function Channels({
               </div>
 
               <div className="flex items-center gap-2">
+                {activeChannel.is_direct && (
+                  <button
+                    type="button"
+                    onClick={() => startCall({ workspaceId, channelId: activeChannel.id, peerName: getChannelDisplayName(activeChannel) })}
+                    className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl transition"
+                    aria-label={`Video call ${getChannelDisplayName(activeChannel)}`}
+                  >
+                    <Video className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="hidden sm:inline">Call</span>
+                  </button>
+                )}
                 {!activeChannel.is_direct && activeChannel.created_by === user?.id && activeChannel.name !== 'general' && (
                   <button
                     type="button"
@@ -746,6 +785,7 @@ export default function Channels({
                 Connection lost. Reconnecting… new messages will appear when it is back.
               </div>
             )}
+            <DropZone onFiles={addFiles} className="flex-1 min-h-0 flex flex-col">
             <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 bg-slate-100/70">
               {messages.length === 0 ? (
                 <div className="text-center py-20 text-slate-400 space-y-3">
@@ -857,10 +897,15 @@ export default function Channels({
                             </div>
                           </form>
                         ) : (
-                          <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed font-sans font-normal">
-                            <FormattedChatMessage content={msg.content} isUser={false} />
-                            {msg.edited_at && <span className="block mt-1 text-xs text-slate-500">(edited)</span>}
-                          </div>
+                          <>
+                            {msg.content && (
+                              <div className="mt-1.5 bg-white border border-slate-200/90 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm sm:text-base text-slate-900 max-w-3xl leading-relaxed font-sans font-normal break-words">
+                                <FormattedChatMessage content={msg.content} isUser={false} />
+                                {msg.edited_at && <span className="block mt-1 text-xs text-slate-500">(edited)</span>}
+                              </div>
+                            )}
+                            <MessageAttachments attachments={msg.attachments} base={channelBase} onOpenPage={openPage} />
+                          </>
                         )}
 
                         {/* Reaction Badges List */}
@@ -961,12 +1006,20 @@ export default function Channels({
               )}
               <div ref={messagesEndRef} />
             </div>
+            </DropZone>
 
             {/* Message Input Form - High Contrast, Large Readable Text */}
             <form
               onSubmit={handleSendMessage}
-              className="p-2 sm:p-4 border-t border-slate-200 bg-white flex items-center gap-2 sm:gap-3"
+              onPaste={(e) => e.clipboardData?.files?.length && addFiles(e.clipboardData.files)}
+              className="p-2 sm:p-4 border-t border-slate-200 bg-white flex flex-wrap items-center gap-2 sm:gap-3"
             >
+              {draft.hasItems && (
+                <div className="w-full">
+                  <AttachmentTray draft={draft} />
+                </div>
+              )}
+              <AttachButton onFiles={addFiles} onShareExisting={() => setShowFilePicker(true)} disabled={isSending} />
               <input aria-label="Message text"
                 type="text"
                 placeholder={`Type message in #${getChannelDisplayName(activeChannel)}...`}
@@ -977,7 +1030,7 @@ export default function Channels({
 
               <button
                 type="submit"
-                disabled={!inputText.trim() || isSending}
+                disabled={(!inputText.trim() && !draft.hasItems) || isSending || draft.busy}
                 className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-3 rounded-2xl text-xs font-bold shadow-md shadow-indigo-600/30 transition flex items-center gap-2"
               >
                 <Send className="w-4 h-4" />
@@ -991,6 +1044,11 @@ export default function Channels({
           </div>
         )}
       </main>
+
+      {/* ------------------------------------------------------------- */}
+      {showFilePicker && (
+        <FilePickerDialog workspaceId={workspaceId} onPick={draft.addShared} onClose={() => setShowFilePicker(false)} />
+      )}
 
       {/* ------------------------------------------------------------- */}
       {/* 3. DEDICATED THREAD PANEL                                      */}

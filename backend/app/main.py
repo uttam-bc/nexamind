@@ -18,17 +18,19 @@ from app.routers import (
     documents,
     files,
     finance,
+    git_http,
     meetings,
     notifications,
     projects,
     reports,
+    repositories,
     sessions,
     video,
     websockets,
     workspaces,
 )
 from app.security import SecurityHeadersMiddleware
-from app.services import jobs
+from app.services import jobs, repo_service
 from app.services.auth_service import AuthError
 from app.services.session_service import resume_interrupted_sessions
 from app.services.websocket_manager import ws_manager
@@ -101,6 +103,11 @@ async def auth_error_handler(_: Request, exc: AuthError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
+@app.exception_handler(repo_service.FlaggedFilesError)
+async def flagged_files_handler(_: Request, exc: repo_service.FlaggedFilesError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "flagged": exc.flagged})
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
@@ -118,4 +125,7 @@ for module in (auth, contact, notifications, meetings, workspaces, documents, pr
                ai_agent, reports, video, calendar):
     app.include_router(module.router)
 app.include_router(ai_agent.global_ai_router)
+app.include_router(repositories.router)
+app.include_router(repositories.token_router)
+app.include_router(git_http.router)
 app.include_router(meetings.mom_router)

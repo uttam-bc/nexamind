@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { isKnownTab } from './lib/navigation';
 import {
   Bot,
@@ -38,6 +38,7 @@ import CommandPalette from './components/CommandPalette';
 const AiAssistant = lazy(() => import('./components/AiAssistant'));
 const SoloChat = lazy(() => import('./components/SoloChat'));
 const CalendarView = lazy(() => import('./components/CalendarView'));
+const CallManager = lazy(() => import('./components/calls/CallManager'));
 import AiReminderToast from './components/AiReminderToast';
 import NotificationBell from './components/NotificationBell';
 import { openDeepLink } from './lib/deepLink';
@@ -76,7 +77,8 @@ export default function App() {
   // Active module navigation
   // The active tab lives in the URL hash (#/documents), so refresh, links and Back work.
   const readTabFromHash = () => {
-    const tab = window.location.hash.replace(/^#\/?/, '');
+    // Only the first segment is the tab: #/code/<repo>/pulls/3 is the Code tab with a deeper view.
+    const tab = window.location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
     return isKnownTab(tab) ? tab : 'dashboard';
   };
   const [activeTab, setActiveTabState] = useState(readTabFromHash);
@@ -349,11 +351,24 @@ export default function App() {
       handleSelectWorkspace(link.workspace_id);
     }
     if (link.tab && isKnownTab(link.tab)) setActiveTab(link.tab);
+    if (link.tab === 'documents' && link.document_id) setOpenDocId(link.document_id);
     openDeepLink(link);
   };
+  // Links opened from inside a feature (e.g. a page shared in chat) come through the same path.
+  const openLinkRef = useRef(handleOpenLink);
+  openLinkRef.current = handleOpenLink;
+  useEffect(() => {
+    const onOpen = (e) => e.detail && openLinkRef.current(e.detail);
+    window.addEventListener('nexamind:open-link', onOpen);
+    return () => window.removeEventListener('nexamind:open-link', onOpen);
+  }, []);
 
   return (
     <div className="h-screen w-full flex flex-col bg-[#F8FAFC] text-[#191C1E] font-sans antialiased overflow-hidden">
+      {/* Incoming calls ring on every screen; the call itself opens full screen. */}
+      <Suspense fallback={null}>
+        <CallManager user={user} currentWorkspaceId={currentWorkspace?.id} />
+      </Suspense>
       {/* TopNavBar (Exact Stitch Specification) */}
       <header className="fixed top-0 left-0 w-full z-40 flex justify-between items-center px-3 sm:px-6 h-16 bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] shadow-sm">
         <div className="flex items-center gap-6">
@@ -660,9 +675,10 @@ export default function App() {
             {activeTab === 'code' && (
               <CodeWorkspace
                 workspaceId={currentWorkspace?.id}
-                repos={repos}
+                workspaceName={currentWorkspace?.name}
+                personal={isSoloWorkspace}
+                user={user}
                 onRefreshRepos={() => loadWorkspaceData(currentWorkspace?.id)}
-                onBack={handleBackToDashboard}
               />
             )}
 

@@ -58,6 +58,11 @@ class Meeting(Base):
     recurrence_parent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Set for a call started from a direct message: its participants are the conversation's members,
+    # whether or not they belong to `workspace_id`.
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_by: Mapped[uuid.UUID | None] = mapped_column(

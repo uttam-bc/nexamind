@@ -2,9 +2,9 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
 
@@ -96,7 +96,11 @@ class Task(Base):
 
 
 class CodeRepo(Base):
+    """A Git repository. The history lives in a bare repository on disk (`git_service`), named by
+    `storage_key`; this row holds what Git doesn't: access, numbering and status."""
+
     __tablename__ = "code_repos"
+    __table_args__ = (UniqueConstraint("workspace_id", "slug", name="uq_code_repos_workspace_slug"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -110,7 +114,23 @@ class CodeRepo(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "workspace": every workspace member gets `member_role`; "private": only collaborators.
+    visibility: Mapped[str] = mapped_column(String(20), default="workspace", nullable=False)
+    member_role: Mapped[str] = mapped_column(String(20), default="write", nullable=False)
+    default_branch: Mapped[str] = mapped_column(String(200), default="main", nullable=False)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Bare repository directory name (uuid hex); None for repositories from before real Git storage.
+    storage_key: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="ready", nullable=False)  # ready | importing | failed
+    status_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    imported_from: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    next_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # shared by issues and PRs
+    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    backup_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -172,6 +192,7 @@ class Commit(Base):
 
 class Issue(Base):
     __tablename__ = "issues"
+    __table_args__ = (UniqueConstraint("repo_id", "number", name="uq_issues_repo_number"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -191,6 +212,24 @@ class Issue(Base):
         default=IssueStatus.OPEN,
         nullable=False,
         index=True,
+    )
+    number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    priority: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    labels: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    milestone: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # One task per issue (and one issue per task / meeting action item): links never duplicate.
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    source_action_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("meeting_action_items.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -214,6 +253,7 @@ class Issue(Base):
 
     repo: Mapped["CodeRepo"] = relationship(back_populates="issues")
     creator: Mapped["User | None"] = relationship(foreign_keys=[created_by])
+    assignee: Mapped["User | None"] = relationship(foreign_keys=[assignee_id])
 
 
 class RepoFile(Base):

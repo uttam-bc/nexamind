@@ -151,7 +151,7 @@ describe('In-call chat replies', () => {
     fireEvent.click(screen.getAllByText('Reply')[0]);
     fireEvent.change(screen.getByLabelText('Message everyone'), { target: { value: 'On it' } });
     fireEvent.submit(screen.getByLabelText('Message everyone').closest('form'));
-    expect(onSend).toHaveBeenCalledWith('On it', expect.objectContaining({ id: 'm1', sender_name: 'Priya' }));
+    expect(onSend).toHaveBeenCalledWith('On it', expect.objectContaining({ id: 'm1', sender_name: 'Priya' }), null);
     expect(screen.queryByTestId('reply-preview')).toBeNull();
   });
 

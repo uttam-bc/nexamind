@@ -106,6 +106,79 @@ def verify_signature(path: Path, filename: str) -> str | None:
     return mime
 
 
+# What can be sent in chat, by extension, and how its content is checked. Anything else is refused.
+OFFICE_ZIP = {".docx": "word/", ".xlsx": "xl/", ".pptx": "ppt/"}
+OFFICE_OLE = {".doc": "application/msword", ".xls": "application/vnd.ms-excel", ".ppt": "application/vnd.ms-powerpoint"}
+OFFICE_ZIP_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+TEXT_TYPES = {
+    ".txt": "text/plain", ".md": "text/markdown", ".markdown": "text/markdown", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
+    ".json": "application/json", ".yaml": "text/yaml", ".yml": "text/yaml", ".toml": "text/plain", ".ini": "text/plain",
+    ".cfg": "text/plain", ".log": "text/plain", ".xml": "text/plain", ".sql": "text/plain", ".env.example": "text/plain",
+    ".py": "text/x-python", ".js": "text/javascript", ".jsx": "text/javascript", ".mjs": "text/javascript", ".ts": "text/plain",
+    ".tsx": "text/plain", ".java": "text/plain", ".kt": "text/plain", ".c": "text/plain", ".h": "text/plain", ".cpp": "text/plain",
+    ".hpp": "text/plain", ".cs": "text/plain", ".go": "text/plain", ".rs": "text/plain", ".rb": "text/plain", ".php": "text/plain",
+    ".swift": "text/plain", ".sh": "text/plain", ".ps1": "text/plain", ".html": "text/plain", ".css": "text/css",
+    ".scss": "text/plain", ".vue": "text/plain", ".svelte": "text/plain", ".dart": "text/plain", ".r": "text/plain",
+}
+ALLOWED_CHAT_EXTENSIONS = sorted({*SIGNATURES, *OFFICE_ZIP, *OFFICE_OLE, *TEXT_TYPES, ".zip"})
+OLE_MAGIC = bytes.fromhex("d0cf11e0a1b11ae1")
+
+
+def classify_upload(path: Path, filename: str) -> str:
+    """Check that a file is what its name says, for the types chat accepts. Returns its MIME type.
+
+    Images/PDF: file signature. Word/Excel/PowerPoint: the OLE or OOXML container, and for OOXML the
+    part folder of that application. Text and code: valid UTF-8 without NUL bytes. Zip: a zip.
+    """
+    import zipfile
+
+    name = filename.lower()
+    suffix = ".env.example" if name.endswith(".env.example") else Path(name).suffix
+    if suffix in SIGNATURES:
+        return verify_signature(path, filename)
+    with open(path, "rb") as handle:
+        head = handle.read(8)
+
+    def refuse(what: str) -> AuthError:
+        return AuthError(f"“{filename}” isn't a valid {what} (it may be damaged, incomplete or renamed). Nothing was sent.",
+                         status_code=415)
+
+    if suffix in OFFICE_OLE:
+        if head != OLE_MAGIC:
+            raise refuse(suffix[1:].upper() + " file")
+        return OFFICE_OLE[suffix]
+    if suffix in OFFICE_ZIP or suffix == ".zip":
+        if not zipfile.is_zipfile(path):
+            raise refuse(suffix[1:].upper() + " file")
+        if suffix in OFFICE_ZIP:
+            with zipfile.ZipFile(path) as archive:
+                names = archive.namelist()
+            if "[Content_Types].xml" not in names or not any(n.startswith(OFFICE_ZIP[suffix]) for n in names):
+                raise refuse(suffix[1:].upper() + " file")
+            return OFFICE_ZIP_TYPES[suffix]
+        return "application/zip"
+    if suffix in TEXT_TYPES:
+        with open(path, "rb") as handle:
+            sample = handle.read(256 * 1024)
+        if bytes(1) in sample:
+            raise refuse("text file")
+        try:
+            sample.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if exc.start < len(sample) - 4:  # a multi-byte character cut by the sample is fine
+                raise refuse("UTF-8 text file") from exc
+        return TEXT_TYPES[suffix]
+    raise AuthError(
+        f"“{filename}” can't be sent: this file type isn't allowed in chat. Allowed: images, PDF, Word, Excel, "
+        "PowerPoint, text, CSV, code and zip files.",
+        status_code=415,
+    )
+
+
 def delete_stored_file(path: str | None) -> None:
     """Remove a stored upload (local file inside the upload directory, or an object in the bucket)."""
     from app.services import storage

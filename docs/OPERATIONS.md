@@ -72,6 +72,29 @@ deploy. Choose one:
 The S3 path is covered by tests against an in-memory fake; verify it against the real provider on
 staging (upload, download, delete, and a recording's transcription).
 
+## 4a. Git repositories
+
+Repositories are bare Git repositories under `REPO_DIR` (`/data/repos` in Docker), one directory
+per repository named by `code_repos.storage_key`; the database holds only access, pull requests,
+issues and activity. The image installs `git` (merges need git ≥ 2.38 for `merge-tree --write-tree`).
+
+- **Durability:** like uploads, `REPO_DIR` is wiped on Render's free plan. With
+  `STORAGE_BACKEND=s3`, every change (push, web edit, merge) uploads a `git bundle` of all refs to
+  `repos/<storage_key>.bundle` a few seconds later, and a repository missing on disk is restored
+  from it when opened. Changes in the last seconds before a crash can be lost; a persistent disk at
+  `/data` avoids that. Without either, repositories are lost on deploy.
+- **Clone/push:** `https://<api>/git/<workspace id>/<repo>.git`, HTTP Basic with a personal access
+  token (Clone dialog → tokens; only a SHA-256 is stored). Pushes over `GIT_MAX_PUSH_MB` (300) are
+  refused; the pre-receive hook enforces protected branches and tag rules. Behind a proxy, make sure
+  request bodies of that size are allowed and the forwarded scheme is set so clone URLs are https.
+- **Imports:** public `https://` URLs only (no credentials, no private/loopback addresses, no
+  redirects), run in the background with a `GIT_TIMEOUT_SECONDS` limit. DNS is checked before the
+  clone; a host that changes its DNS answer in between is not prevented (DNS rebinding).
+- **Deletion:** a deleted repository's directory is moved to `REPO_DIR/.trash` and purged after 7
+  days by the background job (restore by moving it back and re-creating the row). Abandoned
+  upload batches in `REPO_DIR/.staging` are purged after 24 hours.
+- **Backups of the bucket** follow §3: the bundles are ordinary objects.
+
 ## 5. Migrations (NX-BUG-007, NX-BUG-008, NX-REL-005)
 
 - The Docker image runs `alembic upgrade head` before starting. Locally, run it after every pull

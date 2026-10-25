@@ -1,4 +1,5 @@
-"""Periodic work: meeting reminders, task deadline notices, and ending abandoned meetings.
+"""Periodic work: meeting reminders, task deadline notices, ending abandoned meetings, and
+removing chat uploads that were never sent.
 
 Runs once a minute when RUN_BACKGROUND_JOBS is on. Each step is safe to repeat: notifications
 are de-duplicated by key, so a restart or an overlapping run never notifies twice.
@@ -13,7 +14,7 @@ from sqlalchemy import select
 from app import database
 from app.models import Meeting, MeetingInvitee, MeetingStatus, Task
 from app.models.project import TaskStatus
-from app.services import meeting_service, notification_service
+from app.services import attachment_service, meeting_service, notification_service, repo_service
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,10 @@ async def run_once() -> None:
     async with database.AsyncSessionLocal() as db:
         await meeting_service.end_abandoned_meetings(db)
         await db.commit()
+    async with database.AsyncSessionLocal() as db:
+        await attachment_service.cleanup_unsent_uploads(db)
+        await db.commit()
+    await asyncio.to_thread(repo_service.cleanup_storage)  # deleted repositories and abandoned uploads
 
 
 async def _loop() -> None:
