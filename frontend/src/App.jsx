@@ -1,18 +1,6 @@
 import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { isKnownTab } from './lib/navigation';
-import {
-  Bot,
-  Search,
-  Video,
-  CalendarClock,
-  LogOut,
-  HelpCircle,
-  Plus,
-  User,
-  Users,
-  Sparkles,
-  Calendar,
-} from 'lucide-react';
+import { Bot, Search } from 'lucide-react';
 import {
   api,
   getAuthToken,
@@ -33,19 +21,36 @@ const CodeWorkspace = lazy(() => import('./components/CodeWorkspace'));
 const Channels = lazy(() => import('./components/Channels'));
 const WorkspaceSettings = lazy(() => import('./components/WorkspaceSettings'));
 const FileManager = lazy(() => import('./components/FileManager'));
-const ReportSynthesizer = lazy(() => import('./components/ReportSynthesizer'));
 import CommandPalette from './components/CommandPalette';
 const AiAssistant = lazy(() => import('./components/AiAssistant'));
 const SoloChat = lazy(() => import('./components/SoloChat'));
 const CalendarView = lazy(() => import('./components/CalendarView'));
 const CallManager = lazy(() => import('./components/calls/CallManager'));
-import AiReminderToast from './components/AiReminderToast';
 import NotificationBell from './components/NotificationBell';
 import { openDeepLink } from './lib/deepLink';
 const FinanceTracker = lazy(() => import('./components/FinanceTracker'));
 import LandingPage from './pages/LandingPage';
 import CreateGroupModal from './components/CreateGroupModal';
+import BootScreen from './components/BootScreen';
+import Logo from './components/ui/Logo';
+import WorkspaceSwitch from './components/WorkspaceSwitch';
 import { useDialogManager } from './lib/dialogManager';
+import { roomTransition, originOf } from './lib/viewTransition';
+
+// Placeholder for a feature screen that is still downloading.
+function ScreenSkeleton() {
+  return (
+    <div className="max-w-7xl mx-auto space-y-4" role="status" aria-label="Loading">
+      <div className="skeleton h-8 w-56" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="skeleton h-28" />
+        <div className="skeleton h-28" />
+        <div className="skeleton h-28" />
+      </div>
+      <div className="skeleton h-64" />
+    </div>
+  );
+}
 
 export default function App() {
   useDialogManager();
@@ -53,26 +58,17 @@ export default function App() {
   // Auth state
   const [token, setToken] = useState(getAuthToken());
   const [user, setUser] = useState(null);
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
-  const [authForm, setAuthForm] = useState({
-    name: '',
-    email: '',
-    password: '',
-  });
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
+  const [bootError, setBootError] = useState(null);
 
   // Workspaces state
   const [workspaces, setWorkspaces] = useState([]);
   const [currentWorkspace, setCurrentWorkspace] = useState(null);
   const [showCreateWsModal, setShowCreateWsModal] = useState(false);
   const [showJoinWsModal, setShowJoinWsModal] = useState(false);
-  const [newWsName, setNewWsName] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
 
   // Command Palette State
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   // Active module navigation
   // The active tab lives in the URL hash (#/documents), so refresh, links and Back work.
@@ -103,10 +99,9 @@ export default function App() {
   const [filesList, setFilesList] = useState([]);
   const [openDocId, setOpenDocId] = useState(null); // page to show when switching from Files to Pages
   const [repos, setRepos] = useState([]);
-  const [reports, setReports] = useState([]);
-  const [calendarEvents, setCalendarEvents] = useState([]);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [userPresence, setUserPresence] = useState('online');
+  const [switching, setSwitching] = useState(false); // a workspace switch whose data is still loading
 
   // Setup global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -135,6 +130,7 @@ export default function App() {
   }, [currentWorkspace, activeTab]);
 
   const loadInitialData = async () => {
+    setBootError(null);
     try {
       // In parallel: on a distant server each round trip costs a few hundred milliseconds.
       const [userData, wsList] = await Promise.all([api.getMe(), api.listWorkspaces()]);
@@ -153,7 +149,17 @@ export default function App() {
       }
     } catch (err) {
       console.error('Initial load error', err);
-      clearSession();
+      // Only a rejected token signs out. A sleeping or unreachable server keeps the session and
+      // offers a retry (401s already sign out through the nexamind:unauthorized event).
+      if (err.status === 401) clearSession();
+      else if (!user) {
+        // No status (network error) or a gateway/5xx answer usually means the server is asleep or restarting.
+        setBootError(
+          !err.status || err.status >= 500
+            ? 'The server is not answering. It may still be starting up, so try again in a moment.'
+            : err.message
+        );
+      }
     }
   };
 
@@ -202,15 +208,6 @@ export default function App() {
       } else if (activeTab === 'code') {
         const rList = await api.listRepos(wsId).catch(() => []);
         setRepos(rList);
-      } else if (activeTab === 'reports') {
-        const [rList, sList, dList] = await Promise.all([
-          api.listReports(wsId).catch(() => []),
-          api.listSessions(wsId).catch(() => []),
-          api.listDocuments(wsId).catch(() => []),
-        ]);
-        setReports(rList);
-        setSessions(sList);
-        setDocuments(dList);
       } else if (activeTab === 'files') {
         // Files shows every page as well as uploads, so both lists are needed.
         const [fList, dList] = await Promise.all([
@@ -222,44 +219,51 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error loading module data', err);
+    } finally {
+      setSwitching(false);
     }
   };
 
-  const handleSelectWorkspace = (wsId) => {
+  // Switching workspace changes the "room" (accent and panel tint on <html>): when it comes from a
+  // control, the new room is revealed from that control (lib/viewTransition).
+  const handleSelectWorkspace = (wsId, origin) => {
     const targetWs = workspaces.find((w) => w.id === wsId);
-    if (targetWs) {
+    if (!targetWs || targetWs.id === currentWorkspace?.id) return;
+    const apply = () => {
+      document.documentElement.dataset.workspace = targetWs.type === 'personal' ? 'solo' : 'group';
+      // Clear the previous workspace's lists so the revealed room never shows another room's data;
+      // screens show their loading state until the new workspace's data arrives.
+      setTasks([]);
+      setDocuments([]);
+      setChannels([]);
+      setSessions([]);
+      setFinanceSummary(null);
+      setUnreadCounts({});
+      setSwitching(true);
       setCurrentWorkspace(targetWs);
-      setSavedWorkspaceId(targetWs.id);
-    }
+    };
+    setSavedWorkspaceId(targetWs.id);
+    if (origin) roomTransition(origin, apply);
+    else apply();
   };
 
   const isSoloWorkspace = currentWorkspace?.type === 'personal';
 
-  const handleToggleMode = (targetMode) => {
+  useEffect(() => {
+    document.documentElement.dataset.workspace = currentWorkspace && !isSoloWorkspace ? 'group' : 'solo';
+  }, [currentWorkspace, isSoloWorkspace]);
+
+  const handleToggleMode = (targetMode, event) => {
+    const origin = event ? originOf(event) : null;
     if (targetMode === 'personal') {
       const personal = workspaces.find((w) => w.type === 'personal');
-      if (personal) handleSelectWorkspace(personal.id);
+      if (personal) handleSelectWorkspace(personal.id, origin);
     } else {
       const team = workspaces.find(
         (w) => w.type === 'team' || w.type === 'group'
       );
-      if (team) handleSelectWorkspace(team.id);
+      if (team) handleSelectWorkspace(team.id, origin);
       else setShowJoinWsModal(true);
-    }
-  };
-
-  const handleCreateWorkspace = async (e) => {
-    e.preventDefault();
-    if (!newWsName.trim()) return;
-    try {
-      const created = await api.createWorkspace(newWsName.trim());
-      setWorkspaces((prev) => [...prev, created]);
-      setCurrentWorkspace(created);
-      setSavedWorkspaceId(created.id);
-      setShowCreateWsModal(false);
-      setNewWsName('');
-    } catch (err) {
-      notify(err.message || 'Could not create workspace', 'error');
     }
   };
 
@@ -276,25 +280,6 @@ export default function App() {
       setJoinCodeInput('');
     } catch (err) {
       notify(err.message || 'Invalid or expired join code', 'error');
-    }
-  };
-
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    setAuthLoading(true);
-
-    try {
-      if (authMode === 'register') {
-        await api.register(authForm.name, authForm.email, authForm.password);
-      }
-      const loginRes = await api.login(authForm.email, authForm.password);
-      setAuthToken(loginRes.access_token);
-      setToken(loginRes.access_token);
-    } catch (err) {
-      setAuthError(err.message || 'Authentication failed');
-    } finally {
-      setAuthLoading(false);
     }
   };
 
@@ -318,6 +303,15 @@ export default function App() {
   useEffect(() => {
     window.addEventListener('nexamind:unauthorized', clearSession);
     return () => window.removeEventListener('nexamind:unauthorized', clearSession);
+  }, []);
+
+  // Links opened from inside a feature (e.g. a page shared in chat) come through handleOpenLink.
+  // The hook sits above the early returns so React sees the same hooks on every render.
+  const openLinkRef = useRef(null);
+  useEffect(() => {
+    const onOpen = (e) => e.detail && openLinkRef.current?.(e.detail);
+    window.addEventListener('nexamind:open-link', onOpen);
+    return () => window.removeEventListener('nexamind:open-link', onOpen);
   }, []);
 
   // If not logged in, render the pre-login Landing Page (Item 5)
@@ -354,202 +348,66 @@ export default function App() {
     if (link.tab === 'documents' && link.document_id) setOpenDocId(link.document_id);
     openDeepLink(link);
   };
-  // Links opened from inside a feature (e.g. a page shared in chat) come through the same path.
-  const openLinkRef = useRef(handleOpenLink);
   openLinkRef.current = handleOpenLink;
-  useEffect(() => {
-    const onOpen = (e) => e.detail && openLinkRef.current(e.detail);
-    window.addEventListener('nexamind:open-link', onOpen);
-    return () => window.removeEventListener('nexamind:open-link', onOpen);
-  }, []);
+
+  // Until the account and workspaces arrive (the server may be waking up), show the boot screen.
+  if (!user) {
+    return <BootScreen error={bootError} onRetry={loadInitialData} onSignOut={handleLogout} />;
+  }
 
   return (
-    <div className="h-screen w-full flex flex-col bg-[#F8FAFC] text-[#191C1E] font-sans antialiased overflow-hidden">
+    <div className="h-screen w-full flex bg-white text-slate-900 font-sans antialiased overflow-hidden">
       {/* Incoming calls ring on every screen; the call itself opens full screen. */}
       <Suspense fallback={null}>
         <CallManager user={user} currentWorkspaceId={currentWorkspace?.id} />
       </Suspense>
-      {/* TopNavBar (Exact Stitch Specification) */}
-      <header className="fixed top-0 left-0 w-full z-40 flex justify-between items-center px-3 sm:px-6 h-16 bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] shadow-sm">
-        <div className="flex items-center gap-6">
-          {/* Brand Logo & Title */}
+
+      {/* Phones: a slim top bar (the sidebar is replaced by the bottom navigation). */}
+      <header className="md:hidden fixed top-0 inset-x-0 z-40 h-14 flex items-center justify-between gap-2 pl-3 pr-1.5 bg-white/90 backdrop-blur-md border-b border-slate-200">
+        <button type="button" onClick={handleBackToDashboard} aria-label="Go to dashboard" className="rounded-lg">
+          <Logo alt="" className="h-6 max-w-[6.5rem]" />
+        </button>
+        <WorkspaceSwitch compact isSolo={isSoloWorkspace} onChange={handleToggleMode} />
+        <div className="flex items-center">
           <button
             type="button"
-            onClick={handleBackToDashboard}
-            className="flex items-center gap-2 cursor-pointer hover:opacity-90 transition-opacity"
-            title="NexaMind Dashboard"
-            aria-label="Go to dashboard"
+            onClick={() => setIsCommandPaletteOpen(true)}
+            aria-label="Search"
+            className="p-2.5 rounded-pill text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors duration-fast"
           >
-            <img src="/logo.png" alt="" className="h-6 sm:h-7 w-auto max-w-[6.5rem] sm:max-w-none object-contain object-left" />
+            <Search className="w-4 h-4" aria-hidden="true" />
           </button>
-
-          {/* Global Workspace Search (Stitch Spec) */}
-          <div className="relative hidden lg:block">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input aria-label="Search across workspace"
-              type="text"
-              onClick={() => setIsCommandPaletteOpen(true)}
-              placeholder="Search across workspace..."
-              className="pl-9 pr-4 py-1.5 bg-[#F2F4F6] border-b border-[#E2E8F0] focus:border-[#4F46E5] focus:outline-none text-xs w-64 font-mono rounded-none transition-colors text-[#191C1E] placeholder-slate-400 cursor-pointer"
-            />
-          </div>
-        </div>
-
-        {/* Solo / Group mode switcher — centered in the top bar */}
-        <div className="absolute left-1/2 -translate-x-1/2 p-1 bg-[#ECEEF0] rounded-xl flex items-center gap-1 shadow-sm">
-          <button
-            type="button"
-            onClick={() => handleToggleMode('personal')}
-            className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition ${
-              isSoloWorkspace
-                ? 'bg-white text-sky-600 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" aria-hidden="true" /> <span className="sr-only sm:not-sr-only">Solo</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleToggleMode('team')}
-            className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition ${
-              !isSoloWorkspace
-                ? 'bg-white text-purple-600 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" aria-hidden="true" /> <span className="sr-only sm:not-sr-only">Group</span>
-          </button>
-        </div>
-
-        {/* Top Right Action Tools */}
-        <div className="flex items-center gap-1 sm:gap-3">
-          <div className="flex items-center gap-0.5 sm:gap-1">
-            <NotificationBell onNavigate={handleOpenLink} />
-            <button
-              onClick={() => setActiveTab('meetings')}
-              title="Start Video Meeting"
-              aria-label="Start video meeting"
-              className="hidden sm:inline-flex text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
-            >
-              <Video className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setActiveTab('calendar')}
-              title="Calendar & reminders"
-              aria-label="Open calendar and reminders"
-              className="hidden sm:inline-flex text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
-            >
-              <CalendarClock className="w-4 h-4" aria-hidden="true" />
-            </button>
-            <button
-              onClick={() => setIsCommandPaletteOpen(true)}
-              title="Help & Shortcuts"
-              aria-label="Search and keyboard shortcuts"
-              className="text-slate-500 hover:bg-[#ECEEF0] hover:text-[#191C1E] p-2 rounded-lg transition-colors"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
-          </div>
-
-          <button
-            onClick={() => {
-              if (currentWorkspace?.join_code) {
-                navigator.clipboard.writeText(currentWorkspace.join_code);
-                notify(`Join Code copied: ${currentWorkspace.join_code}`, 'success');
-              } else {
-                setShowJoinWsModal(true);
-              }
-            }}
-            className="hidden sm:inline-flex text-xs font-mono font-medium bg-transparent border border-[#E2E8F0] text-[#191C1E] px-4 py-1.5 rounded hover:bg-[#F2F4F6] transition-colors"
-          >
-            Join Code
-          </button>
-
-          <button
-            onClick={() => setShowCreateWsModal(true)}
-            className="hidden sm:inline-flex text-xs font-semibold bg-[#4F46E5] text-white px-4 py-1.5 rounded hover:opacity-90 transition-opacity shadow-sm"
-          >
-            Invite Team
-          </button>
-
-          {/* Account menu */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowAccountMenu((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={showAccountMenu}
-              aria-label={`Account menu for ${user?.name || 'your account'}`}
-              className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden border border-[#E2E8F0] ml-1 flex items-center justify-center font-bold text-xs text-[#4F46E5] cursor-pointer hover:ring-2 hover:ring-[#4F46E5]/30 transition"
-            >
-              {user?.name ? user.name.slice(0, 2).toUpperCase() : '··'}
-            </button>
-            {showAccountMenu && (
-              <div
-                role="menu"
-                aria-label="Account"
-                className="absolute right-0 top-10 w-56 bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 z-50"
-                onKeyDown={(e) => e.key === 'Escape' && setShowAccountMenu(false)}
-              >
-                <div className="px-3 py-2 border-b border-slate-100">
-                  <p className="text-sm font-bold text-slate-900 truncate">{user?.name}</p>
-                  <p className="text-xs text-slate-600 truncate">{user?.email}</p>
-                </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setShowAccountMenu(false);
-                    setActiveTab('settings');
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-800 hover:bg-slate-100"
-                >
-                  Account & workspace settings
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setShowAccountMenu(false);
-                    handleLogout();
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-rose-700 hover:bg-rose-50 flex items-center gap-2"
-                >
-                  <LogOut className="w-4 h-4" aria-hidden="true" />
-                  Sign out
-                </button>
-              </div>
-            )}
-          </div>
+          <NotificationBell onNavigate={handleOpenLink} workspaces={workspaces} />
         </div>
       </header>
 
-      {/* Main Workspace Frame */}
-      <div className="flex flex-1 pt-16 overflow-hidden h-full w-full">
-        {/* SideNavBar */}
-        <Sidebar
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          workspaces={workspaces}
-          currentWorkspace={currentWorkspace}
-          onSelectWorkspace={handleSelectWorkspace}
-          onOpenCreateWs={() => setShowCreateWsModal(true)}
-          onOpenJoinWs={() => setShowJoinWsModal(true)}
-          onLogout={handleLogout}
-          user={user}
-          documents={documents}
-          channels={channels}
-          unreadCounts={unreadCounts}
-          userPresence={userPresence}
-          onChangePresence={setUserPresence}
-        />
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        workspaces={workspaces}
+        currentWorkspace={currentWorkspace}
+        onSelectWorkspace={handleSelectWorkspace}
+        onToggleMode={handleToggleMode}
+        onOpenCreateWs={() => setShowCreateWsModal(true)}
+        onOpenJoinWs={() => setShowJoinWsModal(true)}
+        onOpenSearch={() => setIsCommandPaletteOpen(true)}
+        onLogout={handleLogout}
+        user={user}
+        unreadCounts={unreadCounts}
+        userPresence={userPresence}
+        onChangePresence={setUserPresence}
+        notifications={<NotificationBell onNavigate={handleOpenLink} workspaces={workspaces} placement="sidebar" />}
+      />
 
-        {/* Canvas Area */}
-        <main className="flex-1 flex overflow-hidden bg-[#F8FAFC] relative">
-          <div className="flex-1 p-4 pb-24 sm:p-6 sm:pb-24 md:p-8 overflow-y-auto h-full">
-            <Suspense fallback={<div className="text-sm text-slate-500" role="status">Loading…</div>}>
+      <div className="flex-1 min-w-0 flex pt-14 md:pt-0 overflow-hidden">
+        <main className="flex-1 min-w-0 flex overflow-hidden relative">
+          <div className="flex-1 min-w-0 p-4 pb-24 sm:p-6 sm:pb-24 md:p-8 md:pb-10 overflow-y-auto h-full">
+            <div key={activeTab} className="h-full animate-tab-in">
+            <Suspense fallback={<ScreenSkeleton />}>
             {activeTab === 'dashboard' && (
               <Dashboard
+                loading={switching}
+                workspace={currentWorkspace}
                 workspaceId={currentWorkspace?.id}
                 user={user}
                 tasks={tasks}
@@ -574,6 +432,7 @@ export default function App() {
 
             {activeTab === 'calendar' && (
               <CalendarView
+                workspace={currentWorkspace}
                 workspaceId={currentWorkspace?.id}
                 user={user}
                 sessions={sessions}
@@ -618,7 +477,7 @@ export default function App() {
             {/* Docs is one section: written pages and uploaded files. */}
             {(activeTab === 'documents' || activeTab === 'files') && (
               <div className="h-full flex flex-col">
-                <div role="tablist" aria-label="Docs" className="flex items-center gap-1 mb-4 p-1 bg-white border border-slate-200 rounded-xl w-fit">
+                <div role="tablist" aria-label="Docs" className="flex items-center gap-1 mb-4 p-1 bg-slate-100 rounded-pill w-fit">
                   {[
                     ['documents', 'Pages'],
                     ['files', 'Files'],
@@ -629,8 +488,8 @@ export default function App() {
                       role="tab"
                       aria-selected={activeTab === id}
                       onClick={() => setActiveTab(id)}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition ${
-                        activeTab === id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'
+                      className={`px-4 py-1.5 rounded-pill text-sm font-semibold transition-colors duration-base ${
+                        activeTab === id ? 'bg-white text-slate-900 shadow-card' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       {label}
@@ -726,18 +585,8 @@ export default function App() {
                 }}
               />
             )}
-
-            {activeTab === 'reports' && (
-              <ReportSynthesizer
-                workspaceId={currentWorkspace?.id}
-                reports={reports}
-                sessions={sessions}
-                documents={documents}
-                onRefreshReports={() => loadWorkspaceData(currentWorkspace?.id)}
-                onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
-              />
-            )}
             </Suspense>
+            </div>
           </div>
         </main>
       </div>
@@ -751,22 +600,16 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Floating AI Autonomous Reminder Toast */}
-      <AiReminderToast
-        workspaceId={currentWorkspace?.id}
-        onEventCreated={() => loadWorkspaceData(currentWorkspace?.id)}
-        onNavigateCalendar={() => setActiveTab('calendar')}
-      />
-
-      {/* Floating AI Copilot FAB (Stitch Spec) */}
-      <div className="fixed bottom-6 right-6 z-40">
+      {/* Floating Copilot button on phones (the sidebar has Copilot on larger screens). */}
+      <div className={`md:hidden fixed bottom-20 right-4 z-40 ${activeTab === 'ai_agent' ? 'hidden' : ''}`}>
         <button
+          type="button"
           onClick={() => setActiveTab('ai_agent')}
           title="Open Copilot"
-          className="bg-white hover:bg-slate-50 text-[#4F46E5] rounded-full p-3.5 shadow-xl hover:shadow-2xl hover:-translate-y-1 transition-all duration-200 flex items-center justify-center relative border border-[#E2E8F0]"
+          aria-label="Open AI Copilot"
+          className="bg-white text-indigo-600 rounded-full p-3.5 shadow-panel transition-transform duration-base ease-out flex items-center justify-center relative border border-slate-200 press"
         >
-          <Bot className="w-6 h-6 text-[#8B5CF6]" />
-          <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-[#8B5CF6] rounded-full border-2 border-white ai-pulse"></span>
+          <Bot className="w-6 h-6 text-violet-500" aria-hidden="true" />
         </button>
       </div>
 
@@ -779,7 +622,6 @@ export default function App() {
         sessions={sessions}
         channels={channels}
         repos={repos}
-        reports={reports}
         onNavigate={(tab) => setActiveTab(tab)}
       />
 
@@ -789,22 +631,23 @@ export default function App() {
         onClose={() => setShowCreateWsModal(false)}
         onGroupCreated={(createdGroup) => {
           setWorkspaces((prev) => [...prev, createdGroup]);
-          handleSelectWorkspace(createdGroup.id);
+          setCurrentWorkspace(createdGroup);
+          setSavedWorkspaceId(createdGroup.id);
         }}
       />
 
       {/* Join Team Workspace Modal */}
       {showJoinWsModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div data-modal className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-sm w-full space-y-4 shadow-2xl">
-            <h3 className="text-base font-bold text-[#191C1E]">Join Team Workspace</h3>
+        <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div data-modal className="bg-white p-6 rounded-2xl border border-slate-200 max-w-sm w-full space-y-4 shadow-panel animate-scale-in">
+            <h3 className="text-base font-bold text-slate-900">Join Team Workspace</h3>
             <form onSubmit={handleJoinWorkspace} className="space-y-4">
-              <input aria-label="ENTER 8-DIGIT JOIN CODE"
+              <input aria-label="Enter 8-digit join code"
                 type="text"
                 required
                 autoFocus
                 placeholder="ENTER 8-DIGIT JOIN CODE"
-                className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] uppercase tracking-widest font-mono text-center focus:outline-none focus:border-[#4F46E5]"
+                className="w-full bg-white border border-line-strong rounded-xl px-4 py-2.5 text-xs text-slate-900 uppercase tracking-widest font-mono text-center focus:outline-none focus:border-indigo-600"
                 value={joinCodeInput}
                 onChange={(e) => setJoinCodeInput(e.target.value)}
               />
@@ -812,13 +655,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowJoinWsModal(false)}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
+                  className="px-3.5 py-1.5 rounded-pill text-xs font-semibold text-slate-600 hover:bg-slate-100"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-pill text-xs font-bold shadow-sm press"
                 >
                   Join Space
                 </button>

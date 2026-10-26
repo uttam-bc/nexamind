@@ -80,7 +80,6 @@ export default function Sidebar({
   ];
   const secondary = [
     { id: 'finance', label: 'Finance', icon: DollarSign },
-    { id: 'reports', label: 'Reports', icon: FileBarChart },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
   const presenceColors = { online: 'bg-emerald-500', away: 'bg-amber-400', busy: 'bg-rose-500', offline: 'bg-slate-400' };

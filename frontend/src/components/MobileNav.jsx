@@ -27,8 +27,8 @@ const ICONS = { Bot, Home, Calendar, Code2, DollarSign, FileBarChart, FileText, 
 export default function MobileNav({ activeTab, onTabChange, currentWorkspace, workspaces = [], onSelectWorkspace, onLogout }) {
   const [open, setOpen] = useState(false);
   const isSolo = currentWorkspace?.type === 'personal';
-  // Reports stays reachable from search; Files lives inside Docs.
-  const items = (isSolo ? SOLO_NAV : GROUP_NAV).filter((item) => item.id !== 'reports' && item.id !== 'files');
+  // Files lives inside Docs.
+  const items = (isSolo ? SOLO_NAV : GROUP_NAV).filter((item) => item.id !== 'files');
   const isActiveTab = (id) => activeTab === id || (id === 'documents' && activeTab === 'files');
   const primaryIds = ['dashboard', 'documents', isSolo ? 'solo_chat' : 'channels', 'projects'];
   const primary = primaryIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);

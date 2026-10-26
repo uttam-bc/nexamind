@@ -328,7 +328,7 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
           </div>
           <div className={`${card} p-5 space-y-3`}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                 <Upload className="w-5 h-5" />
               </div>
               <div>
@@ -337,7 +337,7 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
               </div>
             </div>
             <input ref={fileInputRef} type="file" accept="audio/*,video/*" className="hidden" onChange={uploadRecording} />
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="w-full bg-sky-600 hover:bg-sky-700 text-white py-2 rounded-xl text-sm font-bold disabled:opacity-50">
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2 rounded-xl text-sm font-bold transition-colors duration-fast disabled:opacity-50">
               {uploading ? 'Uploading…' : 'Choose file'}
             </button>
           </div>

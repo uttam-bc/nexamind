@@ -8,7 +8,6 @@ import {
   Code2,
   FolderOpen,
   DollarSign,
-  FileBarChart,
   Play,
   ArrowRight,
   X,

@@ -11,7 +11,6 @@ const TAB_LABELS = {
   settings: 'Settings',
   finance: 'Finance Tracker',
   files: 'Docs · Files',
-  reports: 'Report Synthesizer',
 
 };
 
@@ -38,7 +37,6 @@ export const SOLO_NAV = [
   { id: 'ai_agent', label: 'Copilot', icon: 'Sparkles' },
   { id: 'finance', label: 'Finance', icon: 'DollarSign' },
   { id: 'files', label: 'Files', icon: 'FolderOpen' },
-  { id: 'reports', label: 'Reports', icon: 'FileBarChart' },
 
   { id: 'settings', label: 'Settings', icon: 'Settings' },
 ];
@@ -54,7 +52,6 @@ export const GROUP_NAV = [
   { id: 'ai_agent', label: 'Copilot', icon: 'Sparkles' },
   { id: 'finance', label: 'Finance', icon: 'DollarSign' },
   { id: 'files', label: 'Files', icon: 'FolderOpen' },
-  { id: 'reports', label: 'Reports', icon: 'FileBarChart' },
 
   { id: 'settings', label: 'Settings', icon: 'Settings' },
 ];
