@@ -33,6 +33,7 @@ const CodeWorkspace = lazy(() => import('./components/CodeWorkspace'));
 const Channels = lazy(() => import('./components/Channels'));
 const WorkspaceSettings = lazy(() => import('./components/WorkspaceSettings'));
 const FileManager = lazy(() => import('./components/FileManager'));
+const ReportSynthesizer = lazy(() => import('./components/ReportSynthesizer'));
 import CommandPalette from './components/CommandPalette';
 const AiAssistant = lazy(() => import('./components/AiAssistant'));
 const SoloChat = lazy(() => import('./components/SoloChat'));
@@ -102,6 +103,7 @@ export default function App() {
   const [filesList, setFilesList] = useState([]);
   const [openDocId, setOpenDocId] = useState(null); // page to show when switching from Files to Pages
   const [repos, setRepos] = useState([]);
+  const [reports, setReports] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [userPresence, setUserPresence] = useState('online');
@@ -200,6 +202,15 @@ export default function App() {
       } else if (activeTab === 'code') {
         const rList = await api.listRepos(wsId).catch(() => []);
         setRepos(rList);
+      } else if (activeTab === 'reports') {
+        const [rList, sList, dList] = await Promise.all([
+          api.listReports(wsId).catch(() => []),
+          api.listSessions(wsId).catch(() => []),
+          api.listDocuments(wsId).catch(() => []),
+        ]);
+        setReports(rList);
+        setSessions(sList);
+        setDocuments(dList);
       } else if (activeTab === 'files') {
         // Files shows every page as well as uploads, so both lists are needed.
         const [fList, dList] = await Promise.all([
@@ -716,6 +727,16 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'reports' && (
+              <ReportSynthesizer
+                workspaceId={currentWorkspace?.id}
+                reports={reports}
+                sessions={sessions}
+                documents={documents}
+                onRefreshReports={() => loadWorkspaceData(currentWorkspace?.id)}
+                onRefreshDocuments={() => loadWorkspaceData(currentWorkspace?.id)}
+              />
+            )}
             </Suspense>
           </div>
         </main>
@@ -758,7 +779,7 @@ export default function App() {
         sessions={sessions}
         channels={channels}
         repos={repos}
-        
+        reports={reports}
         onNavigate={(tab) => setActiveTab(tab)}
       />
 
