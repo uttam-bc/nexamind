@@ -1,34 +1,127 @@
+@import './styles/palette.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens. Components use Tailwind classes (which read styles/palette.css) or these semantic
+   variables; nothing should hardcode a colour that has to change with the theme. */
 :root {
-  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: light;
+  --font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
   --font-mono: 'JetBrains Mono', monospace;
+
+  /* Editorial greeting: a white page, panels one step off white, hairlines, no shadow at rest. */
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-raised: rgb(var(--bg-slate-50));
+  --color-border: #eaeae8;
+  --color-border-strong: #8b8b87; /* inputs and other controls: >= 3:1 against the surface */
+  --color-text: #1f201d;
+  --color-text-muted: #636361;
+  --color-rail: #ffffff;
+  --color-focus: rgb(var(--tx-accent-600));
+  --color-selection: rgb(var(--bg-accent-600));
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-pill: 9999px;
+
+  --shadow-card: 0 0 0 0 transparent;
+  --shadow-panel: 0 1px 2px rgb(31 32 29 / 0.06), 0 16px 40px -12px rgb(31 32 29 / 0.22);
+  --shadow-glow: 0 1px 2px rgb(31 32 29 / 0.08), 0 8px 20px -10px rgb(var(--color-room) / 0.55);
+
+  /* Motion: short for feedback, a little longer for panels; ease-out in, ease-in out. */
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-panel: 260ms;
+  --dur-hero: 600ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  --z-header: 40;
+  --z-overlay: 50;
+  --z-popover: 70;
+  --z-toast: 100;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --color-canvas: #141513;
+  --color-surface: #21221f;
+  --color-border: #30312e;
+  --color-border-strong: #6e6f6a;
+  --color-text: #ededea;
+  --color-text-muted: #a3a39e;
+  --color-rail: #141513;
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 18px 48px -12px rgb(0 0 0 / 0.7);
+  --shadow-glow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 20px -10px rgb(var(--color-room) / 0.6);
+}
+
+html {
+  background-color: var(--color-canvas);
+  touch-action: manipulation;
+}
+
+h1, h2, h3 {
+  text-wrap: balance;
+}
+
+/* Native selects follow the theme (Windows dark mode otherwise paints them light). */
+select {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* Scrolling inside a dialog or sheet never scrolls the page behind it. */
+[data-modal],
+[role='dialog'] {
+  overscroll-behavior: contain;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background-color: #F8FAFC;
-  color: #191C1E;
+  background-color: var(--color-canvas);
+  color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Explicit High-Contrast Text Selection Styles */
+/* Theme switches cross-fade colours briefly; the class is only present during the switch, so
+   ordinary hovers and typing are never slowed down. */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color var(--dur-panel) var(--ease-out), border-color var(--dur-panel) var(--ease-out),
+    color var(--dur-panel) var(--ease-out), fill var(--dur-panel) var(--ease-out) !important;
+}
+
+/* Room transition (lib/viewTransition.js): the new snapshot is clipped open in a circle from the
+   pressed control while the old one stays still underneath. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.vt-room::view-transition-new(root) {
+  animation: vt-room-reveal 480ms var(--ease-drawer) both;
+}
+@keyframes vt-room-reveal {
+  from { clip-path: circle(0px at var(--vt-x) var(--vt-y)); }
+  to { clip-path: circle(var(--vt-r) at var(--vt-x) var(--vt-y)); }
+}
+
 ::selection {
-  background-color: #4F46E5 !important;
-  color: #FFFFFF !important;
-}
-::-moz-selection {
-  background-color: #4F46E5 !important;
-  color: #FFFFFF !important;
-}
-
-input::selection, textarea::selection {
-  background-color: #4F46E5 !important;
-  color: #FFFFFF !important;
+  background-color: var(--color-selection);
+  color: #ffffff;
 }
 
 .font-mono, .font-jetbrains {
@@ -39,64 +132,114 @@ input::selection, textarea::selection {
   font-family: var(--font-sans);
 }
 
+/* Figures that update or line up read as one numeric voice. */
+.tabular-nums,
+table,
+time {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(241, 245, 249, 0.8);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
+  background: rgb(var(--bg-slate-300));
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
+  background: rgb(var(--bg-slate-400));
 }
 
-/* Explicit High-Contrast Active Navigation & Primary Buttons */
+/* Active navigation & primary buttons */
 .nav-item-active {
-  background-color: #4F46E5 !important;
-  color: #FFFFFF !important;
+  background-color: rgb(var(--bg-accent-600)) !important;
+  color: #ffffff !important;
   font-weight: 700 !important;
 }
 .nav-item-active svg {
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
 .btn-primary-indigo {
-  background-color: #4F46E5 !important;
-  color: #FFFFFF !important;
+  background-color: rgb(var(--bg-accent-600)) !important;
+  color: #ffffff !important;
 }
 .btn-primary-indigo:hover {
-  background-color: #4338CA !important;
+  background-color: rgb(var(--bg-accent-700)) !important;
 }
 
-/* Stitch White Glass Panels & Elevation */
-.glass-panel {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid #E2E8F0;
-}
-
+/* Panels & elevation */
 .glass-panel-elevated {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
 }
 
 .smooth-shadow {
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-card);
 }
 
-.hover-lift {
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+/* Shared control styles (used by components/ui and the Reports screen). */
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-pill bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors duration-fast hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-pill border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition-colors duration-fast hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 text-slate-500 transition-colors duration-fast hover:bg-slate-100 hover:text-slate-900;
+  }
+  .input-base {
+    @apply w-full rounded-xl border border-line-strong bg-white px-3 text-slate-900 placeholder-slate-400 transition-colors duration-fast focus:border-indigo-600 focus:outline-none;
+  }
 }
-.hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+
+/* Pressed feedback for buttons that opt in. */
+.press {
+  transition: transform 160ms var(--ease-out), background-color var(--dur-fast) ease, color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, box-shadow var(--dur-base) ease;
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* Once-only scroll reveal (lib/reveal.js adds .is-visible). Content is visible without JS. */
+.js-reveal [data-reveal] {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity var(--dur-hero) var(--ease-out), transform var(--dur-hero) var(--ease-out);
+}
+.js-reveal [data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Landing hero: the product preview settles from a slight 3D tilt. `backwards` fill means the
+   animation lets go afterwards, so the pointer tilt (inline transform) takes over. */
+.preview-settle {
+  transform-origin: 50% 0;
+  animation: preview-settle 900ms var(--ease-out) 250ms backwards;
+}
+@keyframes preview-settle {
+  from { opacity: 0; transform: translateY(40px) rotateX(14deg) scale(0.96); }
+  to { opacity: 1; transform: rotateX(0deg) rotateY(0deg); }
+}
+/* Loading placeholder */
+.skeleton {
+  background: linear-gradient(90deg, rgb(var(--bg-slate-100)) 0%, rgb(var(--bg-slate-200)) 50%, rgb(var(--bg-slate-100)) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 /* AI Pulse Animation */
@@ -104,9 +247,9 @@ input::selection, textarea::selection {
   animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
 }
 @keyframes pulse-ring {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgb(139 92 246 / 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgb(139 92 246 / 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgb(139 92 246 / 0); }
 }
 
 .live-pulse {
@@ -120,11 +263,11 @@ input::selection, textarea::selection {
 /* Drag and Drop styles */
 .draggable { cursor: grab; }
 .draggable:active { cursor: grabbing; }
-.droppable-active { background-color: rgba(79, 70, 229, 0.05); }
+.droppable-active { background-color: rgb(var(--bg-accent-600) / 0.06); }
 
 /* Formatted Chat Message Typography & KaTeX */
 .formatted-chat-content {
-  color: #1e293b;
+  color: rgb(var(--tx-slate-800));
   font-size: 0.875rem;
   line-height: 1.625;
 }
@@ -134,7 +277,7 @@ input::selection, textarea::selection {
 .formatted-chat-content h3,
 .formatted-chat-content h4 {
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--tx-slate-900));
   letter-spacing: -0.015em;
   margin-top: 0.85rem;
   margin-bottom: 0.4rem;
@@ -181,7 +324,7 @@ input::selection, textarea::selection {
 
 .formatted-chat-content strong {
   font-weight: 700;
-  color: #0f172a;
+  color: rgb(var(--tx-slate-900));
 }
 .formatted-chat-content em {
   font-style: italic;
@@ -190,23 +333,24 @@ input::selection, textarea::selection {
 .formatted-chat-content code {
   font-family: var(--font-mono);
   font-size: 0.825em;
-  background-color: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background-color: rgb(var(--bg-slate-100));
+  border: 1px solid rgb(var(--bg-slate-200));
   padding: 0.15rem 0.35rem;
   border-radius: 0.25rem;
-  color: #4338ca;
+  color: rgb(var(--tx-accent-700));
   word-break: break-word;
 }
 
+/* Code blocks are dark in both themes. */
 .formatted-chat-content pre {
-  background-color: #0f172a;
+  background-color: #0f1115;
   color: #f8fafc;
   border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   overflow-x: auto;
   margin-top: 0.5rem;
   margin-bottom: 0.75rem;
-  border: 1px solid #1e293b;
+  border: 1px solid #262a33;
 }
 .formatted-chat-content pre code {
   background-color: transparent;
@@ -217,13 +361,13 @@ input::selection, textarea::selection {
 }
 
 .formatted-chat-content blockquote {
-  border-left: 3px solid #6366f1;
+  border-left: 2px solid rgb(var(--bg-slate-300));
   padding-left: 0.75rem;
   margin-top: 0.5rem;
   margin-bottom: 0.75rem;
-  color: #475569;
+  color: rgb(var(--tx-slate-600));
   font-style: italic;
-  background-color: #f8fafc;
+  background-color: rgb(var(--bg-slate-50));
   border-radius: 0 0.5rem 0.5rem 0;
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
@@ -231,7 +375,7 @@ input::selection, textarea::selection {
 
 .formatted-chat-content hr {
   border: none;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid rgb(var(--bg-slate-200));
   margin: 0.85rem 0;
 }
 
@@ -253,7 +397,7 @@ input::selection, textarea::selection {
 /* Visible keyboard focus everywhere (WCAG 2.4.7 / 2.4.11). `outline-none` utilities only hide the
    default ring for mouse focus; keyboard users always get this one. */
 :focus-visible {
-  outline: 2px solid #4F46E5 !important;
+  outline: 2px solid var(--color-focus) !important;
   outline-offset: 2px !important;
 }
 
@@ -273,7 +417,12 @@ input::selection, textarea::selection {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .js-reveal [data-reveal] {
+    opacity: 1;
+    transform: none;
   }
 }

@@ -214,6 +214,9 @@ class Notification(Base):
     link: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     dedupe_key: Mapped[str] = mapped_column(String(160), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Dismissed (deleted) by the user: hidden everywhere, but the row stays so dedupe_key keeps
+    # the same event from notifying again.
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.current_timestamp(), nullable=False, index=True
     )

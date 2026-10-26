@@ -56,7 +56,7 @@ function IncomingCall({ ring, onAccept, onDecline }) {
   return (
     <div className="fixed inset-0 z-[95] bg-slate-950/60 flex items-end sm:items-center justify-center p-4">
       <div ref={ref} role="alertdialog" aria-modal="true" aria-label={`Incoming call from ${name}`} tabIndex={-1}
-        className="w-full max-w-sm bg-[#12151C] text-white rounded-2xl shadow-2xl p-6 text-center outline-none" data-testid="incoming-call">
+        className="palette-light w-full max-w-sm bg-[#12151C] text-white rounded-2xl shadow-2xl p-6 text-center outline-none" data-testid="incoming-call">
         <div className="relative w-20 h-20 mx-auto mb-4">
           <span className="absolute inset-0 rounded-full bg-indigo-500/40 animate-ping motion-reduce:animate-none" aria-hidden="true" />
           {ring.caller?.avatar_url

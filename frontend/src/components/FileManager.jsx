@@ -188,7 +188,7 @@ export default function FileManager({ workspaceId, filesList, documents, onRefre
             <input
               aria-label="Search files and pages"
               type="text"
-              placeholder="Search files and pages..."
+              placeholder="Search files and pages…"
               className="w-full bg-slate-100 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:border-indigo-500"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}

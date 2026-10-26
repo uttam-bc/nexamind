@@ -177,7 +177,7 @@ export default function MomReview({ workspaceId, sessionId, onClose, onDelete, o
                   aria-label="Minutes (Markdown)"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  className="w-full min-h-[20rem] border border-slate-300 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-indigo-500"
+                  className="w-full min-h-[20rem] border border-slate-300 rounded-xl p-3 tabular-nums text-sm focus:outline-none focus:border-indigo-500"
                 />
                 <div className="flex gap-2 justify-end">
                   <button type="button" onClick={() => setEditing(false)} className="px-4 py-2 rounded-xl bg-slate-100 text-sm font-bold">
@@ -333,7 +333,7 @@ export default function MomReview({ workspaceId, sessionId, onClose, onDelete, o
           )}
 
           {mom && tab === 'transcript' && (
-            <pre className="text-xs font-mono text-slate-700 whitespace-pre-wrap leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <pre className="text-xs tabular-nums text-slate-700 whitespace-pre-wrap leading-relaxed bg-slate-50 border border-slate-200 rounded-xl p-4">
               {mom.transcript || 'No speech was transcribed.'}
             </pre>
           )}

@@ -269,7 +269,7 @@ export default function MarkdownDocument({ text: markdownText, workspaceId, onTo
       renderedElements.push(
         <blockquote
           key={idx}
-          className="my-2 pl-4 border-l-4 border-indigo-500 text-slate-600 italic text-sm py-1"
+          className="my-2 pl-4 border-l-2 border-slate-300 text-slate-600 italic text-sm py-1"
         >
           {renderInline(line.replace('> ', ''))}
         </blockquote>

@@ -1,17 +1,31 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light" data-workspace="solo">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>NexaMind 2.0 — Autonomous AI Workspace & Engineering Platform</title>
+    <!-- Apply the saved (or system) theme before anything paints, so the page never flashes the wrong one. -->
+    <script>
+      (function () {
+        var theme = null;
+        try { theme = localStorage.getItem('nexamind-theme'); } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.classList.add('js-reveal');
+      })();
+    </script>
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141513" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
-  <body class="bg-[#F8FAFC] text-[#191C1E] antialiased font-sans min-h-screen overflow-x-hidden">
+  <body class="antialiased font-sans min-h-screen overflow-x-clip">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

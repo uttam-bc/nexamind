@@ -282,7 +282,7 @@ export default function CreateRepoDialog({ workspaceId, personal = false, onClos
         {progress !== null && (
           <div role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
             <div className="flex justify-between text-xs text-slate-600 mb-1"><span>Uploading…</span><span>{progress}%</span></div>
-            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 transition-all" style={{ width: `${progress}%` }} /></div>
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 transition-[width]" style={{ width: `${progress}%` }} /></div>
           </div>
         )}
         {error && (

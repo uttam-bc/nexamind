@@ -3,7 +3,7 @@ import { Globe, Loader2, Lock, User, X } from 'lucide-react';
 import { useDialog } from '../../lib/dialog';
 
 const VARIANTS = {
-  primary: 'bg-[#4F46E5] hover:bg-[#4338CA] text-white border-transparent',
+  primary: 'bg-indigo-600 hover:bg-indigo-700 text-white border-transparent',
   secondary: 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300',
   danger: 'bg-white hover:bg-rose-50 text-rose-700 border-rose-300',
   success: 'bg-emerald-600 hover:bg-emerald-700 text-white border-transparent',

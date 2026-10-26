@@ -8,6 +8,7 @@ import {
   FileText,
   FolderKanban,
   FolderOpen,
+  Home,
   LogOut,
   Menu,
   MessageSquare,
@@ -17,15 +18,15 @@ import {
   X,
 } from 'lucide-react';
 import { GROUP_NAV, SOLO_NAV } from '../lib/navigation';
+import ThemeToggle from './ui/ThemeToggle';
 
-const ICONS = { Bot, Calendar, Code2, DollarSign, FileBarChart, FileText, FolderKanban, FolderOpen, MessageSquare, Settings, Sparkles, Video };
+const ICONS = { Bot, Home, Calendar, Code2, DollarSign, FileBarChart, FileText, FolderKanban, FolderOpen, MessageSquare, Settings, Sparkles, Video };
 
 // Phone navigation (below the md breakpoint, where the activity rail and sidebar are hidden):
 // a bottom tab bar for the most-used screens and a "More" sheet with everything else.
 export default function MobileNav({ activeTab, onTabChange, currentWorkspace, workspaces = [], onSelectWorkspace, onLogout }) {
   const [open, setOpen] = useState(false);
   const isSolo = currentWorkspace?.type === 'personal';
-  // Reports stays reachable from search, but isn't a main navigation section.
   // Reports stays reachable from search; Files lives inside Docs.
   const items = (isSolo ? SOLO_NAV : GROUP_NAV).filter((item) => item.id !== 'reports' && item.id !== 'files');
   const isActiveTab = (id) => activeTab === id || (id === 'documents' && activeTab === 'files');
@@ -41,7 +42,7 @@ export default function MobileNav({ activeTab, onTabChange, currentWorkspace, wo
     <>
       <nav
         aria-label="Primary"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 flex justify-around px-1 pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/90 backdrop-blur-md border-t border-slate-200 flex justify-around px-1 pb-[env(safe-area-inset-bottom)]"
       >
         {primary.map((item) => {
           const Icon = ICONS[item.icon] || FileText;
@@ -77,14 +78,18 @@ export default function MobileNav({ activeTab, onTabChange, currentWorkspace, wo
         <div className="md:hidden fixed inset-0 z-50 bg-slate-950/50 flex items-end" onClick={() => setOpen(false)}>
           <div
             data-modal
-            className="w-full max-h-[85vh] overflow-y-auto bg-white rounded-t-3xl p-4 space-y-4"
+            className="w-full max-h-[85vh] overflow-y-auto bg-white rounded-t-3xl p-4 space-y-4 animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900">All sections</h2>
-              <button type="button" onClick={() => setOpen(false)} aria-label="Close menu" className="p-2 rounded-xl hover:bg-slate-100">
-                <X className="w-5 h-5" aria-hidden="true" />
-              </button>
+              <div className="flex items-center gap-1">
+                {/* The header has no room for the theme switch on phones, so it lives here. */}
+                <ThemeToggle />
+                <button type="button" onClick={() => setOpen(false)} aria-label="Close menu" className="p-2 rounded-xl hover:bg-slate-100">
+                  <X className="w-5 h-5" aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
             <ul className="grid grid-cols-2 gap-2">
@@ -111,7 +116,7 @@ export default function MobileNav({ activeTab, onTabChange, currentWorkspace, wo
 
             {workspaces.length > 1 && (
               <div className="space-y-2">
-                <label htmlFor="mobile-workspace" className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                <label htmlFor="mobile-workspace" className="text-xs font-bold text-slate-600">
                   Workspace
                 </label>
                 <select

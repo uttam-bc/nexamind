@@ -98,7 +98,7 @@ export default function GeminiKeySettings({ onChange, compact = false }) {
         placeholder={config?.has_personal_key ? 'Paste a new key to replace yours' : 'AIza…'}
         value={keyInput}
         onChange={(e) => setKeyInput(e.target.value)}
-        className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 font-mono"
+        className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 tabular-nums"
       />
       <p className="text-xs text-slate-500">
         Stored encrypted on the server and never sent back to the browser. Get a key at aistudio.google.com.

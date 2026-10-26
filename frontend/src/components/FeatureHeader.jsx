@@ -10,40 +10,29 @@ export default function FeatureHeader({
   badge,
 }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-200">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 mb-5 border-b border-slate-200">
+      <div className="flex items-center gap-3 min-w-0">
         {onBack && (
-          <button aria-label="Back to dashboard"
+          <button
+            aria-label="Back to home"
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-xl shadow-sm transition hover:-translate-x-0.5 active:translate-x-0"
-            title="Return to Dashboard"
+            className="group -ml-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors duration-fast hover:bg-slate-100 hover:text-slate-900"
+            title="Back to home"
           >
-            <ArrowLeft className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Back</span>
+            <ArrowLeft className="h-4 w-4 transition-transform duration-fast group-hover:-translate-x-0.5" aria-hidden="true" />
           </button>
         )}
-
-        <div className="flex items-center gap-2">
-          {Icon && (
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
-              <Icon className="w-4 h-4" />
-            </div>
-          )}
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
-                {title}
-              </h1>
+        <div className="flex items-center gap-2.5 min-w-0">
+          {Icon && <Icon className="h-5 w-5 shrink-0 text-indigo-600" strokeWidth={1.75} aria-hidden="true" />}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-semibold tracking-[-0.01em] text-slate-900">{title}</h1>
               {badge && (
-                <span className="text-xs font-mono font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
-                  {badge}
-                </span>
+                <span className="rounded-pill bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">{badge}</span>
               )}
             </div>
-            {subtitle && (
-              <p className="text-xs text-slate-500 font-sans">{subtitle}</p>
-            )}
+            {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
           </div>
         </div>
       </div>

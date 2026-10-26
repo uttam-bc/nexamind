@@ -401,7 +401,7 @@ export default function SoloChat({
       <FeatureHeader
         title="Direct Messages"
         icon={MessageSquare}
-        badge="1-on-1 User Chat"
+        badge="Direct messages"
         onBack={onBack}
         actions={
           <button
@@ -421,7 +421,7 @@ export default function SoloChat({
           {/* Top Bar: Search & New Chat */}
           <div className="space-y-2.5 mb-3">
             <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5 text-indigo-600" />
                 <span>Conversations ({channels.length})</span>
               </span>
@@ -438,7 +438,7 @@ export default function SoloChat({
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input aria-label="Search direct chats"
                 type="text"
-                placeholder="Search direct chats..."
+                placeholder="Search direct chats…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
@@ -449,7 +449,7 @@ export default function SoloChat({
           {/* Conversation Thread Items */}
           <div className="flex-1 overflow-y-auto space-y-1 pr-1">
             {loading && channels.length === 0 ? (
-              <div className="text-center py-10 text-xs text-slate-400">Loading chats...</div>
+              <div className="text-center py-10 text-xs text-slate-400">Loading chats…</div>
             ) : filteredChannels.length === 0 ? (
               <div className="text-center py-12 px-4 space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-indigo-600">
@@ -488,7 +488,7 @@ export default function SoloChat({
                   >
                     {/* User Avatar */}
                     <div className="relative shrink-0">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs shadow-xs">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-xs shadow-xs">
                         {details.initial}
                       </div>
                       <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-emerald-500" />
@@ -499,12 +499,12 @@ export default function SoloChat({
                         <span className="text-xs font-bold text-slate-900 truncate">
                           {details.name}
                         </span>
-                        <span className="text-xs text-slate-400 font-mono">
+                        <span className="text-xs text-slate-400 tabular-nums">
                           {chan.created_at ? new Date(chan.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-xs text-indigo-600 font-mono font-medium">
+                        <span className="text-xs text-indigo-600 tabular-nums font-medium">
                           @{details.username}
                         </span>
                         <span className="text-xs text-slate-400 truncate">
@@ -530,7 +530,7 @@ export default function SoloChat({
                     <ArrowLeft className="w-4 h-4" />
                   </button>
                   <div className="relative">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
                       {activeParticipant.initial}
                     </div>
                     <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-emerald-500" />
@@ -541,7 +541,7 @@ export default function SoloChat({
                       <h3 className="font-extrabold text-sm text-slate-900">
                         {activeParticipant.name}
                       </h3>
-                      <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-mono font-bold">
+                      <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full tabular-nums font-bold">
                         @{activeParticipant.username}
                       </span>
                     </div>
@@ -596,7 +596,7 @@ export default function SoloChat({
                       >
                         {/* Avatar for incoming */}
                         {!isOutgoing && (
-                          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs shrink-0 shadow-xs">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-xs shrink-0 shadow-xs">
                             {msg.sender_name?.[0]?.toUpperCase() || 'U'}
                           </div>
                         )}
@@ -607,7 +607,7 @@ export default function SoloChat({
                             <div className="flex items-center gap-1.5 px-1 text-xs text-slate-500 font-medium">
                               <span className="font-bold text-slate-800">{msg.sender_name}</span>
                               {msg.sender_username && (
-                                <span className="font-mono text-indigo-600">
+                                <span className="tabular-nums text-indigo-600">
                                   @{msg.sender_username}
                                 </span>
                               )}
@@ -634,7 +634,7 @@ export default function SoloChat({
 
                           {/* Time & Reactions */}
                           <div
-                            className={`flex items-center gap-2 px-1 text-xs text-slate-400 font-mono ${
+                            className={`flex items-center gap-2 px-1 text-xs text-slate-400 tabular-nums ${
                               isOutgoing ? 'justify-end' : 'justify-start'
                             }`}
                           >
@@ -679,7 +679,7 @@ export default function SoloChat({
                                   }`}
                                 >
                                   <span>{r.emoji}</span>
-                                  <span className="font-mono">{r.count}</span>
+                                  <span className="tabular-nums">{r.count}</span>
                                 </button>
                               ))}
                             </div>
@@ -800,13 +800,13 @@ export default function SoloChat({
                 <input id="solo-chat-field-1"
                   type="text"
                   autoFocus
-                  placeholder="e.g. @alex, john, sarah..."
+                  placeholder="e.g. @alex, john, sarah…"
                   value={userSearchQuery}
                   onChange={(e) => handleSearchUsers(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                 />
                 {isSearchingUsers && (
-                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono animate-pulse">
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 tabular-nums animate-pulse">
                     searching...
                   </span>
                 )}
@@ -830,7 +830,7 @@ export default function SoloChat({
                       className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-indigo-50/60 hover:border-indigo-200 flex items-center justify-between transition text-xs"
                     >
                       <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-xs">
+                        <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-xs">
                           {u.name?.[0]?.toUpperCase() || 'U'}
                         </div>
                         <div>
@@ -842,7 +842,7 @@ export default function SoloChat({
                               </span>
                             )}
                           </div>
-                          <div className="text-xs text-indigo-600 font-mono">
+                          <div className="text-xs text-indigo-600 tabular-nums">
                             @{u.username}
                           </div>
                         </div>

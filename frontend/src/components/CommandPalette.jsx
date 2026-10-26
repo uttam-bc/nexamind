@@ -5,7 +5,6 @@ import {
   FolderKanban,
   Video,
   MessageSquare,
-  FileBarChart,
   Code2,
   FolderOpen,
   DollarSign,
@@ -22,7 +21,6 @@ export default function CommandPalette({
   sessions,
   channels,
   repos,
-  reports,
   onNavigate,
 }) {
   const [query, setQuery] = useState('');
@@ -63,9 +61,6 @@ export default function CommandPalette({
   (repos || []).forEach((r) => {
     items.push({ id: `repo-${r.id}`, category: 'Code', title: r.name, subtitle: 'Repository', icon: Code2, action: () => { onNavigate('code'); onClose(); } });
   });
-  (reports || []).forEach((r) => {
-    items.push({ id: `report-${r.id}`, category: 'Reports', title: r.title, subtitle: r.report_type, icon: FileBarChart, action: () => { onNavigate('reports'); onClose(); } });
-  });
 
   const filteredItems = items.filter((item) => {
     const q = query.toLowerCase();
@@ -88,21 +83,21 @@ export default function CommandPalette({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-start justify-center pt-[15vh] p-4 animate-fade-in" onClick={onClose}>
-      <div data-modal className="glass-panel w-full max-w-xl rounded-2xl border border-slate-700/80 shadow-2xl overflow-hidden flex flex-col max-h-[min(520px,70vh)] animate-slide-up" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center px-4 py-3.5 border-b border-slate-800/80 gap-3">
-          <Search className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+    <div className="fixed inset-0 bg-slate-950/40 z-50 flex items-start justify-center pt-[15vh] p-4" onClick={onClose}>
+      <div data-modal className="bg-white w-full max-w-xl rounded-2xl border border-slate-200 shadow-panel overflow-hidden flex flex-col max-h-[min(520px,70vh)]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center px-4 py-3.5 border-b border-slate-200 gap-3">
+          <Search className="w-5 h-5 text-slate-400 flex-shrink-0" aria-hidden="true" />
           <input aria-label="Search tasks, documents, meetings, channels"
             type="text"
             autoFocus
-            placeholder="Search tasks, documents, meetings, channels..."
-            className="flex-1 bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
+            placeholder="Search tasks, documents, meetings, channels…"
+            className="flex-1 bg-transparent text-sm text-slate-900 placeholder-slate-400 focus:outline-none"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0); }}
             onKeyDown={handleKeyDown}
           />
-          <kbd className="hidden sm:inline text-xs font-mono px-2 py-0.5 text-slate-500 bg-slate-800 rounded border border-slate-700">ESC</kbd>
-          <button onClick={onClose} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
+          <kbd className="hidden sm:inline text-xs px-1.5 py-0.5 text-slate-500 rounded border border-slate-200">ESC</kbd>
+          <button type="button" onClick={onClose} aria-label="Close search" className="btn-ghost rounded-md p-1"><X className="w-4 h-4" aria-hidden="true" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {filteredItems.map((item, idx) => {
@@ -113,22 +108,19 @@ export default function CommandPalette({
                 key={item.id}
                 onClick={item.action}
                 onMouseEnter={() => setSelectedIndex(idx)}
-                className={`w-full flex items-center justify-between p-3 rounded-xl text-left transition ${
-                  isSelected ? 'bg-indigo-600/15 border border-indigo-500/30 text-slate-100' : 'text-slate-300 hover:bg-slate-800/50 border border-transparent'
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left ${
+                  isSelected ? 'bg-slate-100 text-slate-900' : 'text-slate-700'
                 }`}
               >
                 <div className="flex items-center gap-3 truncate">
-                  <div className={`p-2 rounded-lg ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                    <Icon className="w-4 h-4" />
-                  </div>
+                  <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-indigo-600' : 'text-slate-400'}`} aria-hidden="true" />
                   <div className="truncate">
-                    <div className="text-sm font-semibold truncate">{item.title}</div>
+                    <div className="text-sm font-medium truncate">{item.title}</div>
                     {item.subtitle && <div className="text-xs text-slate-500 truncate">{item.subtitle}</div>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-500">{item.category}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
+                  <span className="text-xs text-slate-500">{item.category}</span>
                 </div>
               </button>
             );

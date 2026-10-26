@@ -1,0 +1,56 @@
+{
+  "title": "Choose NexaMind's visual world: the familiar end",
+  "question": "A safer hand: three conventional directions and the category standard. Pick one, or re-roll.",
+  "options": [
+    {
+      "id": "grounded-swiss",
+      "kind": "grounded",
+      "label": "Swiss Grid",
+      "lineage": "International Typographic Style posters and signage",
+      "thesis": "A strict grid, one confident grotesk and colour used only to say where you are.",
+      "palette": ["#FFFFFF", "#F2F2F0", "#121212", "#2457D6", "#7A3FBF", "#E5484D"],
+      "materials": ["white stock", "flush-left grotesk", "flat colour fields"],
+      "viewport": "Black rail, white work area on a 12-column grid; the page title set large flush-left with the workspace colour as a solid field behind the active nav item.",
+      "risk": "Familiar and clean, but can feel cold if the type scale is timid.",
+      "html": ".impeccable/mocks/decision/grounded-swiss.html"
+    },
+    {
+      "id": "grounded-penguin",
+      "kind": "grounded",
+      "label": "Paperback Shelf",
+      "lineage": "colour-coded Penguin and Pelican paperback series",
+      "thesis": "Every part of the workspace has its series colour, like a shelf you can read by spine.",
+      "palette": ["#FAF8F4", "#1B1B1B", "#2C5DA8", "#B8336A", "#2E7D5B", "#E0A526", "#FFFFFF"],
+      "materials": ["three-band covers", "matte paper", "centred-band titling"],
+      "viewport": "Off-white ground, dark rail; each panel carries a thin series band (docs blue, chat cerise, meetings green, tasks ochre) and page headers use the three-band layout.",
+      "risk": "Many colours to keep disciplined; drifts into a rainbow if bands grow beyond thin strips.",
+      "html": ".impeccable/mocks/decision/grounded-penguin.html"
+    },
+    {
+      "id": "grounded-pegboard",
+      "kind": "grounded",
+      "label": "Workshop Pegboard",
+      "lineage": "a maker workshop's tool wall, where every tool has its painted outline",
+      "thesis": "Everything in one place, each with its spot: the workspace as a well-kept tool wall.",
+      "palette": ["#ECEAE4", "#20211F", "#F25C2A", "#2F6FDE", "#FFFFFF", "#9C9A93"],
+      "materials": ["pegboard dot grid", "painted tool outlines", "safety-orange labels"],
+      "viewport": "A faint pegboard dot grid behind the work area; empty states show the outline of what belongs there; one safety-orange primary action.",
+      "risk": "The least conventional of the three; the dot grid must stay faint or it becomes a costume.",
+      "html": ".impeccable/mocks/decision/grounded-pegboard.html"
+    }
+  ],
+  "reroll": { "registers": ["safer", "bolder"] },
+  "buildPath": { "value": "code" },
+  "canon": true,
+  "canonCard": {
+    "kind": "canon",
+    "label": "The category standard",
+    "thesis": "NexaMind alongside Linear, Notion and Slack, at their level of craft.",
+    "palette": ["#FFFFFF", "#18181B", "#F4F4F5", "#5E6AD2"],
+    "materials": ["neutral grey surfaces", "one indigo accent", "compact lists"],
+    "viewport": "Grey sidebar with workspace switcher, white canvas, compact rows and one accent colour.",
+    "risk": "Indistinguishable from the competition by design.",
+    "html": ".impeccable/mocks/decision/canon.html"
+  },
+  "steer": true
+}

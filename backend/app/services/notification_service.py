@@ -98,7 +98,7 @@ async def notify_many(db: AsyncSession, user_ids, **kwargs) -> int:
 
 async def list_for_user(db: AsyncSession, user_id: UUID, limit: int = 30, before: datetime | None = None,
                         unread_only: bool = False) -> list[Notification]:
-    query = select(Notification).where(Notification.user_id == user_id)
+    query = select(Notification).where(Notification.user_id == user_id, Notification.dismissed_at.is_(None))
     if before is not None:
         query = query.where(Notification.created_at < before)
     if unread_only:
@@ -132,6 +132,21 @@ async def mark_all_read(db: AsyncSession, user_id: UUID) -> int:
     )
     return result.rowcount or 0
 
+
+
+async def dismiss(db: AsyncSession, user_id: UUID, notification_id: UUID) -> bool:
+    """Hide one of the user's notifications. It also counts as read; the row stays for de-duplication."""
+    now = datetime.now(UTC)
+    result = await db.execute(
+        update(Notification)
+        .where(
+            Notification.user_id == user_id,
+            Notification.id == notification_id,
+            Notification.dismissed_at.is_(None),
+        )
+        .values(dismissed_at=now, read_at=func.coalesce(Notification.read_at, now))
+    )
+    return bool(result.rowcount)
 
 def get_prefs(user: User) -> dict:
     prefs = user.notification_prefs or {}

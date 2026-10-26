@@ -87,7 +87,7 @@ export default function FilePreview({ workspaceId, file, fill = false }) {
   }
   if (kind === 'code' || kind === 'text') {
     return (
-      <pre className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs font-mono overflow-auto max-h-[65vh] whitespace-pre-wrap break-words">
+      <pre className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs tabular-nums overflow-auto max-h-[65vh] whitespace-pre-wrap break-words">
         {text}
       </pre>
     );

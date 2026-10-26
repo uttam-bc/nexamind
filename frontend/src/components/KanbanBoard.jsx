@@ -214,7 +214,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
     };
     return (
       <span
-        className={`text-xs font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+        className={`text-xs font-extrabold px-2 py-0.5 rounded-md border ${
           map[priority] || map.medium
         }`}
       >
@@ -250,7 +250,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
   });
 
   return (
-    <div className="h-full flex flex-col space-y-3.5 text-[#191C1E] font-sans">
+    <div className="h-full flex flex-col space-y-3.5 text-slate-900 font-sans">
       <FeatureHeader
         title="Sprint Projects & Kanban Board"
         subtitle="Manage sprint tasks, track checklists, and coordinate deliverables across To Do, In Progress, and Done."
@@ -262,15 +262,15 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input aria-label="Search tasks"
                 type="text"
-                placeholder="Search tasks..."
-                className="w-full bg-white border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] shadow-sm"
+                placeholder="Search tasks…"
+                className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 shadow-sm"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
 
             <select aria-label="Filter by priority"
-              className="bg-white border border-[#E2E8F0] rounded-xl px-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] shadow-sm font-sans"
+              className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 shadow-sm font-sans"
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
             >
@@ -286,7 +286,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                 setTaskStatus(sectionFilter !== 'all' ? sectionFilter : 'todo');
                 setShowAddModal(true);
               }}
-              className="flex items-center gap-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm transition"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm transition"
             >
               <Plus className="w-4 h-4" />
               <span>Add Task</span>
@@ -296,9 +296,9 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
       />
 
       {/* ---------------- TASK BAR SECTION SWITCHER / FILTER ---------------- */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-[#E2E8F0] shadow-2xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-slate-200 shadow-2xs">
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2">
+          <span className="text-xs font-bold text-slate-500 px-2">
             Section:
           </span>
           <button
@@ -327,7 +327,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                 : 'text-slate-600 hover:bg-indigo-50 hover:text-indigo-700'
             }`}
           >
-            <span>📋 To Do</span>
+            <span>To Do</span>
             <span
               className={`text-xs px-1.5 py-0.5 rounded-full ${
                 sectionFilter === 'todo' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700 font-bold'
@@ -341,15 +341,15 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
             onClick={() => setSectionFilter('in_progress')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
               sectionFilter === 'in_progress'
-                ? 'bg-amber-500 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-amber-50 hover:text-amber-800'
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <Zap className="w-3.5 h-3.5" />
             <span>In Progress</span>
             <span
               className={`text-xs px-1.5 py-0.5 rounded-full ${
-                sectionFilter === 'in_progress' ? 'bg-white/20 text-white' : 'bg-amber-50 text-amber-700 font-bold'
+                sectionFilter === 'in_progress' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
               }`}
             >
               {filteredTasks.filter((t) => t.status === 'in_progress' || t.status === 'review').length}
@@ -361,14 +361,14 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
               sectionFilter === 'done'
                 ? 'bg-emerald-600 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-emerald-50 hover:text-emerald-800'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>Done</span>
             <span
               className={`text-xs px-1.5 py-0.5 rounded-full ${
-                sectionFilter === 'done' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700 font-bold'
+                sectionFilter === 'done' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
               }`}
             >
               {filteredTasks.filter((t) => t.status === 'done').length}
@@ -378,11 +378,11 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
         <div className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5 pr-2">
           <span>In <strong>To Do</strong>, shift directly to:</span>
-          <span className="font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-            ⚡ In Progress
+          <span className="font-semibold text-slate-800">
+            In Progress
           </span>
           <span>or</span>
-          <span className="font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+          <span className="font-semibold text-slate-800">
             ✓ Done
           </span>
         </div>
@@ -421,19 +421,19 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                     await handleMoveStatus(taskId, col.id);
                   }
                 }}
-                className={`p-4 rounded-2xl border flex flex-col h-full shadow-sm transition-all duration-150 ${
+                className={`p-4 rounded-2xl border flex flex-col h-full shadow-sm transition-[background-color,border-color,box-shadow] duration-150 ${
                   isDragOver
                     ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-200 shadow-md'
-                    : 'border-[#E2E8F0] bg-[#F8FAFC]'
+                    : 'border-slate-200 bg-slate-50'
                 }`}
               >
                 {/* Column Header */}
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#E2E8F0]">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs uppercase tracking-wider text-slate-700">
+                    <span className="font-bold text-xs text-slate-700">
                       {col.label}
                     </span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-[#ECEEF0] text-slate-600 font-mono font-bold">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 tabular-nums font-bold">
                       {colTasks.length}
                     </span>
                   </div>
@@ -469,13 +469,13 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                           setDragOverColumnId(null);
                         }}
                         onClick={() => handleOpenTaskDetail(task)}
-                        className="bg-white border border-[#E2E8F0] hover:border-[#4F46E5] p-3.5 rounded-xl shadow-xs hover-lift transition space-y-2.5 group cursor-pointer"
+                        className="bg-white border border-slate-200 hover:border-indigo-600 p-3.5 rounded-xl shadow-xs transition space-y-2.5 group cursor-pointer"
                       >
                         {/* Title & Delete button */}
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-start gap-1.5 flex-1 min-w-0">
                             <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 cursor-grab shrink-0 mt-0.5" />
-                            <h4 className="font-bold text-xs text-[#191C1E] leading-snug group-hover:text-[#4F46E5] transition break-words">
+                            <h4 className="font-bold text-xs text-slate-900 leading-snug group-hover:text-indigo-600 transition break-words">
                               {task.title}
                             </h4>
                           </div>
@@ -512,7 +512,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
                         {/* Status Shifter & Priority Bar */}
                         <div
-                          className="pt-2.5 border-t border-[#E2E8F0] space-y-2 text-xs"
+                          className="pt-2.5 border-t border-slate-200 space-y-2 text-xs"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between">
@@ -520,17 +520,17 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
                             {/* Direct Quick Dropdown */}
                             <div className="flex items-center gap-1.5">
-                              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                              <span className="text-xs text-slate-400 font-bold">
                                 Section:
                               </span>
                               <select aria-label="Task section"
                                 value={task.status === 'review' ? 'in_progress' : task.status || 'todo'}
                                 onChange={(e) => handleMoveStatus(task.id, e.target.value)}
-                                className="text-xs font-bold bg-[#F8FAFC] hover:bg-slate-100 border border-[#CBD5E1] rounded-lg px-2 py-0.5 text-slate-700 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="text-xs font-bold bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg px-2 py-0.5 text-slate-700 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                 title="Shift section"
                               >
-                                <option value="todo">📋 To Do</option>
-                                <option value="in_progress">⚡ In Progress</option>
+                                <option value="todo">To Do</option>
+                                <option value="in_progress">In Progress</option>
                                 <option value="done">✅ Done</option>
                               </select>
                             </div>
@@ -543,7 +543,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 <button
                                   type="button"
                                   onClick={() => handleMoveStatus(task.id, 'in_progress')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition shadow-2xs active:scale-95"
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 border  transition shadow-2xs active:scale-95"
                                   title="Shift task to In Progress section"
                                 >
                                   <Zap className="w-3 h-3 text-amber-600 fill-amber-500" />
@@ -552,7 +552,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 <button
                                   type="button"
                                   onClick={() => handleMoveStatus(task.id, 'done')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-2xs active:scale-95"
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 border  transition shadow-2xs active:scale-95"
                                   title="Shift task directly to Done section"
                                 >
                                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -566,7 +566,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 <button
                                   type="button"
                                   onClick={() => handleMoveStatus(task.id, 'todo')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 transition shadow-2xs active:scale-95"
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 border  transition shadow-2xs active:scale-95"
                                   title="Shift task back to To Do section"
                                 >
                                   <RotateCcw className="w-3 h-3 text-indigo-600" />
@@ -575,7 +575,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 <button
                                   type="button"
                                   onClick={() => handleMoveStatus(task.id, 'done')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-2xs active:scale-95"
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 border  transition shadow-2xs active:scale-95"
                                   title="Shift task to Done section"
                                 >
                                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -589,7 +589,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 <button
                                   type="button"
                                   onClick={() => handleMoveStatus(task.id, 'todo')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition shadow-2xs active:scale-95"
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 border border-slate-200 transition shadow-2xs active:scale-95"
                                   title="Reopen into To Do section"
                                 >
                                   <RotateCcw className="w-3 h-3 text-slate-500" />
@@ -598,7 +598,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                                 <button
                                   type="button"
                                   onClick={() => handleMoveStatus(task.id, 'in_progress')}
-                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition shadow-2xs active:scale-95"
+                                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 border  transition shadow-2xs active:scale-95"
                                   title="Move back to In Progress section"
                                 >
                                   <Zap className="w-3 h-3 text-amber-600 fill-amber-500" />
@@ -626,12 +626,12 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
       {/* ---------------- TASK DETAIL MODAL & DRAWER ---------------- */}
       {selectedTask && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div data-modal className="p-6 rounded-2xl border border-[#E2E8F0] max-w-lg w-full space-y-5 bg-white max-h-[90vh] overflow-y-auto shadow-2xl text-[#191C1E]">
+          <div data-modal className="p-6 rounded-2xl border border-slate-200 max-w-lg w-full space-y-5 bg-white max-h-[90vh] overflow-y-auto shadow-2xl text-slate-900">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div className="flex items-center gap-2">
-                <FolderKanban className="w-5 h-5 text-[#4F46E5]" />
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 font-mono">
+                <FolderKanban className="w-5 h-5 text-indigo-600" />
+                <span className="text-xs font-bold text-slate-500 tabular-nums">
                   Task Details & Checklist
                 </span>
               </div>
@@ -645,13 +645,13 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
             <form onSubmit={handleSaveTaskDetail} className="space-y-4">
               <div>
-                <label htmlFor="kanban-board-field-1" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="kanban-board-field-1" className="text-xs font-bold text-slate-700 block mb-1">
                   Title
                 </label>
                 <input id="kanban-board-field-1"
                   type="text"
                   required
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-bold"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 font-bold"
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
                 />
@@ -659,14 +659,14 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                  <label className="text-xs font-bold text-slate-700 block">
                     Task Section / Status
                   </label>
                   <span className="text-xs text-slate-400 font-medium">Click to shift section</span>
                 </div>
 
                 {/* Segmented Status Shifter */}
-                <div className="grid grid-cols-3 gap-2 p-1 bg-[#F1F5F9] rounded-xl border border-[#E2E8F0]">
+                <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
                   <button
                     type="button"
                     onClick={() => setEditStatus('todo')}
@@ -709,11 +709,11 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
                 {/* Priority Selection */}
                 <div>
-                  <label htmlFor="kanban-board-field-2" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  <label htmlFor="kanban-board-field-2" className="text-xs font-bold text-slate-700 block mb-1">
                     Priority Level
                   </label>
                   <select id="kanban-board-field-2"
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-medium"
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 font-medium"
                     value={editPriority}
                     onChange={(e) => setEditPriority(e.target.value)}
                   >
@@ -726,27 +726,27 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
               </div>
 
               <div>
-                <label htmlFor="kanban-board-field-3" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="kanban-board-field-3" className="text-xs font-bold text-slate-700 block mb-1">
                   Description
                 </label>
                 <textarea id="kanban-board-field-3"
-                  placeholder="Task specifications, context, criteria..."
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] resize-none h-24"
+                  placeholder="Task specifications, context, criteria…"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 resize-none h-24"
                   value={editDesc}
                   onChange={(e) => setEditDesc(e.target.value)}
                 />
               </div>
 
               {/* Subtasks Checklist */}
-              <div className="space-y-2 pt-2 border-t border-[#E2E8F0]">
+              <div className="space-y-2 pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  <label className="text-xs font-bold text-slate-700">
                     Checklist & Subtasks ({subtasks.filter((s) => s.completed).length}/{subtasks.length})
                   </label>
                   {subtasks.length > 0 && (
-                    <div className="w-24 h-2 bg-[#ECEEF0] rounded-full overflow-hidden">
+                    <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-[#10B981] transition-all rounded-full"
+                        className="h-full bg-emerald-500 transition-[width] rounded-full"
                         style={{
                           width: `${(subtasks.filter((s) => s.completed).length / subtasks.length) * 100}%`,
                         }}
@@ -759,16 +759,16 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   {subtasks.map((st) => (
                     <div
                       key={st.id}
-                      className="flex items-center justify-between p-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] text-xs"
+                      className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"
                     >
                       <label className="flex items-center gap-2 cursor-pointer truncate flex-1">
                         <input
                           type="checkbox"
                           checked={st.completed}
                           onChange={() => handleToggleSubtask(st.id)}
-                          className="rounded border-[#CBD5E1] text-[#4F46E5]"
+                          className="rounded border-slate-300 text-indigo-600"
                         />
-                        <span className={`truncate ${st.completed ? 'line-through text-slate-400' : 'text-[#191C1E]'}`}>
+                        <span className={`truncate ${st.completed ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                           {st.text}
                         </span>
                       </label>
@@ -786,8 +786,8 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                 <div className="flex gap-2">
                   <input aria-label="Add a checklist item"
                     type="text"
-                    placeholder="Add a checklist item..."
-                    className="flex-1 bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-1.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                    placeholder="Add a checklist item…"
+                    className="flex-1 bg-slate-100 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                     value={newSubtaskText}
                     onChange={(e) => setNewSubtaskText(e.target.value)}
                     onKeyDown={(e) => {
@@ -800,7 +800,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   <button
                     type="button"
                     onClick={handleAddSubtask}
-                    className="px-3 py-1.5 bg-[#ECEEF0] hover:bg-[#E0E3E5] text-slate-700 rounded-xl text-xs font-semibold"
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
                   >
                     Add
                   </button>
@@ -808,7 +808,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-3 border-t border-[#E2E8F0]">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => handleDeleteTask(selectedTask.id)}
@@ -829,10 +829,10 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   <button
                     type="submit"
                     disabled={isSavingEdit}
-                    className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-5 py-2 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5"
                   >
                     <Save className="w-3.5 h-3.5" />
-                    <span>{isSavingEdit ? 'Saving...' : 'Save Changes'}</span>
+                    <span>{isSavingEdit ? 'Saving…' : 'Save Changes'}</span>
                   </button>
                 </div>
               </div>
@@ -844,11 +844,11 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
       {/* ---------------- CREATE TASK MODAL ---------------- */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div data-modal className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-md w-full space-y-4 shadow-2xl text-[#191C1E]">
-            <h3 className="text-base font-bold text-[#191C1E]">Add New Kanban Task</h3>
+          <div data-modal className="bg-white p-6 rounded-2xl border border-slate-200 max-w-md w-full space-y-4 shadow-2xl text-slate-900">
+            <h3 className="text-base font-bold text-slate-900">Add New Kanban Task</h3>
             <form onSubmit={handleCreateTask} className="space-y-4">
               <div>
-                <label htmlFor="kanban-board-field-4" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="kanban-board-field-4" className="text-xs font-bold text-slate-700 block mb-1">
                   Task Title
                 </label>
                 <input id="kanban-board-field-4"
@@ -857,7 +857,7 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                   aria-describedby={titleError ? 'kanban-title-error' : undefined}
                   autoFocus
                   placeholder="e.g. Integrate WebRTC video conferencing"
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2.5 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                   value={taskTitle}
                   onChange={(e) => {
                     setTaskTitle(e.target.value);
@@ -872,12 +872,12 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
               </div>
 
               <div>
-                <label htmlFor="kanban-board-field-5" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="kanban-board-field-5" className="text-xs font-bold text-slate-700 block mb-1">
                   Description
                 </label>
                 <textarea id="kanban-board-field-5"
-                  placeholder="Details, requirements, or test criteria..."
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-4 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] resize-none h-20"
+                  placeholder="Details, requirements, or test criteria…"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 resize-none h-20"
                   value={taskDescription}
                   onChange={(e) => setTaskDescription(e.target.value)}
                 />
@@ -885,26 +885,26 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="kanban-board-field-6" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  <label htmlFor="kanban-board-field-6" className="text-xs font-bold text-slate-700 block mb-1">
                     Add to Column / Status
                   </label>
                   <select id="kanban-board-field-6"
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5] font-bold"
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 font-bold"
                     value={taskStatus}
                     onChange={(e) => setTaskStatus(e.target.value)}
                   >
-                    <option value="todo">📋 To Do</option>
-                    <option value="in_progress">⚡ In Progress</option>
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
                     <option value="done">✅ Done</option>
                   </select>
                 </div>
 
                 <div>
-                  <label htmlFor="kanban-board-field-7" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                  <label htmlFor="kanban-board-field-7" className="text-xs font-bold text-slate-700 block mb-1">
                     Priority
                   </label>
                   <select id="kanban-board-field-7"
-                    className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#191C1E] focus:outline-none focus:border-[#4F46E5]"
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                     value={taskPriority}
                     onChange={(e) => setTaskPriority(e.target.value)}
                   >
@@ -927,9 +927,9 @@ export default function KanbanBoard({ workspaceId, tasks, onRefreshTasks, onBack
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-5 py-2 rounded-xl text-xs font-bold shadow-sm"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-sm"
                 >
-                  {isSubmitting ? 'Creating...' : 'Create Task'}
+                  {isSubmitting ? 'Creating…' : 'Create Task'}
                 </button>
               </div>
             </form>

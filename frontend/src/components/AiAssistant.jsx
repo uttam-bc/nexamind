@@ -38,16 +38,13 @@ export default function AiAssistant({
   const defaultGreeting = {
     role: 'assistant',
     content:
-      'Hello! I am your **NexaMind Autonomous Agentic AI**.\n\n' +
-      'I possess persistent memory and direct database authority across this workspace.\n\n' +
-      'Here is what I can execute for you:\n' +
-      '- 🧠 **Synthesize workspace memory** across your documents, chats, tasks, and meetings\n' +
-      '- 📄 **Create & edit Notion documents**\n' +
-      '- 📊 **Create, prioritize & update Kanban tasks** (To Do, In Progress, Done)\n' +
-      '- 📅 **Schedule calendar meetings**\n' +
-      '- 💬 **Post broadcasts to channels**\n' +
-      '- 🔄 **Switch between Solo & Group spaces**\n\n' +
-      'How can I assist your workflow today?',
+      'Hi, I’m Copilot. I answer from what this workspace has written, said and decided, and I can act on it:\n\n' +
+      '- Find decisions and details in your pages and meetings\n' +
+      '- Create and edit pages in Docs\n' +
+      '- Create and update tasks on the board\n' +
+      '- Schedule calendar events\n' +
+      '- Post to channels\n\n' +
+      'Ask a question or tell me what to do.',
     tool_calls: [],
     timestamp: new Date().toISOString(),
   };
@@ -237,9 +234,9 @@ export default function AiAssistant({
     setMessages((prev) => [...prev, userMsg]);
     setIsProcessing(true);
     setActivePlanSteps([
-      'Loading conversation context & episodic memory...',
-      'Synthesizing workspace knowledge (docs, tasks, chats)...',
-      modelConfigured ? 'Reasoning and running workspace actions...' : 'Running workspace commands...',
+      'Loading conversation context & episodic memory…',
+      'Synthesizing workspace knowledge (docs, tasks, chats)…',
+      modelConfigured ? 'Reasoning and running workspace actions…' : 'Running workspace commands…',
     ]);
 
     try {
@@ -353,7 +350,7 @@ export default function AiAssistant({
     <div className="h-full flex flex-col select-none">
       {/* 1. Header with Back Button (Item 1) & Quick Tools */}
       <FeatureHeader
-        title="Agentic AI Copilot"
+        title="Copilot"
         icon={Bot}
         badge={modelConfigured ? 'AI model connected' : 'Offline command mode'}
         onBack={onBack}
@@ -396,7 +393,7 @@ export default function AiAssistant({
         {/* Left Drawer: Past Conversation Sessions (Item 2) */}
         <div className={`${showSessions ? 'flex absolute inset-0 z-30' : 'hidden'} lg:static lg:flex lg:w-60 xl:w-72 bg-white rounded-2xl border border-slate-200 p-3.5 flex-col shadow-xs flex-shrink-0`}>
           <div className="flex items-center justify-between mb-3 px-1">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
               <Clock className="w-3.5 h-3.5 text-indigo-600" />
               <span>AI Sessions</span>
             </div>
@@ -475,7 +472,7 @@ export default function AiAssistant({
                     className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm shadow-xs ${
                       isUser
                         ? 'bg-indigo-600 text-white'
-                        : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white'
+                        : 'bg-indigo-600 text-white'
                     }`}
                   >
                     {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
@@ -527,7 +524,7 @@ export default function AiAssistant({
                       </div>
                     )}
 
-                    <div className="text-xs text-slate-400 px-1 font-mono">
+                    <div className="text-xs text-slate-400 px-1 tabular-nums">
                       {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
                     </div>
                   </div>
@@ -538,13 +535,13 @@ export default function AiAssistant({
             {/* In-Flight Agent Steps Animation */}
             {isProcessing && (
               <div className="flex gap-3 max-w-xl mr-auto">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center shrink-0 animate-pulse">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 animate-pulse">
                   <Bot className="w-4 h-4" />
                 </div>
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl rounded-tl-none space-y-2 text-xs text-slate-700 shadow-xs">
                   <div className="flex items-center gap-2 font-bold text-indigo-700">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                    <span>NexaMind Agent Reasoning...</span>
+                    <span>Working on it…</span>
                   </div>
                   {activePlanSteps.map((step, sIdx) => (
                     <div key={sIdx} className="flex items-center gap-2 text-slate-600">
@@ -582,7 +579,7 @@ export default function AiAssistant({
               onChange={(e) => setInputPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="Ask anything, query workspace memory, or tell the AI to create tasks/docs..."
+              placeholder="Ask anything, query workspace memory, or tell the AI to create tasks/docs…"
               disabled={isProcessing}
               className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 resize-none shadow-xs"
             />
@@ -617,7 +614,7 @@ export default function AiAssistant({
             <div className="py-3 space-y-3 flex-1 overflow-y-auto">
               <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 space-y-1.5 text-xs">
                 <div className="font-bold text-indigo-900">4-Stage Memory Pipeline:</div>
-                <div className="text-slate-600 text-xs font-mono leading-relaxed">
+                <div className="text-slate-600 text-xs tabular-nums leading-relaxed">
                   Ingestion ➔ Extraction ➔ Consolidation ➔ Storage
                 </div>
               </div>
@@ -645,7 +642,7 @@ export default function AiAssistant({
                   {Object.entries(memoryStats.categories).map(([cat, count]) => (
                     <div key={cat} className="flex justify-between text-xs py-1 px-2 rounded-lg bg-slate-50">
                       <span className="capitalize font-medium text-slate-700">{cat}</span>
-                      <span className="font-mono font-bold text-indigo-600">{count}</span>
+                      <span className="tabular-nums font-bold text-indigo-600">{count}</span>
                     </div>
                   ))}
                 </div>
@@ -659,7 +656,7 @@ export default function AiAssistant({
                   className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isReindexing ? 'animate-spin' : ''}`} />
-                  <span>{isReindexing ? 'Consolidating Memory...' : 'Re-Index All Memories'}</span>
+                  <span>{isReindexing ? 'Consolidating Memory…' : 'Re-Index All Memories'}</span>
                 </button>
               </div>
             </div>

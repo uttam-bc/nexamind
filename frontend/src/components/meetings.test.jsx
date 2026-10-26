@@ -93,7 +93,7 @@ describe('NotificationBell', () => {
     api.listNotifications.mockResolvedValue({ items: [], unread_count: 0, has_more: false });
     render(<NotificationBell />);
     fireEvent.click(screen.getByLabelText('Notifications'));
-    await waitFor(() => expect(screen.getByText("You're all caught up.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("You're all caught up")).toBeTruthy());
   });
 });
 

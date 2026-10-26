@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>One-Screen Mosaic</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:#F3F3F3;color:#111;font:12px/1.4 'Zen Kaku Gothic New',sans-serif}
+.top{height:44px;background:#fff;border-bottom:1px solid #D9D9D9;display:flex;align-items:center;gap:18px;padding:0 14px}
+.top b{font-size:16px}.top span{padding:4px 10px;border:1px solid #D9D9D9}.top .on{background:#E60012;color:#fff;border-color:#E60012}
+.nav{height:30px;background:#fff;border-bottom:1px solid #D9D9D9;display:flex;gap:2px;padding:0 10px;align-items:center}
+.nav span{padding:4px 10px;font-weight:500}.nav .on{border-bottom:2px solid #E60012}
+.wrap{display:grid;grid-template-columns:180px 1fr;gap:8px;padding:8px}
+.side{background:#fff;border:1px solid #D9D9D9}
+.side div{padding:6px 10px;border-bottom:1px solid #EEE}
+.mos{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.m{background:#fff;border:1px solid #D9D9D9}
+.m h2{font-size:12px;font-weight:700;padding:5px 8px;border-bottom:1px solid #D9D9D9;display:flex;gap:6px;align-items:center}
+.m h2::before{content:"";width:4px;height:12px;background:#E60012}
+.r{display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #F0F0F0}.r small{color:#666}
+.badge{background:#E60012;color:#fff;padding:0 4px;font-size:10px}
+.w2{grid-column:span 2}
+</style></head><body>
+<div class="top"><b>NexaMind</b><span class="on">Group</span><span>Solo</span><span style="margin-left:auto">Search</span></div>
+<div class="nav"><span class="on">Home</span><span>Docs</span><span>Channels</span><span>Sprints</span><span>Calendar</span><span>Meetings</span><span>Copilot</span><span>Repos</span><span>Finance</span></div>
+<div class="wrap"><div class="side"><div>Orbit Team</div><div># general</div><div># design</div><div># releases</div><div>Sam Lee</div><div>Kim Ito</div></div>
+<div class="mos">
+<section class="m"><h2>Tasks <span class="badge">NEW</span></h2><div class="r">Write release notes<small>Thu</small></div><div class="r">Review PR #42<small>Today</small></div><div class="r">Beta invites<small>Done</small></div></section>
+<section class="m"><h2>Meetings</h2><div class="r">Standup<small>09:30</small></div><div class="r">Design review<small>14:00</small></div></section>
+<section class="m"><h2>Chat</h2><div class="r">Sam Lee<small>09:12</small></div><div class="r">#general<small>Mon</small></div></section>
+<section class="m"><h2>Repos</h2><div class="r">api-server<small>PR #42</small></div><div class="r">web-client<small>3 open</small></div></section>
+<section class="m w2"><h2>Recent pages</h2><div class="r">Launch plan<small>2 h ago</small></div><div class="r">API design notes<small>Yesterday</small></div><div class="r">Onboarding checklist<small>Mon</small></div></section>
+<section class="m"><h2>Calendar</h2><div class="r">Beta deadline<small>Fri</small></div><div class="r">Retro<small>Mon</small></div></section>
+<section class="m"><h2>Runway</h2><div class="r">Cash<small>$182,400</small></div><div class="r">Burn<small>$12,900/mo</small></div></section>
+</div></div></body></html>

@@ -606,21 +606,11 @@ export const api = {
   },
   markNotificationsRead: (ids) => request('/notifications/read', { method: 'POST', body: JSON.stringify({ ids }) }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
+  dismissNotification: (id) => request(`/notifications/${id}`, { method: 'DELETE' }),
   getNotificationPrefs: () => request('/notifications/preferences'),
   setNotificationPrefs: (prefs) => request('/notifications/preferences', { method: 'PUT', body: JSON.stringify(prefs) }),
 
   // Reports
-  listReports: (wsId) => request(`/workspaces/${wsId}/reports`),
-  generateReport: (wsId, data) =>
-    request(`/workspaces/${wsId}/reports/generate`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  getReport: (wsId, reportId) => request(`/workspaces/${wsId}/reports/${reportId}`),
-  deleteReport: (wsId, reportId) =>
-    request(`/workspaces/${wsId}/reports/${reportId}`, {
-      method: 'DELETE',
-    }),
 
   // AI Agent & Long-Term Memory
   chatWithAgent: (wsId, prompt, sessionId = null) =>

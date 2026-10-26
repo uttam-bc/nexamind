@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Bot,
@@ -31,18 +31,71 @@ import {
   ArrowLeft,
   Menu,
   X,
+  AlertCircle,
+  User,
+  CalendarDays,
+  Search,
+  Wrench,
 } from 'lucide-react';
 import { api, setAuthToken } from '../api';
 import { useDialog } from '../lib/dialog';
+import { useReveal, useScrollSpy } from '../lib/reveal';
+import Logo from '../components/ui/Logo';
+import ThemeToggle from '../components/ui/ThemeToggle';
+import WorkspaceSwitch from '../components/WorkspaceSwitch';
+import { roomTransition, originOf } from '../lib/viewTransition';
 
 const NAV_SECTIONS = [
   ['home', 'Home'],
-  ['product', 'Product & Features'],
-  ['memory', 'AI Memory Engine'],
-  ['about', 'About Us'],
+  ['product', 'Product'],
+  ['workspaces', 'Solo & Group'],
+  ['memory', 'Copilot'],
   ['contact', 'Contact'],
 ];
 const SECTION_IDS = NAV_SECTIONS.map(([id]) => id);
+
+// Each row shows a real screen of the app (captured with demonstration data) and only features that
+// exist (see PRODUCT.md).
+const FEATURES = [
+  {
+    title: 'Pages that start from what you already have',
+    body: 'Write in Markdown with images, or drop in a .docx, PDF or text file and get an editable page. Export any page back to Word or Markdown.',
+    facts: ['One library for pages and uploads', 'Previews for PDFs, images and media'],
+    image: '/landing/feature-docs.jpg',
+    size: [2336, 1460],
+    alt: 'Docs: the page list beside the Sprint 14 retro page, with export and formatting tools',
+  },
+  {
+    title: 'Channels the whole team can follow',
+    body: 'Public and private channels, direct messages, reactions and attachments, all live. Mentions land in your notifications.',
+    facts: ['Calls start from any direct message', 'Share pages and files into a conversation'],
+    image: '/landing/feature-channels.jpg',
+    size: [2400, 1120],
+    alt: 'The general channel with messages from Sam, Kim and Priya',
+  },
+  {
+    title: 'A calendar that reads your minutes',
+    body: 'Events and scheduled meetings sit together. Dates said in meetings or written in docs come back as suggestions, quoting where they came from.',
+    facts: ['Click a day to see, edit or delete its events', 'Meetings open straight from their entry'],
+    image: '/landing/feature-calendar.jpg',
+    size: [2336, 1460],
+    alt: 'The October calendar with today selected and suggested dates beside it',
+  },
+  {
+    title: 'A sprint board fed by your meetings',
+    body: 'To do, in progress and done. When meeting minutes are approved, their action items become tasks with owners.',
+    facts: ['Priorities and due dates', 'Real Git repositories beside it, with pull requests and reviews'],
+    image: '/landing/feature-sprint.jpg',
+    size: [2336, 1240],
+    alt: 'The sprint board with tasks in To Do, In Progress and Done',
+  },
+];
+
+const STEPS = [
+  { title: 'It looks things up first', body: 'The Copilot searches what it has learned from your pages and meetings before it answers.' },
+  { title: 'It uses the same actions you do', body: 'Tasks, events and pages it creates show up where you would expect them, made through the app’s own tools.' },
+  { title: 'It leaves blanks empty', body: 'Without a date or an owner, it asks or leaves the field empty instead of inventing one.' },
+];
 
 export default function LandingPage({
   onLogin,
@@ -52,7 +105,11 @@ export default function LandingPage({
   authError: propAuthError,
   setAuthError: propSetAuthError,
 }) {
-  const [activeNav, setActiveNav] = useState('home'); // 'home' | 'product' | 'about' | 'contact'
+  const [activeNav, setActiveNav] = useState('home');
+  const pageRef = useRef(null);
+  const [demoRoom, setDemoRoom] = useState('solo');
+  useReveal(pageRef);
+  useScrollSpy(SECTION_IDS, setActiveNav);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register' | 'forgot'
@@ -434,88 +491,109 @@ export default function LandingPage({
 
   const errorText = localError || propAuthError;
 
-  return (
-    <div className="min-h-screen w-full bg-slate-50 text-slate-900 font-sans antialiased selection:bg-indigo-500 selection:text-white overflow-y-auto overflow-x-hidden">
-      {/* ------------------------------------------------------------- */}
-      {/* 1. TOP NAVIGATION HEADER                                       */}
-      {/* ------------------------------------------------------------- */}
-      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200/80 transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Brand Logo */}
-          <a {...sectionLink('home')} className="flex items-center gap-2 cursor-pointer group" aria-label="NexaMind home">
-            <img
-              src="/logo.png"
-              alt="NexaMind"
-              className="h-8 md:h-9 w-auto object-contain transition-transform group-hover:scale-[1.02]"
-            />
-          </a>
+  // The Solo/Group demo switches the page's own room, revealed from the control like in the app.
+  const switchDemo = (mode, event) => {
+    const next = mode === 'personal' ? 'solo' : 'group';
+    if (next === demoRoom) return;
+    const apply = () => {
+      document.documentElement.dataset.workspace = next;
+      setDemoRoom(next);
+    };
+    // A keyboard press changes at once; a click reveals from the pointer.
+    const origin = originOf(event);
+    if (origin) roomTransition(origin, apply);
+    else apply();
+  };
 
-          {/* Navigation Links */}
-          <nav aria-label="Main" className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
-            {NAV_SECTIONS.map(([id, label]) => (
+  // A real screenshot of the home screen, light or dark to match the page.
+  const shot = (alt, room, { eager = false } = {}) => (
+    <>
+      <img
+        src={`/landing/dashboard-light-${room}.jpg`}
+        alt={alt}
+        width="1440"
+        height="900"
+        loading={eager ? 'eager' : 'lazy'}
+        fetchpriority={eager ? 'high' : undefined}
+        className="block h-auto w-full dark:hidden"
+      />
+      <img
+        src={`/landing/dashboard-dark-${room}.jpg`}
+        alt={alt}
+        width="1440"
+        height="900"
+        loading="lazy"
+        className="hidden h-auto w-full dark:block"
+      />
+    </>
+  );
+
+  return (
+    <div ref={pageRef} className="min-h-screen w-full bg-white text-slate-900 font-sans antialiased overflow-x-clip">
+      <a href="#home" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-pill focus:bg-white focus:px-4 focus:py-2 focus:shadow-panel">
+        Skip to content
+      </a>
+
+      {/* 1. HEADER */}
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-6 px-4 sm:px-6">
+          <a {...sectionLink('home')} className="rounded-lg" aria-label="NexaMind home">
+            <Logo alt="NexaMind" className="h-7" />
+          </a>
+          <nav aria-label="Main" className="hidden items-center gap-1 text-sm md:flex">
+            {NAV_SECTIONS.slice(1).map(([id, label]) => (
               <a
                 key={id}
                 {...sectionLink(id)}
-                className={`hover:text-indigo-600 transition ${activeNav === id ? 'text-indigo-600 font-bold' : ''}`}
+                className={`rounded-lg px-3 py-1.5 transition-colors duration-fast ${
+                  activeNav === id ? 'text-slate-900' : 'text-slate-500 hover:text-slate-900'
+                }`}
               >
                 {label}
               </a>
             ))}
           </nav>
-
-          {/* Action CTAs */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <ThemeToggle />
             <button
               type="button"
               onClick={() => handleOpenAuth('login')}
-              className="text-sm font-bold text-slate-700 hover:text-indigo-600 px-3 py-2 rounded-xl hover:bg-slate-100 transition"
+              className="rounded-pill px-3.5 py-2 text-sm font-medium text-slate-700 transition-colors duration-fast hover:bg-slate-100 hover:text-slate-900"
             >
-              Sign In
+              Sign in
             </button>
             <button
               type="button"
               onClick={() => handleOpenAuth('register')}
-              className="hidden sm:flex bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-md shadow-indigo-600/25 hover:shadow-indigo-600/40 hover:-translate-y-0.5 transition active:translate-y-0 items-center gap-1.5"
+              className="hidden items-center gap-1.5 rounded-pill bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors duration-fast hover:bg-slate-700 dark:bg-[#ededea] dark:text-[#141513] dark:hover:bg-[#ffffff] sm:inline-flex press"
             >
-              <span>Get Started</span>
-              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+              Get started
             </button>
             <button
               type="button"
               onClick={() => setMobileNavOpen((open) => !open)}
-              className="md:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100"
+              className="rounded-pill p-2 text-slate-700 hover:bg-slate-100 md:hidden"
               aria-expanded={mobileNavOpen}
               aria-controls="landing-mobile-nav"
               aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
             >
-              {mobileNavOpen ? <X className="w-5 h-5" aria-hidden="true" /> : <Menu className="w-5 h-5" aria-hidden="true" />}
+              {mobileNavOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
             </button>
           </div>
         </div>
-
-        {/* Mobile section menu */}
         {mobileNavOpen && (
-          <nav id="landing-mobile-nav" aria-label="Main" className="md:hidden border-t border-slate-200 bg-white px-4 py-3">
+          <nav id="landing-mobile-nav" aria-label="Main" className="animate-slide-up border-t border-slate-200 bg-white px-4 py-3 md:hidden">
             <ul className="space-y-1">
               {NAV_SECTIONS.map(([id, label]) => (
                 <li key={id}>
-                  <a
-                    {...sectionLink(id)}
-                    className={`block px-3 py-2.5 rounded-xl text-sm font-semibold ${
-                      activeNav === id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
+                  <a {...sectionLink(id)} className="block rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
                     {label}
                   </a>
                 </li>
               ))}
               <li className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenAuth('register')}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl"
-                >
-                  Get Started
+                <button type="button" onClick={() => handleOpenAuth('register')} className="w-full rounded-pill bg-slate-900 px-4 py-2.5 text-sm font-medium text-white dark:bg-[#ededea] dark:text-[#141513]">
+                  Get started
                 </button>
               </li>
             </ul>
@@ -523,489 +601,223 @@ export default function LandingPage({
         )}
       </header>
 
-      {/* ------------------------------------------------------------- */}
-      {/* 2. HERO SECTION                                                */}
-      {/* ------------------------------------------------------------- */}
-      <section id="home" className="pt-16 pb-20 md:pt-24 md:pb-28 overflow-hidden relative">
-        <div className="absolute inset-0 -z-10 pointer-events-none">
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-indigo-200/40 blur-[130px] rounded-full" />
-          <div className="absolute top-1/3 left-1/4 w-[400px] h-[300px] bg-purple-200/30 blur-[100px] rounded-full" />
-        </div>
-
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-8">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold shadow-sm animate-fade-in">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
-            <span>Autonomous Agentic AI with Continuous Workspace Memory</span>
-          </div>
-
-          {/* Main Headline */}
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black text-slate-900 tracking-tight max-w-5xl mx-auto leading-[1.1]">
-            One Unified Operating System for{' '}
-            <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 bg-clip-text text-transparent">
-              High-Velocity Teams
-            </span>
-          </h1>
-
-          {/* Subtitle */}
-          <p className="text-base sm:text-xl text-slate-600 max-w-3xl mx-auto font-sans leading-relaxed">
-            Stop switching between Notion, Teams, Jira, and Zoom. NexaMind unifies
-            direct-write documents, channel chat with @username invitations, sprint Kanban tasks,
-            and HD video calls — orchestrated by an <strong>Agentic AI Copilot</strong> with 4-stage continuous memory.
-          </p>
-
-          {/* Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <button
-              onClick={() => handleOpenAuth('register')}
-              className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-8 py-3.5 rounded-2xl shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/50 hover:-translate-y-0.5 transition flex items-center justify-center gap-2"
-            >
-              <span>Launch Your Free Workspace</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-            <a
-              {...sectionLink('product')}
-              className="w-full sm:w-auto text-center bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm px-8 py-3.5 rounded-2xl border border-slate-300 shadow-sm transition hover:border-slate-400"
-            >
-              Explore Live Architecture
-            </a>
-          </div>
-
-          {/* Trust Metrics */}
-          <div className="pt-10 grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-4xl mx-auto text-left border-t border-slate-200/80">
-            <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">4-Stage</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">Continuous Memory Pipeline</div>
-            </div>
-            <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-indigo-600 font-mono">Gemini</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">Flash models, Groq fallback</div>
-            </div>
-            <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">1-Click</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">Group Join Codes & DMs</div>
-            </div>
-            <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono">Direct-Write</div>
-              <div className="text-xs text-slate-500 font-medium mt-0.5">WYSIWYG Markdown Docs</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------- */}
-      {/* 3. PRODUCT & CORE FEATURES SHOWCASE                            */}
-      {/* ------------------------------------------------------------- */}
-      <section id="product" className="py-20 bg-white border-y border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
-          <div className="text-center max-w-3xl mx-auto space-y-3">
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-              Product Suite
-            </span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-              Engineered for Complete Team Synergy
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base">
-              Every feature directly communicates with the central AI memory, giving your team superhuman leverage.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {/* Feature 1: Notion Direct-Write Docs */}
-            <div className="bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-3xl p-6 shadow-sm hover:shadow-md transition space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">
-                <FileText className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900">Direct-Write Docs</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Write directly in formatted view without dual-mode conversions. Markdown headings, live interactive checkboxes, callouts, and slash block commands work inline seamlessly.
-              </p>
-              <div className="pt-2 text-xs font-bold text-indigo-600 flex items-center gap-1">
-                <span>WYSIWYG Engine</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </div>
-            </div>
-
-            {/* Feature 2: High-Contrast Teams Chat & DMs */}
-            <div className="bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-3xl p-6 shadow-sm hover:shadow-md transition space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-violet-100 text-violet-600 flex items-center justify-center font-bold">
-                <MessageSquare className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900">Teams Chat & @User DMs</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                High-contrast readable typography, rich threaded discussions, emoji reactions, and direct messaging with any teammate invited by their unique @username.
-              </p>
-              <div className="pt-2 text-xs font-bold text-violet-600 flex items-center gap-1">
-                <span>Instant WebSockets</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </div>
-            </div>
-
-            {/* Feature 3: Sprint Kanban with Status Routing */}
-            <div className="bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-3xl p-6 shadow-sm hover:shadow-md transition space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center font-bold">
-                <FolderKanban className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900">Sprint Kanban Tasks</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Create tasks directly into To Do, In Progress, or Done columns. Priority badges, subtasks, assignment, and autonomous agent task management.
-              </p>
-              <div className="pt-2 text-xs font-bold text-amber-600 flex items-center gap-1">
-                <span>Direct Status Select</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </div>
-            </div>
-
-            {/* Feature 4: HD Video Meetings with AI MoM */}
-            <div className="bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-3xl p-6 shadow-sm hover:shadow-md transition space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center font-bold">
-                <Video className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900">HD Video Meetings</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Launch instant video syncs with real-time audio speech-to-text and automated Minutes of the Meeting (MoM) synthesis with zero fake placeholders.
-              </p>
-              <div className="pt-2 text-xs font-bold text-rose-600 flex items-center gap-1">
-                <span>Automated Minutes</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------- */}
-      {/* 4. AI MEMORY WORKFLOW: INGESTION -> EXTRACTION -> ...          */}
-      {/* ------------------------------------------------------------- */}
-      <section id="memory" className="py-20 bg-slate-900 text-white relative overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
-          <div className="text-center max-w-3xl mx-auto space-y-3">
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400 bg-indigo-950/80 px-3 py-1 rounded-full border border-indigo-800">
-              Agentic Intelligence Architecture
-            </span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-              4-Stage Continuous Memory Engine
-            </h2>
-            <p className="text-slate-400 text-sm sm:text-base">
-              The Agentic AI doesn't just chat — it constantly ingests, extracts, consolidates, and stores workspace context to take autonomous action.
-            </p>
-          </div>
-
-          {/* Workflow Diagram */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 relative">
-            {/* Step 1: Ingestion */}
-            <div className="bg-slate-800/80 border border-slate-700 p-6 rounded-2xl space-y-3 relative group hover:border-indigo-500 transition">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold font-mono text-sm">
-                01
-              </div>
-              <h4 className="font-bold text-base text-white flex items-center gap-2">
-                <Database className="w-4 h-4 text-indigo-400" /> Ingestion
-              </h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Watches and listens to raw content across <strong>Documents</strong>, <strong>Chat Threads</strong>, <strong>Sprint Tasks</strong>, and <strong>Video Calls</strong>.
-              </p>
-            </div>
-
-            {/* Step 2: Extraction */}
-            <div className="bg-slate-800/80 border border-slate-700 p-6 rounded-2xl space-y-3 relative group hover:border-violet-500 transition">
-              <div className="w-10 h-10 rounded-xl bg-violet-500/20 text-violet-400 flex items-center justify-center font-bold font-mono text-sm">
-                02
-              </div>
-              <h4 className="font-bold text-base text-white flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-violet-400" /> Extraction
-              </h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Uses Google Gemini AI to distill concrete <strong>facts</strong>, approved <strong>decisions</strong>, assigned <strong>action items</strong>, and concepts.
-              </p>
-            </div>
-
-            {/* Step 3: Consolidation */}
-            <div className="bg-slate-800/80 border border-slate-700 p-6 rounded-2xl space-y-3 relative group hover:border-amber-500 transition">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold font-mono text-sm">
-                03
-              </div>
-              <h4 className="font-bold text-base text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-amber-400" /> Consolidation
-              </h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Deduplicates new items against existing knowledge nodes, links references, and computes importance weights (0.1 - 1.0).
-              </p>
-            </div>
-
-            {/* Step 4: Storage & Agentic AI */}
-            <div className="bg-slate-800/80 border border-slate-700 p-6 rounded-2xl space-y-3 relative group hover:border-emerald-500 transition">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold font-mono text-sm">
-                04
-              </div>
-              <h4 className="font-bold text-base text-white flex items-center gap-2">
-                <Brain className="w-4 h-4 text-emerald-400" /> Storage & Agent
-              </h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Persisted in <code>ai_memories</code>. Injected into Agentic AI sessions so the Copilot can recall anything, reason, and take action.
-              </p>
-            </div>
-          </div>
-
-          {/* Interactive Agentic Prompt Box Demo */}
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-4xl mx-auto shadow-2xl space-y-4 font-mono text-xs text-slate-300">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-indigo-400 font-bold">
-                <Bot className="w-4 h-4" />
-                <span>NexaMind Agentic Copilot Session</span>
-              </div>
-              <span className="text-xs text-emerald-400 bg-emerald-950 px-2.5 py-0.5 rounded-full border border-emerald-800">
-                ● Memory Active
-              </span>
-            </div>
-
-            <div className="space-y-3 text-slate-400">
-              <p className="text-indigo-300">
-                &gt; user: "Create an urgent task to implement Gemini streaming with status in_progress and assign to @alex"
-              </p>
-              <p className="text-slate-300 pl-4 border-l-2 border-indigo-500 leading-relaxed">
-                ⚡ Agent: I retrieved relevant context from your <strong>Architecture RFC Document</strong> and <strong>Sprint 42 Meeting Minutes</strong>.<br />
-                ✅ Executed <code>create_task(title='Implement Gemini streaming', status='in_progress', priority='urgent')</code>.<br />
-                ✅ Extracted and stored new memory item into <code>ai_memories</code>.<br />
-                Task is live on your Kanban board and notified to @alex!
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------- */}
-      {/* 5. ABOUT US SECTION                                            */}
-      {/* ------------------------------------------------------------- */}
-      <section id="about" className="py-20 bg-slate-50 border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          <div className="text-center max-w-3xl mx-auto space-y-3">
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-              About Us
-            </span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-              Built for Modern Software Builders
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base leading-relaxed">
-              We started NexaMind with a singular goal: eliminate context switching and bring autonomous agentic intelligence into daily engineering workflows.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-slate-900">Privacy & Isolation</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Workspaces are strictly isolated. Your team's docs, audio transcripts, and code never leave your protected boundaries.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center font-bold">
-                <Zap className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-slate-900">Zero Latency Sync</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Powered by FastAPI asynchronous architecture, WebSockets live state broadcasting, and instant local-first state caching.
-              </p>
-            </div>
-
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-                <Brain className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-slate-900">Continuous AI Memory</h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Unlike generic LLMs that forget after every chat, NexaMind holds past session threads and episodic memory across weeks of work.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------- */}
-      {/* 6. CONTACT US SECTION                                          */}
-      {/* ------------------------------------------------------------- */}
-      <section id="contact" className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start">
-            {/* Left Description */}
-            <div className="space-y-6">
-              <div>
-                <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-                  Get In Touch
-                </span>
-                <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-3">
-                  We'd Love to Hear From You
-                </h2>
-                <p className="text-slate-600 text-sm mt-2 leading-relaxed">
-                  Have questions about NexaMind, feature requests, or enterprise deployment? Our engineering team is here to assist.
+      <main>
+        {/* 2. HERO: the product itself is the picture. */}
+        <section id="home" className="scroll-mt-16 pt-16 md:pt-24">
+          <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
+            <div className="grid items-end gap-8 lg:grid-cols-12">
+              <h1 className="animate-rise font-serif text-[3.25rem] leading-[0.98] tracking-[-0.02em] text-slate-900 sm:text-7xl lg:col-span-8 lg:text-[5.5rem]">
+                Docs, chat, meetings and code. <span className="text-slate-500">One calm place.</span>
+              </h1>
+              <div className="animate-rise lg:col-span-4 lg:pb-3" style={{ animationDelay: '90ms' }}>
+                <p className="text-base leading-relaxed text-slate-600 sm:text-lg">
+                  NexaMind is the workspace for small teams: pages, channels, video meetings with minutes, a calendar, a sprint board
+                  and real Git, with a Copilot that knows what your team decided.
                 </p>
-              </div>
-
-              <div className="space-y-4 pt-4 text-xs text-slate-600">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                    <Mail className="w-4 h-4" />
-                  </div>
-                  <span>support@nexamind.app</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
-                    <Globe className="w-4 h-4" />
-                  </div>
-                  <span>github.com/nexamind/nexamind</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Contact Form */}
-            <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm">
-              {contactStatus === 'sent' ? (
-                <div className="text-center py-12 space-y-3" role="status">
-                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-900">Message sent</h3>
-                  <p className="text-sm text-slate-600">
-                    Thanks for getting in touch. We've received your message and will reply by email.
-                  </p>
+                <div className="mt-6 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setContactStatus('idle')}
-                    className="text-sm font-semibold text-indigo-600 hover:underline"
+                    onClick={() => handleOpenAuth('register')}
+                    className="inline-flex items-center gap-2 rounded-pill bg-slate-900 px-6 py-3 text-sm font-medium text-white transition-colors duration-fast hover:bg-slate-700 dark:bg-[#ededea] dark:text-[#141513] dark:hover:bg-[#ffffff] press"
                   >
+                    Create your workspace <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <a {...sectionLink('product')} className="rounded-pill px-4 py-3 text-sm font-medium text-slate-700 transition-colors duration-fast hover:text-slate-900">
+                    See the product
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <figure className="mt-14 md:mt-20 [perspective:1800px]">
+              <div className="preview-settle overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-panel md:rounded-3xl">
+                {shot('NexaMind home for the Orbit Labs workspace: a greeting with today’s next meeting, open tasks, docs, channels and the day’s schedule', 'group', { eager: true })}
+              </div>
+              <figcaption className="mt-3 text-center text-xs text-slate-500">The real app, shown with demonstration data.</figcaption>
+            </figure>
+          </div>
+        </section>
+
+        {/* 3. PRODUCT: one row per tool, each with its real screen. */}
+        <section id="product" className="scroll-mt-16 py-24 md:py-32">
+          <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
+            <h2 data-reveal className="max-w-3xl font-serif text-4xl leading-[1.05] tracking-[-0.01em] text-slate-900 sm:text-6xl">
+              Stop switching between five apps.
+            </h2>
+            <p data-reveal className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
+              Every tool is a real one, and they share one workspace: a decision made in a meeting becomes a task, and a page can be
+              found again from chat.
+            </p>
+
+            <div className="mt-20 space-y-24 md:space-y-32">
+              {FEATURES.map((f, i) => (
+                <div key={f.title} className="grid items-center gap-10 lg:grid-cols-12">
+                  <div data-reveal className={`lg:col-span-4 ${i % 2 ? 'lg:order-2 lg:col-start-9' : ''}`}>
+                    <h3 className="text-2xl font-semibold tracking-[-0.01em] text-slate-900">{f.title}</h3>
+                    <p className="mt-3 leading-relaxed text-slate-600">{f.body}</p>
+                    <ul className="mt-5 space-y-2">
+                      {f.facts.map((fact) => (
+                        <li key={fact} className="flex items-start gap-2.5 text-sm text-slate-700">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" aria-hidden="true" />
+                          {fact}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div data-reveal className={`lg:col-span-8 ${i % 2 ? 'lg:order-1 lg:col-start-1' : ''}`}>
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                      <img src={f.image} alt={f.alt} width={f.size[0]} height={f.size[1]} loading="lazy" decoding="async" className="block h-auto w-full" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* 4. SOLO & GROUP: try the switch; the page changes room the way the app does. */}
+        <section id="workspaces" className="scroll-mt-16 bg-slate-50 py-24 transition-colors duration-panel md:py-32">
+          <div className="mx-auto grid max-w-[1200px] items-center gap-12 px-4 sm:px-6 lg:grid-cols-12">
+            <div data-reveal className="lg:col-span-4">
+              <h2 className="font-serif text-4xl leading-[1.05] tracking-[-0.01em] text-slate-900 sm:text-5xl">
+                Focus alone. Build together.
+              </h2>
+              <p className="mt-5 leading-relaxed text-slate-600">
+                {demoRoom === 'solo'
+                  ? 'Your Solo workspace is yours: your pages, tasks, calendar and direct messages, in deep teal.'
+                  : 'A Group workspace is the team’s: channels, meetings with minutes, the sprint board and repositories, in plum.'}
+              </p>
+              <WorkspaceSwitch isSolo={demoRoom === 'solo'} onChange={switchDemo} className="mt-7 w-64" />
+              <p className="mt-3 text-xs text-slate-500">Try it: this is the switch from the app.</p>
+            </div>
+            <div data-reveal className="lg:col-span-8">
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-panel">
+                {shot(demoRoom === 'solo' ? 'A Solo workspace home: personal tasks, docs and a 1:1 today' : 'A Group workspace home: sprint tasks, channels and the team’s schedule', demoRoom)}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 5. COPILOT */}
+        <section id="memory" className="scroll-mt-16 py-24 md:py-32">
+          <div className="mx-auto max-w-[1200px] px-4 sm:px-6">
+            <h2 data-reveal className="max-w-3xl font-serif text-4xl leading-[1.05] tracking-[-0.01em] text-slate-900 sm:text-6xl">
+              A Copilot that answers from your workspace.
+            </h2>
+            <figure data-reveal className="mt-14 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-panel">
+              <img
+                src="/landing/feature-copilot.jpg"
+                alt="Copilot creating the high-priority task Draft the beta FAQ on request, with a link to the board"
+                width="1440"
+                height="500"
+                loading="lazy"
+                decoding="async"
+                className="block h-auto w-full"
+              />
+            </figure>
+            <ol className="mt-14 grid gap-10 border-t border-slate-200 pt-10 md:grid-cols-3">
+              {STEPS.map((step, i) => (
+                <li key={step.title} data-reveal style={{ transitionDelay: `${i * 80}ms` }}>
+                  <h3 className="text-lg font-semibold text-slate-900">{step.title}</h3>
+                  <p className="mt-2 leading-relaxed text-slate-600">{step.body}</p>
+                </li>
+              ))}
+            </ol>
+            <p data-reveal className="mt-12 text-sm text-slate-500">
+              Runs on Gemini with a Groq fallback. Bring your own Gemini key; it is stored encrypted on the server, never in the browser.
+            </p>
+          </div>
+        </section>
+
+        {/* 6. CONTACT */}
+        <section id="contact" className="scroll-mt-16 border-t border-slate-200 py-24 md:py-32">
+          <div className="mx-auto grid max-w-[1200px] items-start gap-12 px-4 sm:px-6 lg:grid-cols-12">
+            <div data-reveal className="lg:col-span-5">
+              <h2 className="font-serif text-4xl leading-[1.05] tracking-[-0.01em] text-slate-900 sm:text-5xl">Talk to us.</h2>
+              <p className="mt-4 leading-relaxed text-slate-600">Questions, feature requests or help with deployment. We reply by email.</p>
+              <p className="mt-6 flex items-center gap-2.5 text-sm text-slate-700">
+                <Mail className="h-4 w-4 text-indigo-600" aria-hidden="true" /> support@nexamind.app
+              </p>
+            </div>
+            <div data-reveal className="rounded-2xl bg-slate-50 p-6 sm:p-8 lg:col-span-7">
+              {contactStatus === 'sent' ? (
+                <div className="space-y-3 py-12 text-center" role="status">
+                  <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-700" aria-hidden="true" />
+                  <h3 className="text-lg font-semibold text-slate-900">Message sent</h3>
+                  <p className="text-sm text-slate-600">Thanks for getting in touch. We’ll reply by email.</p>
+                  <button type="button" onClick={() => setContactStatus('idle')} className="text-sm font-medium text-indigo-700 hover:underline">
                     Send another message
                   </button>
                 </div>
               ) : (
                 <form onSubmit={handleContactSubmit} className="space-y-4" noValidate>
                   {contactError && (
-                    <div id="contact-error" role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl">
+                    <div id="contact-error" role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                       {contactError}
                     </div>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-1">
-                      <label htmlFor="contact-name" className="text-xs font-bold text-slate-700">Your Name</label>
-                      <input
-                        id="contact-name"
-                        type="text"
-                        required
-                        autoComplete="name"
-                        maxLength={255}
-                        placeholder="Alex Mitchell"
-                        className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
-                        value={contactForm.name}
-                        onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
-                      />
+                      <label htmlFor="contact-name" className="text-sm font-medium text-slate-700">Your name</label>
+                      <input id="contact-name" name="name" type="text" required autoComplete="name" maxLength={255} placeholder="Alex Mitchell" className="input-base py-2.5 text-sm" value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} />
                     </div>
                     <div className="space-y-1">
-                      <label htmlFor="contact-email" className="text-xs font-bold text-slate-700">Email Address</label>
-                      <input
-                        id="contact-email"
-                        type="email"
-                        required
-                        autoComplete="email"
-                        maxLength={255}
-                        placeholder="alex@company.com"
-                        className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
-                        value={contactForm.email}
-                        onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
-                      />
+                      <label htmlFor="contact-email" className="text-sm font-medium text-slate-700">Email address</label>
+                      <input id="contact-email" name="email" type="email" required autoComplete="email" spellCheck={false} maxLength={255} placeholder="alex@company.com" className="input-base py-2.5 text-sm" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} />
                     </div>
                   </div>
-
                   <div className="space-y-1">
-                    <label htmlFor="contact-subject" className="text-xs font-bold text-slate-700">Subject (optional)</label>
-                    <input
-                      id="contact-subject"
-                      type="text"
-                      maxLength={255}
-                      placeholder="Product question or feedback"
-                      className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition"
-                      value={contactForm.subject}
-                      onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })}
-                    />
+                    <label htmlFor="contact-subject" className="text-sm font-medium text-slate-700">Subject (optional)</label>
+                    <input id="contact-subject" name="subject" type="text" maxLength={255} placeholder="Product question or feedback" className="input-base py-2.5 text-sm" value={contactForm.subject} onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })} />
                   </div>
-
                   <div className="space-y-1">
-                    <label htmlFor="contact-message" className="text-xs font-bold text-slate-700">Message</label>
-                    <textarea
-                      id="contact-message"
-                      required
-                      rows={4}
-                      maxLength={5000}
-                      placeholder="Tell us what you'd like to achieve with NexaMind..."
-                      className="w-full bg-white border border-slate-300 focus:border-indigo-600 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition resize-none"
-                      value={contactForm.message}
-                      onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
-                    />
+                    <label htmlFor="contact-message" className="text-sm font-medium text-slate-700">Message</label>
+                    <textarea id="contact-message" name="message" required rows={4} maxLength={5000} placeholder="Tell us what you’d like to do with NexaMind…" className="input-base resize-none py-2.5 text-sm" value={contactForm.message} onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })} />
                   </div>
-
                   {/* Honeypot: invisible to people and assistive tech, often filled in by bots. */}
                   <div className="hidden" aria-hidden="true">
                     <label htmlFor="contact-website">Website</label>
-                    <input
-                      id="contact-website"
-                      type="text"
-                      tabIndex={-1}
-                      autoComplete="off"
-                      value={contactForm.website}
-                      onChange={(e) => setContactForm({ ...contactForm, website: e.target.value })}
-                    />
+                    <input id="contact-website" type="text" tabIndex={-1} autoComplete="off" value={contactForm.website} onChange={(e) => setContactForm({ ...contactForm, website: e.target.value })} />
                   </div>
-
-                  <button
-                    type="submit"
-                    disabled={contactStatus === 'sending'}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-sm py-3 rounded-xl shadow-md transition flex items-center justify-center gap-2"
-                  >
-                    {contactStatus === 'sending' ? (
-                      <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Send className="w-3.5 h-3.5" aria-hidden="true" />
-                    )}
-                    <span>{contactStatus === 'sending' ? 'Sending…' : 'Send Message'}</span>
+                  <button type="submit" disabled={contactStatus === 'sending'} className="inline-flex w-full items-center justify-center gap-2 rounded-pill bg-slate-900 py-3 text-sm font-medium text-white transition-colors duration-fast hover:bg-slate-700 dark:bg-[#ededea] dark:text-[#141513] dark:hover:bg-[#ffffff] disabled:opacity-60 press">
+                    {contactStatus === 'sending' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Send className="h-3.5 w-3.5" aria-hidden="true" />}
+                    <span>{contactStatus === 'sending' ? 'Sending…' : 'Send message'}</span>
                   </button>
                 </form>
               )}
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ------------------------------------------------------------- */}
-      {/* 7. FOOTER                                                      */}
-      {/* ------------------------------------------------------------- */}
-      <footer className="bg-slate-900 text-slate-400 py-12 border-t border-slate-800 text-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo-white.png"
-              alt="NexaMind"
-              className="h-6 w-auto object-contain opacity-90"
-            />
-            <span className="text-slate-400 text-xs">— The Agentic AI Workspace</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <a {...sectionLink('home')} className="hover:text-white transition">
-              Home
-            </a>
-            <a {...sectionLink('product')} className="hover:text-white transition">
-              Features
-            </a>
-            <a {...sectionLink('about')} className="hover:text-white transition">
-              About
-            </a>
-            <a {...sectionLink('contact')} className="hover:text-white transition">
-              Contact
-            </a>
-            <button onClick={() => handleOpenAuth('login')} className="hover:text-indigo-400 transition font-bold">
-              Sign In
+        {/* Closing call to action */}
+        <section className="px-4 pb-24 sm:px-6">
+          <div data-reveal className="mx-auto max-w-[1200px] rounded-3xl bg-indigo-600 px-6 py-16 text-center transition-colors duration-panel sm:px-12">
+            <h2 className="font-serif text-4xl leading-[1.05] text-white sm:text-6xl">Bring your team’s work together.</h2>
+            <p className="mx-auto mt-4 max-w-md text-indigo-50">Start with your own Solo workspace in a minute, then invite the team with a code.</p>
+            <button
+              type="button"
+              onClick={() => handleOpenAuth('register')}
+              className="mt-8 inline-flex items-center gap-2 rounded-pill bg-[#ffffff] px-6 py-3 text-sm font-medium text-[#1f201d] transition-colors duration-fast hover:bg-[#f2f2f0] press"
+            >
+              Create your workspace <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
+        </section>
+      </main>
+
+      {/* 7. FOOTER */}
+      <footer className="border-t border-slate-200">
+        <div className="mx-auto flex max-w-[1200px] flex-col gap-6 px-4 py-10 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex items-center gap-4">
+            <Logo alt="NexaMind" className="h-6" />
+            <span className="text-slate-500">© {new Date().getFullYear()} NexaMind</span>
+          </div>
+          <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2">
+            {NAV_SECTIONS.slice(1).map(([id, label]) => (
+              <a key={id} {...sectionLink(id)} className="text-slate-600 hover:text-slate-900">{label}</a>
+            ))}
+            <button type="button" onClick={() => handleOpenAuth('login')} className="text-slate-600 hover:text-slate-900">Sign in</button>
+          </nav>
         </div>
       </footer>
 
@@ -1014,7 +826,7 @@ export default function LandingPage({
       {/* ------------------------------------------------------------- */}
       {showAuthModal && (
         <div
-          className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          className="fixed inset-0 bg-slate-950/50 z-50 flex items-center justify-center p-4 animate-fade-in"
           onClick={closeAuthModal}
         >
           <div
@@ -1025,7 +837,7 @@ export default function LandingPage({
             aria-describedby="auth-dialog-desc"
             tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative space-y-5 max-h-[90vh] overflow-y-auto outline-none"
+            className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-panel relative space-y-5 max-h-[90vh] overflow-y-auto outline-none animate-scale-in"
           >
             <button
               type="button"
@@ -1041,7 +853,7 @@ export default function LandingPage({
               <div className="flex items-center justify-center mx-auto mb-1">
                 <img src="/logo-mark.png" alt="" className="h-11 w-auto object-contain" />
               </div>
-              <h2 id="auth-dialog-title" className="text-xl font-extrabold text-slate-900 tracking-tight">
+              <h2 id="auth-dialog-title" className="font-serif text-3xl text-slate-900">
                 {authMode === 'login'
                   ? 'Sign In to NexaMind'
                   : authMode === 'forgot'
@@ -1083,13 +895,13 @@ export default function LandingPage({
                         <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                       </svg>
                     )}
-                    <span>{googleLoading ? 'Signing in with Google...' : 'Continue with Google'}</span>
+                    <span>{googleLoading ? 'Signing in with Google…' : 'Continue with Google'}</span>
                   </button>
                 </div>
 
                 <div className="flex items-center gap-3 pt-1">
                   <div className="h-px bg-slate-200 flex-1" />
-                  <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">or with email</span>
+                  <span className="text-xs text-slate-500 font-medium">or with email</span>
                   <div className="h-px bg-slate-200 flex-1" />
                 </div>
               </div>
@@ -1103,7 +915,7 @@ export default function LandingPage({
 
             {errorText && (
               <div id="auth-error" role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl font-medium flex items-start gap-2">
-                <span className="text-rose-600 font-bold flex-shrink-0" aria-hidden="true">⚠</span>
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-700" aria-hidden="true" />
                 <span>{errorText}</span>
               </div>
             )}
@@ -1178,7 +990,7 @@ export default function LandingPage({
                   <button
                     type="submit"
                     disabled={localLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2"
+                    className="w-full bg-slate-900 hover:bg-slate-700 dark:bg-[#ededea] dark:text-[#141513] disabled:opacity-50 text-white font-medium text-sm py-3 rounded-pill transition-colors flex items-center justify-center gap-2 press"
                   >
                     {localLoading && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                     <span>{resetStep === 'email' ? 'Send reset code' : 'Set new password'}</span>
@@ -1245,12 +1057,12 @@ export default function LandingPage({
                   <button
                     type="submit"
                     disabled={localLoading || propAuthLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer mt-2"
+                    className="w-full bg-slate-900 hover:bg-slate-700 dark:bg-[#ededea] dark:text-[#141513] disabled:opacity-50 text-white font-medium text-sm py-3 rounded-pill transition-colors flex items-center justify-center gap-2 press"
                   >
                     {localLoading || propAuthLoading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                        <span>Verifying & Setting Up Workspace...</span>
+                        <span>Verifying & Setting Up Workspace…</span>
                       </>
                     ) : (
                       <>
@@ -1356,12 +1168,12 @@ export default function LandingPage({
                   <button
                     type="submit"
                     disabled={localLoading || propAuthLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2 cursor-pointer"
+                    className="w-full bg-slate-900 hover:bg-slate-700 dark:bg-[#ededea] dark:text-[#141513] disabled:opacity-50 text-white font-medium text-sm py-3 rounded-pill transition-colors flex items-center justify-center gap-2 press"
                   >
                     {localLoading || propAuthLoading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                        <span>{authMode === 'register' ? 'Sending Code...' : 'Signing In...'}</span>
+                        <span>{authMode === 'register' ? 'Sending Code…' : 'Signing In…'}</span>
                       </>
                     ) : authMode === 'login' ? (
                       <span>Sign In to Workspace</span>

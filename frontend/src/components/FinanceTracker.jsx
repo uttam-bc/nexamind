@@ -133,7 +133,7 @@ export default function FinanceTracker({
       <FeatureHeader
         title="Financial Ledger & Runway"
         icon={DollarSign}
-        badge="Workspace Finance"
+        badge={null}
         onBack={onBack}
         actions={
           <div className="flex items-center gap-2">
@@ -158,82 +158,82 @@ export default function FinanceTracker({
       {/* 4 Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Cash Balance */}
-        <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm space-y-2">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase font-bold text-slate-500 tracking-wider">
+            <span className="text-xs tabular-nums font-bold text-slate-500">
               Cash Balance
             </span>
-            <div className="w-8 h-8 rounded-lg bg-indigo-50 text-[#4F46E5] border border-indigo-100 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold text-[#191C1E] tracking-tight">
+          <div className="text-2xl font-bold text-slate-900 tracking-tight">
             {formatMoney(cashBalance)}
           </div>
-          <p className="text-xs font-mono text-[#10B981] font-semibold">Available Liquidity</p>
+          <p className="text-xs tabular-nums text-emerald-500 font-semibold">Available Liquidity</p>
         </div>
 
         {/* Total Income */}
-        <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm space-y-2">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase font-bold text-slate-500 tracking-wider">
+            <span className="text-xs tabular-nums font-bold text-slate-500">
               Total Inflow
             </span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-[#10B981] border border-emerald-100 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 border border-emerald-100 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold text-[#10B981] tracking-tight">
+          <div className="text-2xl font-bold text-emerald-500 tracking-tight">
             {formatMoney(totalIncome, { sign: '+' })}
           </div>
-          <p className="text-xs font-mono text-slate-500">Revenue & Grants</p>
+          <p className="text-xs tabular-nums text-slate-500">Revenue & Grants</p>
         </div>
 
         {/* Total Expenses */}
-        <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm space-y-2">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase font-bold text-slate-500 tracking-wider">
+            <span className="text-xs tabular-nums font-bold text-slate-500">
               Total Outflow
             </span>
-            <div className="w-8 h-8 rounded-lg bg-rose-50 text-[#F43F5E] border border-rose-100 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-500 border border-rose-100 flex items-center justify-center">
               <TrendingDown className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold text-[#F43F5E] tracking-tight">
+          <div className="text-2xl font-bold text-rose-500 tracking-tight">
             {typeof totalExpenses === 'number' ? formatMoney(-totalExpenses) : '—'}
           </div>
-          <p className="text-xs font-mono text-slate-500">Operational & Cloud Burn</p>
+          <p className="text-xs tabular-nums text-slate-500">Operational & Cloud Burn</p>
         </div>
 
         {/* Runway Months */}
-        <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm space-y-2">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase font-bold text-slate-500 tracking-wider">
+            <span className="text-xs tabular-nums font-bold text-slate-500">
               Runway Forecast
             </span>
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-[#8B5CF6] border border-purple-100 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-purple-50 text-violet-500 border border-purple-100 flex items-center justify-center">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-bold text-[#8B5CF6] tracking-tight">
+          <div className="text-2xl font-bold text-violet-500 tracking-tight">
             {runwayLabel}
           </div>
-          <p className="text-xs font-mono text-slate-500 font-semibold">
+          <p className="text-xs tabular-nums text-slate-500 font-semibold">
             {financeSummary ? `Net burn ${formatMoney(Number(financeSummary.net_burn_rate || 0))}/mo (90-day avg)` : 'No figures loaded yet'}
           </p>
         </div>
       </div>
 
       {/* Ledger Table Section */}
-      <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-6 space-y-4 flex-1 flex flex-col">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4 flex-1 flex flex-col">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setFilterType('all')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 filterType === 'all'
-                  ? 'bg-[#4F46E5] text-white shadow-sm'
-                  : 'bg-[#F2F4F6] text-slate-600 hover:bg-[#ECEEF0]'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-100'
               }`}
             >
               All Transactions
@@ -242,8 +242,8 @@ export default function FinanceTracker({
               onClick={() => setFilterType('income')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 filterType === 'income'
-                  ? 'bg-[#10B981] text-white shadow-sm'
-                  : 'bg-[#F2F4F6] text-slate-600 hover:bg-[#ECEEF0]'
+                  ? 'bg-emerald-500 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-100'
               }`}
             >
               Inflow (+)
@@ -252,8 +252,8 @@ export default function FinanceTracker({
               onClick={() => setFilterType('expense')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 filterType === 'expense'
-                  ? 'bg-[#F43F5E] text-white shadow-sm'
-                  : 'bg-[#F2F4F6] text-slate-600 hover:bg-[#ECEEF0]'
+                  ? 'bg-rose-500 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-100'
               }`}
             >
               Outflow (-)
@@ -262,8 +262,8 @@ export default function FinanceTracker({
 
           <input aria-label="Filter category or date"
             type="text"
-            placeholder="Filter category or date..."
-            className="bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-1.5 text-xs text-[#191C1E] focus:outline-none transition w-56 font-mono"
+            placeholder="Filter category or date…"
+            className="bg-slate-100 border border-slate-200 focus:border-indigo-600 rounded-xl px-3.5 py-1.5 text-xs text-slate-900 focus:outline-none transition w-56 tabular-nums"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -273,7 +273,7 @@ export default function FinanceTracker({
         <div className="flex-1 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="border-b border-[#E2E8F0] text-slate-500 font-mono text-xs bg-[#F8FAFC]">
+              <tr className="border-b border-slate-200 text-slate-500 tabular-nums text-xs bg-slate-50">
                 <th className="py-3 px-4">TYPE</th>
                 <th className="py-3 px-4">CATEGORY</th>
                 <th className="py-3 px-4">DATE</th>
@@ -281,7 +281,7 @@ export default function FinanceTracker({
                 <th className="py-3 px-4 text-right w-16"> </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#E2E8F0] text-[#191C1E]">
+            <tbody className="divide-y divide-slate-200 text-slate-900">
               {filteredTransactions.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
@@ -290,13 +290,13 @@ export default function FinanceTracker({
                 </tr>
               ) : (
                 filteredTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-[#F8FAFC] transition group">
+                  <tr key={tx.id} className="hover:bg-slate-50 transition group">
                     <td className="py-3 px-4">
                       <span
-                        className={`text-xs font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                        className={`text-xs tabular-nums font-bold px-2 py-0.5 rounded ${
                           tx.type === 'income'
-                            ? 'bg-emerald-50 text-[#10B981] border border-emerald-200'
-                            : 'bg-rose-50 text-[#F43F5E] border border-rose-200'
+                            ? 'bg-emerald-50 text-emerald-500 border border-emerald-200'
+                            : 'bg-rose-50 text-rose-500 border border-rose-200'
                         }`}
                       >
                         {tx.type}
@@ -306,10 +306,10 @@ export default function FinanceTracker({
                       {tx.category}
                       {tx.description && <div className="text-xs font-normal text-slate-500">{tx.description}</div>}
                     </td>
-                    <td className="py-3 px-4 font-mono text-slate-500">{String(tx.date || '').slice(0, 10)}</td>
+                    <td className="py-3 px-4 tabular-nums text-slate-500">{String(tx.date || '').slice(0, 10)}</td>
                     <td
-                      className={`py-3 px-4 text-right font-bold font-mono ${
-                        tx.type === 'income' ? 'text-[#10B981]' : 'text-[#F43F5E]'
+                      className={`py-3 px-4 text-right font-bold tabular-nums ${
+                        tx.type === 'income' ? 'text-emerald-500' : 'text-rose-500'
                       }`}
                     >
                       {tx.type === 'income' ? '+' : '-'}$
@@ -337,16 +337,16 @@ export default function FinanceTracker({
       {/* Log Transaction Modal */}
       {showLogModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div data-modal className="bg-white p-6 rounded-2xl border border-[#E2E8F0] max-w-sm w-full space-y-4 shadow-2xl">
-            <h3 className="text-base font-bold text-[#191C1E]">Log Financial Transaction</h3>
+          <div data-modal className="bg-white p-6 rounded-2xl border border-slate-200 max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-slate-900">Log Financial Transaction</h3>
             <form onSubmit={handleLogTransaction} className="space-y-3">
-              <div className="flex gap-2 p-1 bg-[#F2F4F6] rounded-xl border border-[#E2E8F0]">
+              <div className="flex gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
                 <button
                   type="button"
                   onClick={() => setTxType('expense')}
                   className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
                     txType === 'expense'
-                      ? 'bg-white text-[#F43F5E] shadow-sm'
+                      ? 'bg-white text-rose-500 shadow-sm'
                       : 'text-slate-500'
                   }`}
                 >
@@ -357,7 +357,7 @@ export default function FinanceTracker({
                   onClick={() => setTxType('income')}
                   className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
                     txType === 'income'
-                      ? 'bg-white text-[#10B981] shadow-sm'
+                      ? 'bg-white text-emerald-500 shadow-sm'
                       : 'text-slate-500'
                   }`}
                 >
@@ -372,7 +372,7 @@ export default function FinanceTracker({
                   step="0.01"
                   required
                   placeholder="e.g. 2500"
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
+                  className="w-full bg-slate-100 border border-slate-200 focus:border-indigo-600 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none"
                   value={txAmount}
                   onChange={(e) => setTxAmount(e.target.value)}
                 />
@@ -384,7 +384,7 @@ export default function FinanceTracker({
                   type="text"
                   required
                   placeholder="e.g. Cloud Infrastructure, Payroll, Grant"
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] focus:border-[#4F46E5] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
+                  className="w-full bg-slate-100 border border-slate-200 focus:border-indigo-600 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none"
                   value={txCategory}
                   onChange={(e) => setTxCategory(e.target.value)}
                 />
@@ -395,7 +395,7 @@ export default function FinanceTracker({
                 <input id="finance-tracker-field-3"
                   type="date"
                   required
-                  className="w-full bg-[#F2F4F6] border border-[#E2E8F0] rounded-xl px-3.5 py-2 text-xs text-[#191C1E] focus:outline-none"
+                  className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none"
                   value={txDate}
                   onChange={(e) => setTxDate(e.target.value)}
                 />
@@ -411,7 +411,7 @@ export default function FinanceTracker({
                 </button>
                 <button
                   type="submit"
-                  className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-sm"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-sm"
                 >
                   Save Entry
                 </button>

@@ -249,10 +249,10 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
 
   const live = meetings.filter((m) => m.status === 'live');
   const upcoming = meetings.filter((m) => m.status === 'scheduled');
-  const card = 'bg-white border border-[#E2E8F0] rounded-2xl shadow-sm';
+  const card = 'bg-white border border-slate-200 rounded-2xl shadow-sm';
 
   return (
-    <div className="h-full w-full text-[#191C1E]">
+    <div className="h-full w-full text-slate-900">
       <div className="space-y-6 max-w-6xl mx-auto py-2">
         <FeatureHeader
           title="Meetings"
@@ -319,7 +319,7 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
                 onChange={(e) => setInstantTitle(e.target.value)}
                 maxLength={255}
                 placeholder="Title (optional)"
-                className="flex-1 min-w-0 bg-[#F2F4F6] border border-[#E2E8F0] focus:border-indigo-500 rounded-xl px-3 py-2 text-sm focus:outline-none"
+                className="flex-1 min-w-0 bg-slate-100 border border-slate-200 focus:border-indigo-500 rounded-xl px-3 py-2 text-sm focus:outline-none"
               />
               <button type="button" onClick={startInstant} disabled={starting} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-50">
                 {starting ? 'Starting…' : 'Start'}
@@ -347,7 +347,7 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
           <h2 className="text-base font-bold flex items-center gap-2">
             <CalendarClock className="w-4 h-4 text-indigo-600" /> Upcoming
           </h2>
-          <div className={`${card} divide-y divide-[#E2E8F0] overflow-hidden`}>
+          <div className={`${card} divide-y divide-slate-200 overflow-hidden`}>
             {loading ? (
               <div className="p-6 flex justify-center">
                 <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
@@ -416,10 +416,10 @@ export default function Meetings({ workspaceId, workspace, workspaces = [], onSe
           <h2 className="text-base font-bold flex items-center gap-2">
             <FileText className="w-4 h-4 text-violet-600" /> Past meetings & minutes
           </h2>
-          <div className={`${card} divide-y divide-[#E2E8F0] overflow-hidden`}>
+          <div className={`${card} divide-y divide-slate-200 overflow-hidden`}>
             {sessions?.length ? (
               sessions.map((s) => (
-                <button key={s.id} type="button" onClick={() => setMomSessionId(s.id)} className="w-full text-left p-4 flex items-center justify-between gap-3 hover:bg-[#F8FAFC]">
+                <button key={s.id} type="button" onClick={() => setMomSessionId(s.id)} className="w-full text-left p-4 flex items-center justify-between gap-3 hover:bg-slate-50">
                   <div className="min-w-0">
                     <h4 className="font-bold text-sm truncate">{s.title}</h4>
                     <p className="text-xs text-slate-500">

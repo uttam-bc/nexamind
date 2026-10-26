@@ -138,7 +138,7 @@ export function AttachmentTray({ draft, tone = 'light' }) {
               </p>
               {(it.status === 'uploading' || it.status === 'queued') && (
                 <div className={`mt-1 h-1 rounded ${dark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                  <div className="h-1 rounded bg-indigo-500 transition-all" style={{ width: `${it.progress || 0}%` }} />
+                  <div className="h-1 rounded bg-indigo-500 transition-[width]" style={{ width: `${it.progress || 0}%` }} />
                 </div>
               )}
               {it.status === 'error' && (

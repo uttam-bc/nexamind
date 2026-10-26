@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Sparkles,
-  Calendar,
-  Clock,
-  Check,
-  X,
-} from 'lucide-react';
+import { Sparkles, Check } from 'lucide-react';
 import { api } from '../api';
 import { forgetReminder, getDetectedReminders } from '../lib/reminders';
 
@@ -53,6 +47,9 @@ export default function AiReminderToast({
   // Check for reminders on mount / workspace change
   useEffect(() => {
     let isMounted = true;
+    // A suggestion belongs to one workspace: drop the previous one at once when the workspace changes.
+    setReminders([]);
+    setCurrentReminder(null);
     const fetchReminders = async () => {
       if (!workspaceId) return;
       if (document.visibilityState === 'hidden') return;
@@ -123,68 +120,38 @@ export default function AiReminderToast({
     }
   };
 
+  // "2026-10-30" as "Fri 30 Oct" (the date is a local calendar day, so it is parsed as one).
+  const niceDate = (iso) => {
+    const [y, m, d] = (iso || '').split('-').map(Number);
+    if (!y || !m || !d) return iso || '';
+    return new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(y, m - 1, d));
+  };
+
+  // Shown inline in the home screen's Today panel: a suggestion found in the workspace's minutes or
+  // documents, quoting its source, that the user can add to the calendar or dismiss.
   return (
-    <div className="fixed bottom-20 right-6 z-50 max-w-sm w-full font-sans">
-      <div className="bg-white p-4 rounded-2xl border border-[#E2E8F0] shadow-2xl shadow-slate-400/20 flex flex-col space-y-2.5 text-[#191C1E]">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-[#4F46E5]">
-              <Sparkles className="w-3.5 h-3.5 text-[#8B5CF6] animate-pulse" />
-            </div>
-            <span className="text-xs font-extrabold uppercase tracking-wider text-[#4F46E5] font-mono">
-              AI Detected Reminder
-            </span>
-          </div>
-
-          <button
-            onClick={handleDismiss}
-            className="text-slate-400 hover:text-slate-700 transition"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="space-y-1">
-          <h4 className="font-bold text-xs text-[#191C1E]">{currentReminder.title}</h4>
-          <p className="text-xs text-slate-500 leading-relaxed font-sans line-clamp-2">
-            {currentReminder.context_snippet}
-          </p>
-        </div>
-
-        {/* Date / Time Badge */}
-        <div className="flex items-center gap-2 text-xs text-slate-600 font-mono bg-[#F2F4F6] px-2.5 py-1 rounded-lg border border-[#E2E8F0]">
-          <Calendar className="w-3 h-3 text-[#4F46E5]" />
-          <span>{currentReminder.suggested_date}</span>
-          <span>•</span>
-          <Clock className="w-3 h-3 text-[#4F46E5]" />
-          <span>{currentReminder.suggested_time || 'No time given'}</span>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-xs text-slate-400 truncate max-w-[120px] font-mono">
-            {currentReminder.source_name}
-          </span>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleDismiss}
-              className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800 font-medium transition"
-            >
-              Dismiss
-            </button>
-            <button
-              onClick={handleAccept}
-              disabled={scheduling}
-              className="flex items-center gap-1 bg-[#4F46E5] hover:bg-[#4338CA] text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
-            >
-              <Check className="w-3 h-3" />
-              <span>{scheduling ? 'Scheduling...' : 'Set Reminder'}</span>
-            </button>
-          </div>
-        </div>
+    <div className="mt-1 flex flex-col gap-3 border-t border-slate-200 pt-3 sm:flex-row sm:items-center" role="status">
+      <Sparkles className="hidden h-4 w-4 shrink-0 text-indigo-600 sm:block" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-slate-900">{currentReminder.title}</p>
+        <p className="truncate text-xs text-slate-500">
+          <span className="tabular-nums">{niceDate(currentReminder.suggested_date)}</span>
+          {currentReminder.suggested_time ? ` · ${currentReminder.suggested_time}` : ''} · found in {currentReminder.source_name}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <button type="button" onClick={handleDismiss} className="rounded-pill px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900">
+          Dismiss
+        </button>
+        <button
+          type="button"
+          onClick={handleAccept}
+          disabled={scheduling}
+          className="inline-flex items-center gap-1 rounded-pill bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 press"
+        >
+          <Check className="h-3 w-3" aria-hidden="true" />
+          {scheduling ? 'Adding…' : 'Add to calendar'}
+        </button>
       </div>
     </div>
   );

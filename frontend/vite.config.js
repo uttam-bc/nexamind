@@ -1,22 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// The dev proxy forwards API calls to the local backend; NEXAMIND_API points it at another one.
+const API = process.env.NEXAMIND_API || 'http://127.0.0.1:8000';
+const WS = API.replace(/^http/, 'ws');
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      '/auth': 'http://127.0.0.1:8000',
-      '/workspaces': 'http://127.0.0.1:8000',
-      '/ai': 'http://127.0.0.1:8000',
+      '/auth': API,
+      '/workspaces': API,
+      '/ai': API,
       '/ws': {
-        target: 'ws://127.0.0.1:8000',
+        target: WS,
         ws: true,
       },
-      '/health': 'http://127.0.0.1:8000',
-      '/contact': 'http://127.0.0.1:8000',
-      '/notifications': 'http://127.0.0.1:8000',
-      '/git': 'http://127.0.0.1:8000',
+      '/health': API,
+      '/contact': API,
+      '/notifications': API,
+      '/git': API,
     },
   },
   test: {

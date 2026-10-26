@@ -68,7 +68,7 @@ Briefly describe the product vision, primary problem solved, and expected busine
 3. **Enterprise Security:** Row-level security and workspace isolation.
 
 ## 4. Key Milestones
-- [x] Initial reverse engineering of Notion and Teams
+- [x] Agree on the project scope
 - [ ] Implement direct-write live canvas
 - [ ] Connect agentic AI memory sync
 - [ ] Deploy v2.0 release candidate
@@ -669,8 +669,8 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
         <div
           className={`group flex items-center justify-between px-2 py-1.5 rounded-xl text-xs transition cursor-pointer ${
             isSelected
-              ? 'bg-indigo-50 text-[#4F46E5] font-bold shadow-sm'
-              : 'text-slate-700 hover:bg-[#F2F4F6]'
+              ? 'bg-indigo-50 text-indigo-600 font-bold shadow-sm'
+              : 'text-slate-700 hover:bg-slate-100'
           }`}
           style={{ paddingLeft: `${Math.max(8, depth * 14 + 8)}px` }}
           onClick={() => {
@@ -713,7 +713,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 setNewDocIcon('📄');
                 setShowCreateModal(true);
               }}
-              className="p-1 text-slate-400 hover:text-[#4F46E5] hover:bg-white rounded transition"
+              className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded transition"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -744,9 +744,9 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
       {/* 0. Feature Header with Back Button (Item 1) */}
       {!isZenMode && (
         <FeatureHeader
-          title="Notion Documents"
+          title="Docs"
           icon={BookOpen}
-          badge="Direct-Write Canvas"
+          badge={null}
           onBack={onBack}
           actions={
             <div className="flex items-center gap-2">
@@ -760,7 +760,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                   className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                  <span>{isSaving ? 'Saving…' : 'Save'}</span>
                 </button>
               )}
             </div>
@@ -787,7 +787,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-indigo-600" />
-                <h3 className="font-extrabold text-xs uppercase tracking-wider text-slate-700">
+                <h3 className="font-extrabold text-xs text-slate-700">
                   Pages & Hierarchy
                 </h3>
               </div>
@@ -824,13 +824,13 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input aria-label="Search pages or content"
                 type="text"
-                placeholder="Search pages or content..."
+                placeholder="Search pages or content…"
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
               {isSearching && (
-                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono animate-pulse">
+                <span className="absolute right-3 top-2.5 text-xs text-slate-400 tabular-nums animate-pulse">
                   ...
                 </span>
               )}
@@ -843,9 +843,9 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             >
               <div className="flex items-center gap-2">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-12 transition" />
-                <span className="font-bold">Notion Templates</span>
+                <span className="font-bold">Templates</span>
               </div>
-              <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-mono font-bold">
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full tabular-nums font-bold">
                 3 Specs
               </span>
             </button>
@@ -883,7 +883,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                           <span className="truncate">{res.title}</span>
                         </div>
                         {res.match_snippet && (
-                          <p className="text-xs text-slate-500 font-mono line-clamp-2 bg-white/70 p-1.5 rounded border border-slate-200">
+                          <p className="text-xs text-slate-500 tabular-nums line-clamp-2 bg-white/70 p-1.5 rounded border border-slate-200">
                             {res.match_snippet}
                           </p>
                         )}
@@ -1107,7 +1107,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                 className="text-2xl sm:text-3xl font-extrabold bg-transparent text-slate-900 focus:outline-none flex-1 min-w-0 placeholder-slate-300 tracking-tight"
                 value={docTitle}
                 onChange={(e) => setDocTitle(e.target.value)}
-                placeholder="Untitled Page..."
+                placeholder="Untitled Page…"
               />
             </div>
 
@@ -1157,7 +1157,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               <button
                 onClick={() => insertSlashBlock('callout')}
                 className="px-2 py-1 hover:bg-slate-200 rounded-lg text-slate-700 font-semibold transition flex items-center gap-1"
-                title="Notion Callout Card"
+                title="Callout card"
               >
                 <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
                 <span>Callout</span>
@@ -1200,7 +1200,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               {/* Slash Command Dropdown Popover */}
               {showSlashMenu && (
                 <div className="absolute left-4 top-10 bg-white border border-slate-200 p-2 rounded-2xl shadow-2xl z-40 w-56 space-y-1 animate-in fade-in zoom-in-95">
-                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+                  <div className="text-xs font-bold text-slate-400 px-2 py-1">
                     Basic Blocks
                   </div>
                   <button
@@ -1256,7 +1256,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
             </div>
 
             {/* Document Statistics Footer */}
-            <div className={`${viewMode === 'original' ? 'hidden' : 'flex'} flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500 px-3 sm:px-6 py-2 border-b border-slate-100 font-mono bg-slate-50/40 whitespace-nowrap`}>
+            <div className={`${viewMode === 'original' ? 'hidden' : 'flex'} flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500 px-3 sm:px-6 py-2 border-b border-slate-100 tabular-nums bg-slate-50/40 whitespace-nowrap`}>
               <div className="flex items-center gap-3">
                 <span>{wordCount} words</span>
                 <span>•</span>
@@ -1266,11 +1266,12 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="hidden md:flex items-center gap-1 text-emerald-600 font-bold">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Direct Write Active</span>
-                </span>
-                {lastSaved && <span>• Saved {lastSaved.toLocaleTimeString()}</span>}
+                {lastSaved && (
+                  <span className="flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-700" aria-hidden="true" />
+                    Saved {lastSaved.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1322,7 +1323,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                       <Wand2 className="w-3.5 h-3.5 text-indigo-600" />
                       Write and preview simultaneously — type directly into the canvas below
                     </span>
-                    <span className="text-xs text-slate-400 font-mono">
+                    <span className="text-xs text-slate-400 tabular-nums">
                       Markdown shortcuts rendered live
                     </span>
                   </div>
@@ -1330,7 +1331,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                   {/* Editor first, then a read-only formatted preview below it */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     <div className="space-y-2">
-                      <label htmlFor="doc-direct-editor" className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
+                      <label htmlFor="doc-direct-editor" className="text-xs font-bold text-slate-600 flex items-center justify-between">
                         <span>Write</span>
                         <span className="text-slate-500 font-medium normal-case">Markdown: # heading, - [ ] checklist, &gt; callout</span>
                       </label>
@@ -1346,7 +1347,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                     </div>
 
                     <section aria-label="Formatted preview" className="p-4 bg-slate-50/60 rounded-2xl border border-slate-200/80">
-                      <div className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3 flex items-center justify-between">
+                      <div className="text-xs font-bold text-slate-600 mb-3 flex items-center justify-between">
                         <span>Preview (read-only)</span>
                         <span className="text-slate-500 font-medium normal-case">Checkboxes can be toggled here</span>
                       </div>
@@ -1377,12 +1378,12 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
                       ref={directTextareaRef}
                       value={docContent}
                       onChange={(e) => setDocContent(e.target.value)}
-                      placeholder="Write markdown directly..."
+                      placeholder="Write markdown directly…"
                       className="w-full flex-1 p-5 text-sm text-slate-900 focus:outline-none font-sans leading-relaxed resize-none"
                     />
                   </div>
                   <div className="flex-1 h-full bg-white rounded-2xl border border-slate-200 shadow-xs p-6 overflow-y-auto">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
+                    <div className="text-xs font-bold text-slate-400 mb-4">
                       Interactive Live Render
                     </div>
                     {renderFormattedBlocks(docContent)}
@@ -1393,7 +1394,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               {/* RAW CODE MODE */}
               {viewMode === 'code' && (
                 <div className="flex-1 h-full bg-slate-900 rounded-2xl border border-slate-800 p-6 overflow-hidden flex flex-col shadow-inner">
-                  <div className="text-xs font-mono text-slate-400 mb-3 flex items-center justify-between">
+                  <div className="text-xs tabular-nums text-slate-400 mb-3 flex items-center justify-between">
                     <span>Raw Markdown Content</span>
                     <span>UTF-8</span>
                   </div>
@@ -1449,7 +1450,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
           <div data-modal className="bg-white rounded-3xl border border-slate-200 p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <h3 className="font-extrabold text-lg text-slate-900">
-                {createParentId ? 'Create Nested Sub-page' : 'Create New Notion Page'}
+                {createParentId ? 'Create Nested Sub-page' : 'Create new page'}
               </h3>
               <button
                 onClick={() => setShowCreateModal(false)}
@@ -1530,7 +1531,7 @@ export default function Documents({ workspaceId, documents = [], onRefreshDocume
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-indigo-600" />
                 <h3 className="font-extrabold text-lg text-slate-900">
-                  Select a Notion Template
+                  Select a template
                 </h3>
               </div>
               <button

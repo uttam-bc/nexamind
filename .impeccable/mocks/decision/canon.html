@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Category standard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:#fff;color:#18181B;font:13px/1.45 Inter,sans-serif;display:grid;grid-template-columns:240px 1fr}
+.side{background:#F4F4F5;border-right:1px solid #E4E4E7;padding:12px 10px}
+.ws{display:flex;align-items:center;gap:8px;font-weight:600;padding:6px 8px;margin-bottom:6px}
+.ws i{width:22px;height:22px;border-radius:6px;background:#5E6AD2;display:block}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:#E4E4E7;border-radius:7px;padding:2px;margin:6px 4px 14px}
+.seg span{text-align:center;padding:4px 0;border-radius:5px;font-weight:500}.seg .on{background:#fff}
+.it{padding:6px 8px;border-radius:6px;color:#3F3F46}.it.on{background:#E4E4E7;color:#18181B;font-weight:500}
+main{padding:24px 36px}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+h1{font-size:20px;font-weight:600}
+.btn{background:#5E6AD2;color:#fff;padding:7px 14px;border-radius:6px;font-weight:500}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.c{border:1px solid #E4E4E7;border-radius:10px;padding:14px}
+.c h2{font-size:12px;color:#71717A;font-weight:500;margin-bottom:8px}
+.r{display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid #F4F4F5}.r small{color:#71717A}
+</style></head><body>
+<aside class="side"><div class="ws"><i></i>Priya's workspace</div><div class="seg"><span class="on">Solo</span><span>Group</span></div>
+<div class="it on">Home</div><div class="it">Docs</div><div class="it">Chat</div><div class="it">Tasks</div><div class="it">Calendar</div><div class="it">Meetings</div><div class="it">Copilot</div><div class="it">Repos</div></aside>
+<main><div class="hd"><h1>Home</h1><span class="btn">New page</span></div>
+<div class="grid">
+<section class="c"><h2>My tasks</h2><div class="r">Write release notes<small>Thu</small></div><div class="r">Review PR #42<small>Today</small></div></section>
+<section class="c"><h2>Today</h2><div class="r">Standup<small>09:30</small></div><div class="r">Design review<small>14:00</small></div></section>
+<section class="c"><h2>Recent pages</h2><div class="r">Launch plan<small>2 h ago</small></div><div class="r">API design notes<small>Yesterday</small></div></section>
+</div></main></body></html>

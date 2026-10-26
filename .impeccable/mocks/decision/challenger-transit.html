@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Workspace Transit Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:#F4F1E8;color:#0F1B3D;font:14px/1.45 'Hanken Grotesk',sans-serif;display:grid;grid-template-columns:80px 1fr}
+.rail{background:#0F1B3D;display:flex;flex-direction:column;align-items:center;gap:14px;padding:22px 0}
+.rail i{width:16px;height:16px;border-radius:50%;border:4px solid #F4F1E8;display:block}
+.rail i:nth-child(2){border-color:#D7263D}.rail i:nth-child(3){border-color:#2E5EAA}.rail i:nth-child(4){border-color:#F2A900}.rail i:nth-child(5){border-color:#1A936F}
+main{padding:30px 40px}
+.hd{display:flex;justify-content:space-between;align-items:center}
+h1{font-weight:800;font-size:38px;letter-spacing:-.02em}
+.sw{display:flex;border:2px solid #0F1B3D;border-radius:999px;overflow:hidden;font-weight:700}
+.sw span{padding:8px 22px}.sw .on{background:#0F1B3D;color:#F4F1E8}
+.map{margin-top:22px;height:300px;background:#0F1B3D;border-radius:18px;position:relative;overflow:hidden}
+.l{position:absolute;height:8px;border-radius:8px}
+.st{position:absolute;width:22px;height:22px;border-radius:50%;background:#F4F1E8;border:5px solid #0F1B3D;box-shadow:0 0 0 3px #F4F1E8}
+.lab{position:absolute;color:#F4F1E8;font-weight:700;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:22px}
+.c{background:#fff;border-radius:14px;padding:18px;border-top:6px solid var(--c)}
+.c h2{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+.r{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #EDE9DD}.r small{color:#5A6382}
+</style></head><body>
+<nav class="rail"><i></i><i></i><i></i><i></i><i></i></nav>
+<main>
+<div class="hd"><h1>Orbit Team, today</h1><div class="sw"><span>Solo</span><span class="on">Group</span></div></div>
+<div class="map">
+<div class="l" style="background:#D7263D;left:60px;top:80px;width:700px"></div>
+<div class="l" style="background:#2E5EAA;left:300px;top:80px;width:8px;height:180px"></div>
+<div class="l" style="background:#2E5EAA;left:300px;top:252px;width:900px"></div>
+<div class="l" style="background:#F2A900;left:740px;top:80px;width:8px;height:180px"></div>
+<div class="l" style="background:#1A936F;left:740px;top:160px;width:560px"></div>
+<div class="st" style="left:290px;top:72px"></div><div class="st" style="left:730px;top:72px"></div><div class="st" style="left:730px;top:150px"></div><div class="st" style="left:290px;top:244px"></div>
+<div class="lab" style="left:60px;top:44px">Meetings · Weekly sync</div><div class="lab" style="left:760px;top:44px">Minutes approved</div><div class="lab" style="left:770px;top:126px">3 tasks created</div><div class="lab" style="left:330px;top:216px">Docs · Launch plan</div>
+</div>
+<div class="grid">
+<section class="c" style="--c:#D7263D"><h2>Meetings</h2><div class="r">Design review<small>14:00</small></div><div class="r">Standup<small>09:30</small></div></section>
+<section class="c" style="--c:#F2A900"><h2>Tasks</h2><div class="r">Write release notes<small>Thu</small></div><div class="r">Review PR #42<small>Today</small></div></section>
+<section class="c" style="--c:#2E5EAA"><h2>Docs</h2><div class="r">Launch plan<small>2 h ago</small></div><div class="r">API design notes<small>Yesterday</small></div></section>
+</div></main></body></html>

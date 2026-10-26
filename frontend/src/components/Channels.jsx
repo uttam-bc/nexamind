@@ -502,7 +502,7 @@ export default function Channels({
   };
 
   return (
-    <div className="h-full flex overflow-hidden -m-6 md:-m-8 bg-slate-50 text-slate-900 font-sans">
+    <div className="h-full flex overflow-hidden -m-4 sm:-m-6 md:-m-8 bg-slate-50 text-slate-900 font-sans">
       {/* ------------------------------------------------------------- */}
       {/* 1. LEFT CHANNEL & DM SIDEBAR                                   */}
       {/* ------------------------------------------------------------- */}
@@ -551,7 +551,7 @@ export default function Channels({
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input aria-label="Filter channels or @users"
               type="text"
-              placeholder="Filter channels or @users..."
+              placeholder="Filter channels or @users…"
               className="w-full bg-slate-100 border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600 placeholder-slate-400 transition"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -563,7 +563,7 @@ export default function Channels({
         <div className="flex-1 overflow-y-auto p-3 space-y-5">
           {/* Main Workspace General Channel */}
           <div>
-            <div className="text-xs font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+            <div className="text-xs tabular-nums font-bold text-slate-400 px-2 mb-2 flex items-center justify-between">
               <span>Main Channel</span>
               <span className="bg-indigo-50 text-indigo-700 text-xs px-1.5 py-0.5 rounded font-bold">
                 Team
@@ -594,7 +594,7 @@ export default function Channels({
 
           {/* Team Topic Channels */}
           <div>
-            <div className="text-xs font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+            <div className="text-xs tabular-nums font-bold text-slate-400 px-2 mb-2 flex items-center justify-between">
               <span>Channels ({filteredTeamChannels.length})</span>
               <button
                 onClick={() => setShowCreateModal(true)}
@@ -640,7 +640,7 @@ export default function Channels({
 
           {/* Direct Messages (DMs) by @username */}
           <div>
-            <div className="text-xs font-mono font-bold uppercase text-slate-400 tracking-wider px-2 mb-2 flex items-center justify-between">
+            <div className="text-xs tabular-nums font-bold text-slate-400 px-2 mb-2 flex items-center justify-between">
               <span>Direct Messages ({filteredDmChannels.length})</span>
               <button
                 onClick={() => setShowDmModal(true)}
@@ -698,12 +698,12 @@ export default function Channels({
             </div>
             <div className="min-w-0">
               <span className="font-bold text-slate-900 block truncate">{user?.name}</span>
-              <span className="text-xs font-mono text-indigo-600 block truncate">
+              <span className="text-xs tabular-nums text-indigo-600 block truncate">
                 @{user?.username || 'user'}
               </span>
             </div>
           </div>
-          <span className="text-xs font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+          <span className="text-xs tabular-nums bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
             online
           </span>
         </div>
@@ -734,8 +734,8 @@ export default function Channels({
                   <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                     <span>{getChannelDisplayName(activeChannel)}</span>
                     {activeChannel.name === 'general' && (
-                      <span className="text-xs font-mono bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
-                        Workspace General
+                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-pill font-normal">
+                        Everyone
                       </span>
                     )}
                   </h3>
@@ -851,11 +851,11 @@ export default function Channels({
                             {msg.sender_name || 'Teammate'}
                           </span>
                           {msg.sender_username && (
-                            <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                            <span className="text-xs tabular-nums font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
                               @{msg.sender_username}
                             </span>
                           )}
-                          <span className="text-xs font-mono text-slate-400 ml-1">
+                          <span className="text-xs tabular-nums text-slate-400 ml-1">
                             {new Date(msg.created_at).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -922,7 +922,7 @@ export default function Channels({
                                 }`}
                               >
                                 <span>{r.emoji}</span>
-                                <span className="font-mono text-xs font-bold">{r.count}</span>
+                                <span className="tabular-nums text-xs font-bold">{r.count}</span>
                               </button>
                             ))}
                           </div>
@@ -1081,7 +1081,7 @@ export default function Channels({
                   {threadRootMessage.sender_name || 'Teammate'}
                 </span>
                 {threadRootMessage.sender_username && (
-                  <span className="text-xs font-mono text-indigo-600 ml-1.5">
+                  <span className="text-xs tabular-nums text-indigo-600 ml-1.5">
                     @{threadRootMessage.sender_username}
                   </span>
                 )}
@@ -1110,11 +1110,11 @@ export default function Channels({
                         {reply.sender_name || 'Teammate'}
                       </span>
                       {reply.sender_username && (
-                        <span className="text-xs font-mono text-indigo-600">
+                        <span className="text-xs tabular-nums text-indigo-600">
                           @{reply.sender_username}
                         </span>
                       )}
-                      <span className="text-xs text-slate-400 font-mono">
+                      <span className="text-xs text-slate-400 tabular-nums">
                         {new Date(reply.created_at).toLocaleTimeString([], {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -1138,7 +1138,7 @@ export default function Channels({
           >
             <input aria-label="Reply to thread"
               type="text"
-              placeholder="Reply to thread..."
+              placeholder="Reply to thread…"
               className="flex-1 bg-slate-100 border border-slate-200 focus:border-indigo-600 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none transition"
               value={threadInputText}
               onChange={(e) => setThreadInputText(e.target.value)}
@@ -1169,11 +1169,11 @@ export default function Channels({
 
             <form onSubmit={handleCreateSubchat} className="space-y-4">
               <div>
-                <label htmlFor="channels-field-1" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="channels-field-1" className="text-xs font-bold text-slate-700 block mb-1">
                   Channel Name
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-400 font-mono text-xs">#</span>
+                  <span className="absolute left-3 top-2.5 text-slate-400 tabular-nums text-xs">#</span>
                   <input id="channels-field-1"
                     type="text"
                     required
@@ -1186,7 +1186,7 @@ export default function Channels({
               </div>
 
               <div>
-                <label htmlFor="channels-field-2" className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                <label htmlFor="channels-field-2" className="text-xs font-bold text-slate-700 block mb-1">
                   Description
                 </label>
                 <input id="channels-field-2"
@@ -1261,12 +1261,12 @@ export default function Channels({
 
             {/* Input with @ Prefix */}
             <div className="relative">
-              <span className="absolute left-3.5 top-2.5 text-indigo-600 font-mono text-sm font-bold">@</span>
+              <span className="absolute left-3.5 top-2.5 text-indigo-600 tabular-nums text-sm font-bold">@</span>
               <input aria-label="type username e.g. jason_bourne"
                 type="text"
                 autoFocus
-                placeholder="type username e.g. jason_bourne..."
-                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-xs text-slate-900 outline-none transition font-mono font-bold"
+                placeholder="type username e.g. jason_bourne…"
+                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl pl-8 pr-4 py-2.5 text-xs text-slate-900 outline-none transition tabular-nums font-bold"
                 value={targetUsernameInput}
                 onChange={(e) => setTargetUsernameInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1295,7 +1295,7 @@ export default function Channels({
                         <span className="font-bold text-xs text-slate-900 group-hover:text-indigo-600 transition block">
                           {u.name}
                         </span>
-                        <span className="text-xs font-mono text-indigo-600">
+                        <span className="text-xs tabular-nums text-indigo-600">
                           @{u.username || 'user'}
                         </span>
                       </div>
@@ -1310,7 +1310,7 @@ export default function Channels({
                 ))
               ) : targetUsernameInput.trim() ? (
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
-                  <span className="text-xs text-slate-600 font-mono">
+                  <span className="text-xs text-slate-600 tabular-nums">
                     Start chat with <strong>@{targetUsernameInput.trim()}</strong>
                   </span>
                   <button
@@ -1318,7 +1318,7 @@ export default function Channels({
                     disabled={dmLoading}
                     className="bg-indigo-600 text-white font-bold text-xs px-3 py-1 rounded-lg shadow-sm"
                   >
-                    {dmLoading ? 'Opening...' : 'Start'}
+                    {dmLoading ? 'Opening…' : 'Start'}
                   </button>
                 </div>
               ) : (

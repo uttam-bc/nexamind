@@ -293,7 +293,7 @@ export function PreJoin({ meeting, user, onJoin, onCancel }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#12151C] text-white overflow-y-auto" data-modal>
+    <div className="palette-light fixed inset-0 z-50 bg-[#12151C] text-white overflow-y-auto" data-modal>
       <div className="min-h-full flex items-center justify-center p-4">
         <div className="w-full max-w-3xl grid gap-6 md:grid-cols-[1.4fr_1fr] items-center">
           <div className="relative aspect-video rounded-2xl overflow-hidden bg-[#232836] flex items-center justify-center">
@@ -320,7 +320,7 @@ export function PreJoin({ meeting, user, onJoin, onCancel }) {
           </div>
           <div className="space-y-4">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Ready to join?</p>
+              <p className="text-xs text-slate-400">Ready to join?</p>
               <h2 className="text-xl font-bold break-words">{meeting.title}</h2>
               <p className="text-sm text-slate-400">
                 {meeting.participant_count
@@ -370,7 +370,7 @@ export function EndDialog({ isHost, busy, onEndForMe, onEndForAll, onCancel }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="end-meeting-title"
-        className="w-full max-w-sm bg-[#1E2330] border border-slate-700 rounded-2xl p-5 space-y-4 text-white"
+        className="palette-light w-full max-w-sm bg-[#1E2330] border border-slate-700 rounded-2xl p-5 space-y-4 text-white"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="end-meeting-title" className="text-lg font-bold">
@@ -522,7 +522,7 @@ export function ChatPanel({ messages, userId, onSend, onRetry, base, workspaceId
         <AttachmentTray draft={draft} tone="dark" />
         {replyTo && (
           <div className="flex items-start gap-2 bg-slate-800 rounded-lg px-3 py-2 text-xs" data-testid="reply-preview">
-            <div className="flex-1 min-w-0 border-l-2 border-indigo-400 pl-2">
+            <div className="flex-1 min-w-0 border-l border-white/40 pl-2">
               <span className="font-semibold text-indigo-300 block">Replying to {replyTo.sender_name}</span>
               <span className="text-slate-300 line-clamp-2 break-words">{replyTo.excerpt}</span>
             </div>
@@ -900,7 +900,7 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
     }[client.endReason] || 'The meeting is over.';
     const stillRunning = client.endReason === 'replaced' || client.endReason === 'full';
     return (
-      <div className="fixed inset-0 z-50 bg-[#12151C] text-white flex items-center justify-center p-4">
+      <div className="palette-light fixed inset-0 z-50 bg-[#12151C] text-white flex items-center justify-center p-4">
         <div className="text-center space-y-4 max-w-sm" role="status">
           <PhoneOff className="w-10 h-10 mx-auto text-rose-400" />
           <h2 className="text-xl font-bold">{client.endReason === 'replaced' ? 'Joined elsewhere' : client.endReason === 'full' ? 'Meeting is full' : isCall ? 'Call ended' : 'Meeting ended'}</h2>
@@ -993,7 +993,7 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
   );
 
   return (
-    <div ref={rootRef} className="fixed inset-0 z-50 flex flex-col bg-[#12151C] text-white overflow-hidden" data-testid="meeting-room">
+    <div ref={rootRef} className="palette-light fixed inset-0 z-50 flex flex-col bg-[#12151C] text-white overflow-hidden" data-testid="meeting-room">
       {tiles.slice(1).map((t) => (
         <RemoteAudio key={`${t.id}-${trackKey(t.stream, 'audio')}`} stream={t.stream} />
       ))}

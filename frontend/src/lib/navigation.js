@@ -11,7 +11,7 @@ const TAB_LABELS = {
   settings: 'Settings',
   finance: 'Finance Tracker',
   files: 'Docs · Files',
-  reports: 'Report Synthesizer',
+
 };
 
 export function isKnownTab(tab) {
@@ -25,32 +25,33 @@ export function getTabLabel(tab, workspaceType) {
   return TAB_LABELS[tab] || tab.replace(/_/g, ' ');
 }
 
+// Same names and order as the desktop sidebar (components/Sidebar.jsx).
 export const SOLO_NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'Bot' },
-  { id: 'solo_chat', label: 'Solo Chat', icon: 'MessageSquare' },
-  { id: 'calendar', label: 'Calendar', icon: 'Calendar' },
-  { id: 'ai_agent', label: 'AI Copilot', icon: 'Sparkles' },
+  { id: 'dashboard', label: 'Home', icon: 'Home' },
+  { id: 'documents', label: 'Docs', icon: 'FileText' },
+  { id: 'solo_chat', label: 'Chat', icon: 'MessageSquare' },
   { id: 'meetings', label: 'Meetings', icon: 'Video' },
-  { id: 'documents', label: 'Documents', icon: 'FileText' },
+  { id: 'calendar', label: 'Calendar', icon: 'Calendar' },
   { id: 'projects', label: 'Tasks', icon: 'FolderKanban' },
-  { id: 'code', label: 'Code Repos', icon: 'Code2' },
+  { id: 'code', label: 'Repositories', icon: 'Code2' },
+  { id: 'ai_agent', label: 'Copilot', icon: 'Sparkles' },
   { id: 'finance', label: 'Finance', icon: 'DollarSign' },
   { id: 'files', label: 'Files', icon: 'FolderOpen' },
-  { id: 'reports', label: 'Reports', icon: 'FileBarChart' },
+
   { id: 'settings', label: 'Settings', icon: 'Settings' },
 ];
 
 export const GROUP_NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'Bot' },
-  { id: 'ai_agent', label: 'AI Copilot', icon: 'Sparkles' },
-  { id: 'meetings', label: 'Meetings', icon: 'Video' },
+  { id: 'dashboard', label: 'Home', icon: 'Home' },
+  { id: 'documents', label: 'Docs', icon: 'FileText' },
   { id: 'channels', label: 'Channels', icon: 'MessageSquare' },
+  { id: 'meetings', label: 'Meetings', icon: 'Video' },
   { id: 'calendar', label: 'Calendar', icon: 'Calendar' },
-  { id: 'documents', label: 'Documents', icon: 'FileText' },
-  { id: 'projects', label: 'Sprint Board', icon: 'FolderKanban' },
-  { id: 'code', label: 'Code Repos', icon: 'Code2' },
+  { id: 'projects', label: 'Sprint board', icon: 'FolderKanban' },
+  { id: 'code', label: 'Repositories', icon: 'Code2' },
+  { id: 'ai_agent', label: 'Copilot', icon: 'Sparkles' },
   { id: 'finance', label: 'Finance', icon: 'DollarSign' },
   { id: 'files', label: 'Files', icon: 'FolderOpen' },
-  { id: 'reports', label: 'Reports', icon: 'FileBarChart' },
+
   { id: 'settings', label: 'Settings', icon: 'Settings' },
 ];

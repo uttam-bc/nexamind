@@ -1,47 +1,92 @@
 /** @type {import('tailwindcss').Config} */
+
+// Every colour class reads a CSS variable from src/styles/palette.css, so light/dark theme and the
+// Solo/Group accent switch without touching components. `indigo` is the workspace accent.
+const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+const PALETTES = ['slate', 'rose', 'emerald', 'amber', 'purple', 'violet', 'sky', 'blue', 'cyan', 'orange', 'green', 'red', 'teal', 'yellow', 'solo', 'group'];
+
+const scale = (prefix, name) =>
+  Object.fromEntries(SHADES.map((k) => [k, `rgb(var(--${prefix}-${name}-${k}) / <alpha-value>)`]));
+
+const palette = (prefix) => ({
+  inherit: 'inherit',
+  current: 'currentColor',
+  transparent: 'transparent',
+  black: '#000',
+  // A white background is the card surface (dark grey in dark mode); white text stays white.
+  white: prefix === 'bg' ? 'rgb(var(--bg-white) / <alpha-value>)' : '#fff',
+  ...Object.fromEntries(PALETTES.map((name) => [name, scale(prefix, name)])),
+  gray: scale(prefix, 'slate'),
+  indigo: scale(prefix, 'accent'),
+  accent: scale(prefix, 'accent'),
+  // Semantic surfaces for new code.
+  canvas: 'var(--color-canvas)',
+  surface: 'var(--color-surface)',
+  raised: 'var(--color-raised)',
+  line: 'var(--color-border)',
+  'line-strong': 'var(--color-border-strong)',
+  ink: 'var(--color-text)',
+  muted: 'var(--color-text-muted)',
+  rail: 'var(--color-rail)',
+});
+
+const textPalette = palette('tx');
+
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
+    colors: palette('bg'),
+    textColor: textPalette,
+    placeholderColor: textPalette,
+    caretColor: textPalette,
+    textDecorationColor: textPalette,
+    fill: textPalette,
+    stroke: textPalette,
     extend: {
       fontFamily: {
-        sans: ['Geist', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['"Instrument Sans"', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'],
+        // Greetings and landing headlines only.
+        serif: ['"Instrument Serif"', 'Georgia', 'serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
       },
-      colors: {
-        // Previously defined inline for the Tailwind Play CDN in index.html.
-        'engineering-indigo': '#4F46E5',
-        'group-violet': '#8B5CF6',
-        'urgent-rose': '#F43F5E',
-        'success-emerald': '#10B981',
-        'warning-amber': '#F59E0B',
-        'slate-surface': '#F8FAFC',
-        'border-subtle': '#E2E8F0',
-        surface: {
-          DEFAULT: '#0c1018',
-          raised: '#111827',
-          overlay: '#151d2e',
-          muted: '#1a2332',
-        },
-        accent: {
-          DEFAULT: '#6366f1',
-          hover: '#818cf8',
-          muted: 'rgba(99, 102, 241, 0.12)',
-        },
-        solo: {
-          DEFAULT: '#10b981',
-          hover: '#34d399',
-          muted: 'rgba(16, 185, 129, 0.12)',
-        },
+      // Panels use the 22px card radius; controls are pills.
+      borderRadius: {
+        '2xl': '22px',
+        '3xl': '28px',
+        pill: '9999px',
       },
+      transitionDuration: {
+        fast: 'var(--dur-fast)',
+        base: 'var(--dur-base)',
+        panel: 'var(--dur-panel)',
+      },
+      transitionTimingFunction: {
+        out: 'var(--ease-out)',
+        in: 'var(--ease-in)',
+        'in-out': 'var(--ease-in-out)',
+      },
+      // Surfaces are flat at rest: small shadows are removed, only floating layers keep depth.
       boxShadow: {
-        glow: '0 0 24px rgba(99, 102, 241, 0.18)',
-        'glow-solo': '0 0 24px rgba(16, 185, 129, 0.18)',
-        panel: '0 4px 24px rgba(0, 0, 0, 0.35)',
+        sm: 'none',
+        DEFAULT: 'none',
+        xs: 'none',
+        glow: 'var(--shadow-glow)',
+        card: 'var(--shadow-card)',
+        panel: 'var(--shadow-panel)',
       },
       animation: {
-        'fade-in': 'fadeIn 0.2s ease-out',
-        'slide-up': 'slideUp 0.25s ease-out',
-        'slide-in-right': 'slideInRight 0.25s ease-out',
+        'fade-in': 'fadeIn var(--dur-base) var(--ease-out)',
+        'slide-up': 'slideUp var(--dur-panel) var(--ease-out)',
+        'slide-in-right': 'slideInRight var(--dur-panel) var(--ease-out)',
+        'scale-in': 'scaleIn var(--dur-panel) var(--ease-out)',
+        rise: 'rise 600ms var(--ease-out) both',
+        // Opacity only: a transform here would trap the screen's fixed dialogs while it runs.
+        'tab-in': 'fadeIn 120ms var(--ease-out)',
+        // App screens settle in quickly; the longer rise is for the landing page.
+        settle: 'settle 280ms var(--ease-out) both',
+        // `animate-in` was used without its plugin; it now gives the same short entrance.
+        in: 'fadeIn var(--dur-base) var(--ease-out)',
       },
       keyframes: {
         fadeIn: {
@@ -55,6 +100,18 @@ export default {
         slideInRight: {
           '0%': { opacity: '0', transform: 'translateX(16px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        scaleIn: {
+          '0%': { opacity: '0', transform: 'scale(0.97)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        settle: {
+          '0%': { opacity: '0', transform: 'translateY(6px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        rise: {
+          '0%': { opacity: '0', transform: 'translateY(16px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
       },
     },

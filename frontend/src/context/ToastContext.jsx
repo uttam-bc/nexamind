@@ -14,6 +14,16 @@ export function notify(message, type = 'info') {
   if (activeApi) activeApi.toast(message, type, type === 'error' ? 6000 : 4000);
 }
 
+// A toast with an Undo button. `onCommit` runs when the toast closes without Undo (timeout or ×);
+// `onUndo` runs instead when the user clicks Undo. Used for deletes that are applied after a pause.
+export function notifyUndo(message, { onUndo, onCommit, duration = 5000 } = {}) {
+  if (!activeApi) {
+    onCommit?.();
+    return;
+  }
+  activeApi.toast(message, 'info', duration, { undo: { onUndo, onCommit } });
+}
+
 export function confirmDialog(message, options = {}) {
   if (!activeApi) return Promise.resolve(false);
   return activeApi.confirm(message, options);
@@ -23,7 +33,7 @@ function ConfirmDialog({ request, onResolve }) {
   const ref = useDialog(true, () => onResolve(false));
   const danger = request.variant === 'danger';
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm" onClick={() => onResolve(false)}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/50 animate-fade-in" onClick={() => onResolve(false)}>
       <div
         ref={ref}
         role="alertdialog"
@@ -32,7 +42,7 @@ function ConfirmDialog({ request, onResolve }) {
         aria-describedby={`confirm-desc-${request.id}`}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl p-5 shadow-2xl outline-none animate-slide-up"
+        className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl p-5 shadow-panel outline-none animate-scale-in"
       >
         <h2 id={`confirm-title-${request.id}`} className="text-sm font-bold text-slate-900 mb-1">{request.title}</h2>
         <p id={`confirm-desc-${request.id}`} className="text-sm text-slate-600 mb-5">{request.message}</p>
@@ -41,14 +51,14 @@ function ConfirmDialog({ request, onResolve }) {
             type="button"
             data-autofocus
             onClick={() => onResolve(false)}
-            className="text-sm font-semibold px-3.5 py-2 rounded-xl text-slate-700 hover:bg-slate-100 border border-slate-200"
+            className="text-sm font-semibold px-4 py-2 rounded-pill text-slate-700 hover:bg-slate-100 border border-slate-200 transition-colors duration-fast"
           >
             {request.cancelLabel}
           </button>
           <button
             type="button"
             onClick={() => onResolve(true)}
-            className={`text-sm font-semibold px-4 py-2 rounded-xl text-white transition ${
+            className={`text-sm font-semibold px-4 py-2 rounded-pill text-white transition-colors duration-fast press ${
               danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'
             }`}
           >
@@ -64,14 +74,23 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const [confirmQueue, setConfirmQueue] = useState([]);
 
-  const dismiss = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  // Closing an undo toast any way other than Undo commits its action (exactly once).
+  const dismiss = useCallback((id, undone = false) => {
+    setToasts((prev) => {
+      const closing = prev.find((t) => t.id === id);
+      if (closing?.undo && !closing.settled) {
+        closing.settled = true;
+        if (undone) closing.undo.onUndo?.();
+        else closing.undo.onCommit?.();
+      }
+      return prev.filter((t) => t.id !== id);
+    });
   }, []);
 
   const toast = useCallback(
-    (message, type = 'info', duration = 4000) => {
+    (message, type = 'info', duration = 4000, options = {}) => {
       const id = ++toastId;
-      setToasts((prev) => [...prev, { id, message, type }]);
+      setToasts((prev) => [...prev, { id, message, type, undo: options.undo }]);
       if (duration > 0) {
         setTimeout(() => dismiss(id), duration);
       }
@@ -142,7 +161,7 @@ export function ToastProvider({ children }) {
           <div
             key={t.id}
             role={t.type === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex items-start gap-3 bg-white rounded-xl border p-3.5 shadow-xl animate-slide-up ${
+            className={`pointer-events-auto flex items-start gap-3 bg-white rounded-xl border p-3.5 shadow-panel animate-slide-up ${
               t.type === 'error'
                 ? 'border-rose-300'
                 : t.type === 'success'
@@ -154,6 +173,15 @@ export function ToastProvider({ children }) {
             {t.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" aria-hidden="true" />}
             {t.type === 'info' && <Info className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" aria-hidden="true" />}
             <p className="text-sm text-slate-800 flex-1 leading-relaxed">{t.message}</p>
+            {t.undo && (
+              <button
+                type="button"
+                onClick={() => dismiss(t.id, true)}
+                className="text-sm font-bold text-indigo-700 hover:underline flex-shrink-0"
+              >
+                Undo
+              </button>
+            )}
             <button
               type="button"
               onClick={() => dismiss(t.id)}

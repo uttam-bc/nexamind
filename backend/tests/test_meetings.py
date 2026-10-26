@@ -350,6 +350,30 @@ async def test_notifications_read_prefs_and_dedupe(client: AsyncClient, team: di
 
 
 @pytest.mark.asyncio
+async def test_notification_dismiss_hides_it_and_keeps_dedupe(client: AsyncClient, team: dict, db_session) -> None:
+    from app.services import notification_service
+
+    member_id = uuid.UUID(team["member"]["id"])
+    await notification_service.notify(db_session, member_id, kind="x", category="tasks", title="Gone", dedupe_key="d1")
+    await notification_service.notify(db_session, member_id, kind="x", category="tasks", title="Kept", dedupe_key="d2")
+    await db_session.commit()
+    headers = team["member"]["headers"]
+    items = (await client.get("/notifications", headers=headers)).json()["items"]
+    gone = next(n["id"] for n in items if n["title"] == "Gone")
+
+    # Someone else can't dismiss it.
+    assert (await client.delete(f"/notifications/{gone}", headers=team["owner"])).status_code == 404
+    res = await client.delete(f"/notifications/{gone}", headers=headers)
+    assert res.status_code == 200 and res.json()["unread_count"] == 1
+    listed = (await client.get("/notifications", headers=headers)).json()
+    assert [n["title"] for n in listed["items"]] == ["Kept"]
+    assert (await client.delete(f"/notifications/{gone}", headers=headers)).status_code == 404
+    # The same event does not come back after being dismissed.
+    again = await notification_service.notify(db_session, member_id, kind="x", category="tasks", title="Gone", dedupe_key="d1")
+    assert again is None
+
+
+@pytest.mark.asyncio
 async def test_dm_and_mention_notifications(client: AsyncClient, team: dict) -> None:
     channel = (await client.post(f"/workspaces/{team['wid']}/channels", headers=team["owner"], json={"name": "general"})).json()
     sent = await client.post(f"/workspaces/{team['wid']}/channels/{channel['id']}/messages", headers=team["owner"],

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,14 @@ async def mark_all_read(current_user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db, scope="function")) -> dict:
     await notification_service.mark_all_read(db, current_user.id)
     return {"unread_count": 0}
+
+
+@router.delete("/{notification_id}")
+async def dismiss(notification_id: UUID, current_user: User = Depends(get_current_user),
+                  db: AsyncSession = Depends(get_db, scope="function")) -> dict:
+    if not await notification_service.dismiss(db, current_user.id, notification_id):
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"unread_count": await notification_service.unread_count(db, current_user.id)}
 
 
 @router.get("/preferences")

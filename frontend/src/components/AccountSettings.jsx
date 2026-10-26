@@ -128,7 +128,7 @@ export default function AccountSettings({ user, onUserUpdated, onTokenChanged, o
             <label htmlFor="account-username" className="text-xs font-bold text-slate-700">Username</label>
             <input
               id="account-username"
-              className={`${inputClass} font-mono`}
+              className={`${inputClass} tabular-nums`}
               autoComplete="username"
               maxLength={50}
               value={profile.username}

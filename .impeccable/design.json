@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-26T00:00:00Z",
+  "title": "Design System: NexaMind",
+  "extensions": {
+    "colorMeta": {
+      "solo-teal": { "role": "primary", "displayName": "Solo Deep Teal", "canonical": "#1B6E66", "tonalRamp": ["#082321", "#113C38", "#134944", "#165A54", "#1B6E66", "#4C9A91", "#ADD6D1", "#EEF6F5"] },
+      "solo-teal-deep": { "role": "primary", "displayName": "Solo Teal Deep", "canonical": "#165A54" },
+      "solo-teal-wash": { "role": "primary", "displayName": "Solo Teal Wash", "canonical": "#EEF6F5" },
+      "group-plum": { "role": "secondary", "displayName": "Group Plum", "canonical": "#7B3F74", "tonalRamp": ["#2A1327", "#452541", "#532B4E", "#66345F", "#7B3F74", "#B57BAC", "#DDBBD9", "#F7F0F6"] },
+      "group-plum-deep": { "role": "secondary", "displayName": "Group Plum Deep", "canonical": "#66345F" },
+      "group-plum-wash": { "role": "secondary", "displayName": "Group Plum Wash", "canonical": "#F7F0F6" },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#1F201D", "tonalRamp": ["#121310", "#1F201D", "#2B2C29", "#3D3D3A", "#5C5C59", "#A9A9A5", "#EAEAE8", "#F9F9F8"] },
+      "page-white": { "role": "neutral", "displayName": "Page White", "canonical": "#FFFFFF" },
+      "panel-grey": { "role": "neutral", "displayName": "Panel Grey", "canonical": "#F9F9F8" },
+      "panel-grey-hover": { "role": "neutral", "displayName": "Panel Grey Hover", "canonical": "#F2F2F0" },
+      "panel-grey-solo": { "role": "neutral", "displayName": "Panel Grey, Solo room", "canonical": "#F0F4F2" },
+      "panel-grey-group": { "role": "neutral", "displayName": "Panel Grey, Group room", "canonical": "#F4F1F3" },
+      "hairline": { "role": "neutral", "displayName": "Hairline", "canonical": "#EAEAE8" },
+      "control-edge": { "role": "neutral", "displayName": "Control Edge", "canonical": "#8B8B87" },
+      "quiet-grey": { "role": "neutral", "displayName": "Quiet Grey", "canonical": "#D9D9D6" },
+      "muted-text": { "role": "neutral", "displayName": "Muted Text", "canonical": "#636361" },
+      "secondary-text": { "role": "neutral", "displayName": "Secondary Text", "canonical": "#4E4E4B" },
+      "dark-page": { "role": "neutral", "displayName": "Dark Page", "canonical": "#141513", "tonalRamp": ["#090A09", "#0E0F0D", "#141513", "#1A1B19", "#21221F", "#30312E", "#6E6F6A", "#EDEDEA"] },
+      "dark-panel": { "role": "neutral", "displayName": "Dark Panel", "canonical": "#1A1B19" },
+      "dark-card": { "role": "neutral", "displayName": "Dark Card", "canonical": "#21221F" },
+      "dark-hairline": { "role": "neutral", "displayName": "Dark Hairline", "canonical": "#30312E" },
+      "dark-control-edge": { "role": "neutral", "displayName": "Dark Control Edge", "canonical": "#6E6F6A" },
+      "dark-ink": { "role": "neutral", "displayName": "Dark Ink", "canonical": "#EDEDEA" },
+      "dark-muted-text": { "role": "neutral", "displayName": "Dark Muted Text", "canonical": "#A3A39E" },
+      "dark-solo-accent": { "role": "primary", "displayName": "Dark Solo Accent", "canonical": "#4C9A91" },
+      "dark-group-accent": { "role": "secondary", "displayName": "Dark Group Accent", "canonical": "#B57BAC" },
+      "status-danger": { "role": "status", "displayName": "Danger Rose", "canonical": "#BE123C" },
+      "status-danger-wash": { "role": "status", "displayName": "Danger Wash", "canonical": "#FFF1F2" },
+      "status-warning": { "role": "status", "displayName": "Warning Amber", "canonical": "#92400E" },
+      "status-warning-wash": { "role": "status", "displayName": "Warning Wash", "canonical": "#FFFBEB" },
+      "status-success": { "role": "status", "displayName": "Success Emerald", "canonical": "#047857" },
+      "code-block": { "role": "neutral", "displayName": "Code Block", "canonical": "#0F1115" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Landing hero headline only." },
+      "greeting": { "displayName": "Greeting", "purpose": "Home greeting stating today's one fact." },
+      "headline": { "displayName": "Headline", "purpose": "Landing section headings." },
+      "title": { "displayName": "Title", "purpose": "Feature screen titles and landing feature titles." },
+      "panel-title": { "displayName": "Panel Title", "purpose": "Panel, dialog and menu headings." },
+      "figure": { "displayName": "Figure", "purpose": "Count tiles, tabular." },
+      "body": { "displayName": "Body", "purpose": "Rows, messages, forms." },
+      "body-long": { "displayName": "Body Long", "purpose": "Landing paragraphs, 16 to 18px." },
+      "label": { "displayName": "Label", "purpose": "Captions, chips, tile labels, sentence case." },
+      "code": { "displayName": "Code", "purpose": "Code and repository content only." }
+    },
+    "shadows": [
+      { "name": "panel", "value": "0 1px 2px rgb(31 32 29 / 0.06), 0 16px 40px -12px rgb(31 32 29 / 0.22)", "purpose": "Floating layers only: menus, command palette, confirm dialogs, toasts, landing screenshots." },
+      { "name": "panel-dark", "value": "0 1px 2px rgb(0 0 0 / 0.4), 0 18px 48px -12px rgb(0 0 0 / 0.7)", "purpose": "Floating layers in dark mode." },
+      { "name": "rest", "value": "none", "purpose": "Every resting surface; Tailwind shadow-sm, shadow and shadow-xs are mapped to none." }
+    ],
+    "motion": [
+      { "name": "dur-fast", "value": "150ms", "purpose": "Hover and colour feedback." },
+      { "name": "dur-base", "value": "200ms", "purpose": "Fades." },
+      { "name": "dur-panel", "value": "260ms", "purpose": "Menus, dialogs, switch thumb, theme cross-fade." },
+      { "name": "settle", "value": "280ms ease-out, translateY(6px) to 0 with opacity", "purpose": "App screens and home panels, staggered 30ms." },
+      { "name": "tab-in", "value": "120ms opacity only", "purpose": "Tab changes; no transform so fixed dialogs are not trapped." },
+      { "name": "room-reveal", "value": "480ms cubic-bezier(0.32, 0.72, 0, 1), clip-path circle from pointer", "purpose": "Solo/Group and light/dark switches by pointer; skipped for keyboard and reduced motion." },
+      { "name": "dur-hero", "value": "600ms", "purpose": "Landing rise and once-only scroll reveal." },
+      { "name": "press", "value": "scale(0.97) over 160ms", "purpose": "Pressed feedback on opted-in buttons." },
+      { "name": "ease-out", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Entrances." },
+      { "name": "ease-in", "value": "cubic-bezier(0.4, 0, 1, 1)", "purpose": "Exits." },
+      { "name": "ease-drawer", "value": "cubic-bezier(0.32, 0.72, 0, 1)", "purpose": "Room reveal." },
+      { "name": "ease-in-out", "value": "cubic-bezier(0.77, 0, 0.175, 1)", "purpose": "Workspace switch thumb." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Room-accent pill; one per area. Teal in Solo, plum in Group.",
+      "html": "<button class=\"ds-btn-primary\">Create event</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; background: rgb(var(--bg-accent-600, 27 110 102)); color: #fff; font: 600 14px/20px 'Instrument Sans', system-ui, sans-serif; padding: 8px 16px; border: none; border-radius: 9999px; cursor: pointer; transition: background-color 150ms ease, transform 160ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn-primary:hover { background: rgb(var(--bg-accent-700, 22 90 84)); } .ds-btn-primary:active { transform: scale(0.97); } .ds-btn-primary:focus-visible { outline: 2px solid rgb(var(--tx-accent-600, 27 110 102)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "White pill with a hairline; empty-state and secondary actions.",
+      "html": "<button class=\"ds-btn-secondary\">Add an event</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; gap: 6px; background: var(--color-surface, #fff); color: var(--color-text, #1f201d); font: 600 14px/20px 'Instrument Sans', system-ui, sans-serif; padding: 8px 16px; border: 1px solid var(--color-border, #eaeae8); border-radius: 9999px; cursor: pointer; transition: background-color 150ms ease; } .ds-btn-secondary:hover { background: #f2f2f0; } .ds-btn-secondary:focus-visible { outline: 2px solid rgb(var(--tx-accent-600, 27 110 102)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Landing Primary Button",
+      "kind": "button",
+      "refersTo": "button-landing-primary",
+      "description": "Near-black pill on the public page; inverts in dark mode.",
+      "html": "<button class=\"ds-btn-landing\">Create your workspace <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/></svg></button>",
+      "css": ".ds-btn-landing { display: inline-flex; align-items: center; gap: 8px; background: #1f201d; color: #fff; font: 500 14px/20px 'Instrument Sans', system-ui, sans-serif; padding: 12px 24px; border: none; border-radius: 9999px; cursor: pointer; transition: background-color 150ms ease, transform 160ms cubic-bezier(0.16, 1, 0.3, 1); } .ds-btn-landing:hover { background: #3d3d3a; } .ds-btn-landing:active { transform: scale(0.97); } .ds-btn-landing:focus-visible { outline: 2px solid #1b6e66; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "White field, 3:1 control border, accent border on focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"alex@company.com\" />",
+      "css": ".ds-input { width: 100%; background: var(--color-surface, #fff); color: var(--color-text, #1f201d); font: 400 14px/20px 'Instrument Sans', system-ui, sans-serif; padding: 10px 12px; border: 1px solid var(--color-border-strong, #8b8b87); border-radius: 12px; transition: border-color 150ms ease; } .ds-input::placeholder { color: #a9a9a5; } .ds-input:focus { outline: none; border-color: rgb(var(--bg-accent-600, 27 110 102)); } .ds-input:focus-visible { outline: 2px solid rgb(var(--tx-accent-600, 27 110 102)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Labelled 32px rows on the page ground; active row is a grey fill with an accent icon.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item is-active\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\"/></svg>Home</a><a class=\"ds-nav-item\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/><path d=\"M14 2v6h6\"/></svg>Docs</a><a class=\"ds-nav-item\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z\"/></svg>Channels</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 216px; } .ds-nav-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 8px; font: 400 14px/20px 'Instrument Sans', system-ui, sans-serif; color: #4e4e4b; cursor: pointer; text-decoration: none; transition: background-color 150ms ease, color 150ms ease; } .ds-nav-item svg { color: #a9a9a5; } .ds-nav-item:hover { background: rgb(242 242 240 / 0.7); color: #1f201d; } .ds-nav-item.is-active { background: #f2f2f0; color: #1f201d; font-weight: 500; } .ds-nav-item.is-active svg { color: rgb(var(--tx-accent-600, 27 110 102)); } .ds-nav-item:focus-visible { outline: 2px solid rgb(var(--tx-accent-600, 27 110 102)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip-status-danger",
+      "description": "Pill with wash background and deep text; status colours only for status, room accent for events.",
+      "html": "<span class=\"ds-chip ds-chip-danger\">Urgent</span> <span class=\"ds-chip ds-chip-room\">Meeting</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font: 400 12px/16px 'Instrument Sans', system-ui, sans-serif; } .ds-chip-danger { background: #fff1f2; color: #9f1239; } .ds-chip-room { background: #eef6f5; color: #134944; }"
+    },
+    {
+      "name": "Tonal Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Off-white 22px panel, no shadow, rows divided by hairlines.",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><h2>Today</h2><span class=\"ds-count\">2</span></div><ul class=\"ds-rows\"><li><span class=\"ds-time\">10:00</span><span class=\"ds-row-title\">Sprint planning</span></li><li><span class=\"ds-time\">14:30</span><span class=\"ds-row-title\">Design review</span></li></ul></section>",
+      "css": ".ds-panel { background: #f0f4f2; border-radius: 22px; padding: 20px; color: #1f201d; font-family: 'Instrument Sans', system-ui, sans-serif; max-width: 520px; } .ds-panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; } .ds-panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; } .ds-count { background: #fff; border-radius: 9999px; padding: 2px 8px; font-size: 12px; color: #4e4e4b; box-shadow: 0 0 0 1px #eaeae8; font-variant-numeric: tabular-nums; } .ds-rows { list-style: none; margin: 0; padding: 0; } .ds-rows li { display: flex; align-items: center; gap: 12px; min-height: 52px; border-radius: 8px; transition: background-color 150ms ease; } .ds-rows li + li { border-top: 1px solid #eaeae8; } .ds-rows li:hover { background: rgb(255 255 255 / 0.7); } .ds-time { width: 80px; font-size: 14px; color: #636361; font-variant-numeric: tabular-nums; } .ds-row-title { font-size: 14px; font-weight: 500; }"
+    },
+    {
+      "name": "Count Tile",
+      "kind": "card",
+      "refersTo": "count-tile",
+      "description": "Home count tile: label, 32px tabular figure, caption; whole tile navigates.",
+      "html": "<button class=\"ds-tile\"><span class=\"ds-tile-label\">Open tasks</span><span class=\"ds-tile-figure\">12</span><span class=\"ds-tile-caption\">4 done</span></button>",
+      "css": ".ds-tile { display: flex; flex-direction: column; justify-content: space-between; width: 220px; height: 128px; padding: 16px; background: #f9f9f8; border: none; border-radius: 22px; text-align: left; cursor: pointer; font-family: 'Instrument Sans', system-ui, sans-serif; transition: background-color 150ms ease; } .ds-tile:hover { background: #f2f2f0; } .ds-tile:focus-visible { outline: 2px solid rgb(var(--tx-accent-600, 27 110 102)); outline-offset: 2px; } .ds-tile-label { font-size: 13px; color: #4e4e4b; } .ds-tile-figure { font-size: 32px; line-height: 1; color: #1f201d; font-variant-numeric: tabular-nums; } .ds-tile-caption { font-size: 12px; color: #636361; }"
+    },
+    {
+      "name": "Workspace Switch",
+      "kind": "custom",
+      "refersTo": "workspace-switch",
+      "description": "Solo/Group pill switch; thumb slides in the chosen room's colour and triggers the circular room reveal.",
+      "html": "<div class=\"ds-switch\" role=\"group\" aria-label=\"Workspace mode\"><span class=\"ds-switch-thumb\"></span><button aria-pressed=\"true\" class=\"is-on\">Solo</button><button aria-pressed=\"false\">Group</button></div>",
+      "css": ".ds-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 216px; padding: 4px; background: #f2f2f0; border-radius: 9999px; } .ds-switch-thumb { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); background: #1b6e66; border-radius: 9999px; transition: transform 260ms cubic-bezier(0.77, 0, 0.175, 1), background-color 260ms cubic-bezier(0.77, 0, 0.175, 1); } .ds-switch:has(button:last-of-type.is-on) .ds-switch-thumb { transform: translateX(100%); background: #7b3f74; } .ds-switch button { position: relative; z-index: 1; padding: 6px 12px; border: none; background: none; border-radius: 9999px; font: 600 13px/18px 'Instrument Sans', system-ui, sans-serif; color: #4e4e4b; cursor: pointer; transition: color 200ms ease; } .ds-switch button:hover { color: #1f201d; } .ds-switch button.is-on { color: #fff; } .ds-switch button:focus-visible { outline: 2px solid #1b6e66; outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Typeset Team Home",
+    "overview": "NexaMind reads like a well-set page rather than a control panel. The ground is plain white, the working surfaces are panels one step off white at a generous 22px radius, rows are separated by 1px hairlines, and nothing casts a shadow while it sits still. A serif greeting opens the home screen and states the day's one fact; everything below it is set in a quiet grotesque with tabular figures. The system is dense enough for all-day use on a laptop (14px body, 32px navigation rows) but never crowded: whitespace and tone separate things, not boxes and borders.\n\nColour is held back until it means something. Each workspace is a room with its own hue: Solo is deep teal, Group is plum. The current room's hue colours the active icon, primary buttons, links and selection, and also tints the panel greys by a few percent, so switching rooms changes the whole space, not just the buttons. Status colours (rose, amber, emerald) appear only for status. The public landing page uses the same world with a near-black primary and real product screenshots in place of illustration.\n\nMotion is short and purposeful. Screens settle in over 280ms, menus scale in from their trigger, and the one signature moment, switching Solo and Group or light and dark, reveals the new room as a circle spreading from the pointer. Keyboard presses and reduced-motion users get the change instantly.",
+    "keyCharacteristics": [
+      "White page, off-white tonal panels (22px), 1px hairlines, flat at rest.",
+      "Instrument Sans for the interface; Instrument Serif only for greetings and landing headlines; tabular figures for numbers.",
+      "Two rooms: Solo deep teal and Group plum, each tinting accent and ground.",
+      "Pills for controls, 22px for panels, 8 to 12px for rows and fields.",
+      "Circular room reveal for workspace and theme changes; otherwise short settle and fade.",
+      "Light and dark themes from one generated palette with separate background and text scales."
+    ],
+    "rules": [
+      { "name": "The Room Rule", "body": "The current workspace owns the accent. Teal and plum never appear together except on the controls that choose between them.", "section": "colors" },
+      { "name": "The Meaning-Only Rule", "body": "Colour marks the active, the actionable or a status. Decoration is done with tone and space, never with hue.", "section": "colors" },
+      { "name": "The Two-Scale Rule", "body": "Every hue has a background scale and a separate text scale (light and dark), so a tinted chip and its text both stay legible. New colours go through `frontend/scripts/build-palette.cjs`, never as hard-coded hex in components.", "section": "colors" },
+      { "name": "The Serif Speaks Once Rule", "body": "Instrument Serif is for greetings and landing headlines. It never appears in buttons, navigation, tables or feature screen titles.", "section": "typography" },
+      { "name": "The Tabular Figures Rule", "body": "Counts, times, money and table cells use tabular figures so updating numbers do not shift.", "section": "typography" },
+      { "name": "The Sentence Case Rule", "body": "Labels and headings are sentence case at normal tracking. Section headings in the sidebar are plain 12px muted text, not small caps.", "section": "typography" },
+      { "name": "The Flat-At-Rest Rule", "body": "A surface that is not floating has no shadow. Separation comes from a tone step or a 1px hairline, never both stacked around the same box.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use the workspace accent classes for every accent role so Solo shows teal and Group shows plum without component changes.",
+      "Do separate content with a tone step (white page to Panel Grey) or a 1px Hairline, and keep panels at 22px with 20px padding.",
+      "Do keep text contrast at WCAG AA: muted text is 6.0:1 on white, white on Solo Deep Teal 6.1:1, white on Group Plum 7.5:1, control borders 3.4:1, dark muted text 6.3:1 on Dark Card, dark accent text 4.8:1 or better.",
+      "Do give every interactive element the global 2px accent focus outline at 2px offset.",
+      "Do use tabular figures for counts, times and money.",
+      "Do show the real product (real screenshots with demonstration data, light and dark) on public pages.",
+      "Do run the room reveal only for pointer-initiated workspace and theme changes, and change instantly for keyboard and reduced motion."
+    ],
+    "donts": [
+      "Don't use gradients, glows or coloured shadows on any surface, avatar or button.",
+      "Don't put eyebrows or kickers (small uppercase tracked labels) above headings, or uppercase tracked micro-labels anywhere.",
+      "Don't use monospace for decoration; JetBrains Mono is for code and code-like identifiers only.",
+      "Don't use coloured left rules thicker than 1px to mark quotes, callouts or replies.",
+      "Don't nest cards inside cards or panels inside panels.",
+      "Don't add shadows to resting surfaces or stack a shadow and a border on the same panel.",
+      "Don't use Instrument Serif outside greetings and landing headlines.",
+      "Don't show teal and plum together except on the controls that choose between them.",
+      "Don't use text glyphs (such as a warning sign character) as icons; use the line icon set."
+    ]
+  }
+}

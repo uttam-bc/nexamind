@@ -129,7 +129,7 @@ export default function CreateGroupModal({
                   disabled={loading || !groupName.trim()}
                   className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-indigo-600/30 transition flex items-center gap-1.5"
                 >
-                  {loading ? 'Creating...' : 'Create Group'}
+                  {loading ? 'Creating…' : 'Create Group'}
                 </button>
               </div>
             </form>
@@ -151,11 +151,11 @@ export default function CreateGroupModal({
             </div>
 
             {/* Prominent Join Code Display Card */}
-            <div className="p-5 bg-gradient-to-br from-indigo-50 to-violet-50 border-2 border-dashed border-indigo-300 rounded-2xl space-y-3">
-              <div className="text-xs font-mono uppercase tracking-wider font-bold text-indigo-700">
+            <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="text-xs tabular-nums font-bold text-indigo-700">
                 TEAM JOIN CODE
               </div>
-              <div className="text-3xl font-black font-mono tracking-widest text-slate-900 select-all">
+              <div className="text-3xl font-semibold font-mono tracking-widest text-slate-900 select-all">
                 {createdWorkspace?.join_code || 'NM-TEAM'}
               </div>
               <button

@@ -242,7 +242,7 @@ export default function WorkspaceSettings({
         onBack={onBack}
         actions={
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-slate-500 hidden sm:inline">
+            <span className="text-xs tabular-nums text-slate-500 hidden sm:inline">
               ID: {workspace?.id?.slice(0, 8)}...
             </span>
           </div>
@@ -393,7 +393,7 @@ export default function WorkspaceSettings({
 
               <div className="space-y-4">
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                  <label htmlFor="workspace-settings-field-1" className="text-xs font-bold uppercase tracking-wider text-slate-600 block">
+                  <label htmlFor="workspace-settings-field-1" className="text-xs font-bold text-slate-600 block">
                     Workspace Name
                   </label>
                   {isEditingName ? (
@@ -440,7 +440,7 @@ export default function WorkspaceSettings({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    <span className="text-xs font-bold text-slate-500 block mb-1">
                       Space Type
                     </span>
                     <span className="font-bold text-slate-900 text-sm">
@@ -449,7 +449,7 @@ export default function WorkspaceSettings({
                   </div>
 
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                    <span className="text-xs font-bold text-slate-500 block mb-1">
                       Created Date
                     </span>
                     <span className="font-bold text-slate-900 text-sm">
@@ -484,13 +484,13 @@ export default function WorkspaceSettings({
                 <div className="relative">
                   <input id="workspace-settings-field-2"
                     type="text"
-                    placeholder="Type @username to search..."
+                    placeholder="Type @username to search…"
                     value={inviteQuery}
                     onChange={(e) => handleSearchUsers(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-600"
                   />
                   {isSearchingUsers && (
-                    <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-mono animate-pulse">
+                    <span className="absolute right-3 top-2.5 text-xs text-slate-400 tabular-nums animate-pulse">
                       searching...
                     </span>
                   )}
@@ -506,7 +506,7 @@ export default function WorkspaceSettings({
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-900">{u.name}</span>
-                          <span className="text-indigo-600 font-mono">@{u.username}</span>
+                          <span className="text-indigo-600 tabular-nums">@{u.username}</span>
                         </div>
                         <button
                           onClick={() => handleCopyInviteDetails(u)}
@@ -530,7 +530,7 @@ export default function WorkspaceSettings({
               {/* Members Roster */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <span className="text-xs font-bold text-slate-500">
                     Active Members ({members.length})
                   </span>
                   <button onClick={loadMembers} className="text-xs text-indigo-600 hover:underline font-bold">
@@ -546,14 +546,14 @@ export default function WorkspaceSettings({
                       className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs hover:border-slate-300 transition"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white text-sm shadow-xs">
                           {member.name?.slice(0, 2).toUpperCase() || 'U'}
                         </div>
                         <div>
                           <div className="font-bold text-slate-900 flex items-center gap-2">
                             <span>{member.name}</span>
                             {member.username && (
-                              <span className="text-indigo-600 font-mono text-xs">
+                              <span className="text-indigo-600 tabular-nums text-xs">
                                 @{member.username}
                               </span>
                             )}
@@ -669,7 +669,7 @@ export default function WorkspaceSettings({
                     className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isReindexing ? 'animate-spin' : ''}`} />
-                    <span>{isReindexing ? 'Running 4-Stage Pipeline...' : 'Re-Index Workspace Memory Now'}</span>
+                    <span>{isReindexing ? 'Running 4-Stage Pipeline…' : 'Re-Index Workspace Memory Now'}</span>
                   </button>
                 </div>
               </div>
@@ -687,9 +687,9 @@ export default function WorkspaceSettings({
               </div>
 
               {/* Join Code Card */}
-              <div className="p-6 bg-gradient-to-br from-indigo-50/70 to-purple-50/70 rounded-3xl border border-indigo-200/80 space-y-4">
+              <div className="p-6 bg-slate-50 rounded-2xl space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-indigo-900">
+                  <span className="text-xs font-bold text-indigo-900">
                     Shareable Team Join Code
                   </span>
                   {isOwnerOrAdmin && (
@@ -705,7 +705,7 @@ export default function WorkspaceSettings({
                 </div>
 
                 <div className="p-5 bg-white rounded-2xl border border-indigo-100 flex items-center justify-between shadow-xs">
-                  <span className="font-mono text-2xl sm:text-3xl font-black text-indigo-600 tracking-widest">
+                  <span className="font-mono tracking-widest text-2xl sm:text-3xl font-semibold text-indigo-700">
                     {workspace?.join_code || 'NONE'}
                   </span>
                   <button
