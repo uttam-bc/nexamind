@@ -13,130 +13,146 @@
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{url}
+\def\UrlBreaks{\do\_\do\.}
 \usepackage[hidelinks]{hyperref}
 
-% ---------------------------------------------------------------------------
-% Live-model results (E4, E5). Filled from backend/eval/llm_results.json.
-% ---------------------------------------------------------------------------
-\newcommand{\llmPrompts}{25}
-\newcommand{\llmAnswered}{25}
-\newcommand{\llmIntended}{92\%}
-\newcommand{\llmUnexpected}{one}
-\newcommand{\llmLatency}{6.6}
-\newcommand{\injCases}{10}
-\newcommand{\injAnswered}{10}
-\newcommand{\injSuccess}{none}
-\newcommand{\injAnyWrite}{none}
-\newcommand{\llmModel}{Gemini \texttt{gemini-flash-lite-latest}}
+% Every reported number is a macro generated from the raw trial records by
+% backend/eval/summarize_v2.py (python -m eval.summarize_v2). Do not type results by hand.
+\input{generated/results}
+
+% Fill these in before submission.
+\newcommand{\commitID}{\texttt{<commit>}}
+\newcommand{\artifactURL}{\url{<artifact link>}}
 
 \begin{document}
 
-\title{NexaMind: Least-Privilege Tool Use and Contextual Integrity for an LLM Copilot in a Multi-Tenant Collaborative Workspace}
+\title{Least-Privilege Tool Use and Contextual Integrity for an LLM Copilot in a Multi-Tenant Workspace: A Case Study of NexaMind}
 
 \author{
 \IEEEauthorblockN{First Author}
-\IEEEauthorblockA{\textit{Department of Computer Science} \\
-\textit{University Name}\\
+\IEEEauthorblockA{\textit{Department} \\
+\textit{University}\\
 City, Country \\
-email@university.edu}
+email}
 \and
 \IEEEauthorblockN{Second Author}
-\IEEEauthorblockA{\textit{Department of Computer Science} \\
-\textit{University Name}\\
+\IEEEauthorblockA{\textit{Department} \\
+\textit{University}\\
 City, Country \\
-email@university.edu}
+email}
 }
 
 \maketitle
 
 \begin{abstract}
-Collaborative workspaces now ship with language-model copilots that can read team documents and act on a user's behalf. That combination is risky. The copilot sees content written by many people, it can change shared state, and a single access-control slip turns it into a channel for leaking private data. We describe NexaMind, an open workspace that combines documents, chat, task boards, meetings, and finance tracking with a tool-calling copilot, and we report what it took to make that copilot safe to deploy. Every tool runs with the calling user's own permissions; private channels and direct messages are excluded from the shared memory the model retrieves from; the model treats retrieved text as data rather than instructions; and a deterministic command parser keeps the system useful when no model is reachable. A security audit of an earlier version found thirteen defects, including direct messages that silently granted workspace membership and chat histories readable by anyone who knew a session identifier. After the redesign, all 22 access-control checks in our test harness pass, the offline parser takes no wrong action on any of 71 labeled requests, and the live copilot completes \llmIntended{} of natural-language requests. In ten indirect prompt-injection trials, \injSuccess{} led the model to perform the attacker's action. We release the evaluation harness alongside the system.
+Language-model copilots in collaborative workspaces read content written by many people and can change shared state on a user's behalf, so an authorization gap anywhere in the application becomes a gap in the copilot. We report a security case study of NexaMind, a multi-tenant workspace with documents, chat, tasks, meetings, finances, and a copilot that calls twenty workspace tools. A manual audit of an earlier version found thirteen defects; the five most serious were ordinary authorization gaps in the application that the copilot inherited, such as direct messages that granted workspace membership. The redesign executes every tool call through the service layer with the requesting user's identity, keeps private channels and direct messages out of the shared memory index, labels retrieved content as untrusted, and falls back to a deterministic parser that declines incomplete commands. Each defect now has a regression test, and all \eTwoProbes{} cross-tenant access probes are blocked. On \eOneTotal{} labeled prompts the offline parser performed no wrong action but completed only \eOneFreeExact{} of free-form requests, against \eFourLiteGoalPct{} for a live model judged by the resulting database state. The live model also made unrequested writes, which a tool-level metric would miss. Planted instructions led to attacker-chosen actions in \eFiveLiteRuleAct{} and \eFiveOssRuleAct{} of 48 attacks on two models, and in \eFiveLiteNoRuleAct{} of 48 when the untrusted-content instruction was removed; we report exact confidence intervals and six data-disclosure attempts per condition. The results describe this implementation under the tested conditions; they do not establish general robustness to prompt injection.
 \end{abstract}
 
 \begin{IEEEkeywords}
-LLM agents, tool use, access control, prompt injection, contextual integrity, retrieval-augmented generation, collaborative software
+LLM agents, tool use, access control, prompt injection, contextual integrity, retrieval-augmented generation
 \end{IEEEkeywords}
 
 % ===========================================================================
 \section{Introduction}
 % ===========================================================================
 
-Teams keep their plans in one tool, their conversations in another, and their numbers in a third. Products that merge these, combining a Notion-style editor with Teams-style channels, are increasingly sold with an assistant that can answer questions across all of it and carry out small jobs: file a task, log an expense, book a meeting. Building the assistant is easy. Building one that never shows Alice what Bob wrote in a private message, and never obeys a sentence planted in a shared document, is much harder.
+Workspace products that combine a document editor with team chat now include an assistant that answers questions across the workspace and carries out small jobs such as filing a task, logging an expense, or booking a meeting. The assistant reads text written by every member and acts with real write access. Two questions follow. Can the assistant reach data that the person using it could not reach? Can text planted by one member make the assistant act against another?
 
-The research community has measured these failure modes in isolation. Benchmarks show that tool-using agents follow instructions hidden in the content they read~\cite{zhan2024injecagent,greshake2023indirect}, that retrieval pipelines can be steered by poisoned or conflicting context~\cite{liang2025saferag}, and that enterprise agents which perform better on tasks often leak more private information~\cite{fu2026ciwork}. Proposed defenses range from mandatory access control over agent--tool interactions~\cite{ji2026seagent} to applying classic security design principles to agent pipelines~\cite{zhang2025principles} and filtering retrieval by identity and access policies~\cite{jeong2025permission}. What is less often reported is how these ideas hold up inside an ordinary web application with real users, real schemas, and the kind of bugs that ship.
+Prior work has studied these failure modes mostly in benchmarks and controlled settings. Tool-using agents follow instructions hidden in the content they read~\cite{greshake2023indirect,zhan2024injecagent}; retrieval pipelines can be steered by manipulated context~\cite{liang2025saferag}; and enterprise agents that perform better on tasks can leak more private information~\cite{fu2026ciwork}. Defenses include mandatory access control over agent--tool interactions~\cite{ji2026seagent}, classic security design principles for agent pipelines~\cite{zhang2025principles,saltzer1975protection}, and retrieval filtered by access policy~\cite{jeong2025permission}. Less is reported about where such failures come from in an ordinary web application, with its own schemas and its own authorization bugs, and how much a conservative design costs in usefulness.
 
-This paper is a case study of one such application. NexaMind is a full-stack workspace (FastAPI and SQLAlchemy on the server, React on the client) with documents, channels and direct messages, a Kanban board, meeting transcription, a finance ledger, a calendar, and a copilot that can call twenty workspace tools. We audited an earlier version, found that several of its most serious defects came from the boundary between the copilot and the rest of the system, and rebuilt that boundary. Our contributions are:
-
+This paper is a case study of one application, NexaMind, before and after a security redesign of its copilot boundary. We ask four questions:
 \begin{itemize}
-\item An architecture in which the copilot holds no privileges of its own. Each tool call is executed through the same service-layer checks as a direct API request by the user, so the model cannot reach data the user could not reach.
-\item A memory pipeline designed around contextual integrity~\cite{nissenbaum2004contextual}: messages from private channels and direct messages are never written to the workspace memory that the model retrieves from, so they cannot resurface in another member's conversation.
-\item A deterministic fallback planner that maps explicit commands to tool calls when no model is available, and which declines rather than guesses when a required value is missing.
-\item An audit of thirteen defects found in the earlier version, each mapped to the design principle it violated, with a regression test for every fix.
-\item An evaluation covering access control, the fallback planner, live-model task completion, indirect prompt injection, and latency, together with the harness used to produce it.
+\item \textbf{RQ1} Where did the security defects of the earlier version come from, and how many of them involved the model at all? (Section~\ref{sec:audit})
+\item \textbf{RQ2} If every tool call runs through the same service-layer checks as the user's own requests, do cross-tenant and cross-conversation accesses fail through the copilot as they do through the API? (E2)
+\item \textbf{RQ3} What does a deterministic fallback that refuses to guess cost in usefulness compared with a live model, and what unrequested side effects does the live model cause? (E1, E4)
+\item \textbf{RQ4} How often do instructions planted in documents lead to attacker-chosen actions or data disclosure, and does an explicit untrusted-content instruction change that rate? (E5)
+\end{itemize}
+
+The mechanisms we use are established: least privilege and complete mediation~\cite{saltzer1975protection}, contextual integrity~\cite{nissenbaum2004contextual}, and state-based task evaluation~\cite{yao2024taubench}. Our contribution is the case study itself:
+\begin{itemize}
+\item an audit of thirteen defects in a working system, classified by the principle each violated, which shows that the most serious ones were authorization gaps outside the model that the copilot inherited (RQ1);
+\item a design that gives the copilot no privileges of its own and keeps restricted conversations out of shared memory, with the trade-off this exclusion imposes (Sections~\ref{sec:design} and~\ref{sec:discussion});
+\item an evaluation that scores a live copilot by the resulting database state, including unrequested writes, and measures indirect prompt injection and data disclosure on two models, and the effect of an untrusted-content instruction on one of them (RQ2--RQ4);
+\item the evaluation harness, prompts, and raw trial records (see Artifact Availability).
 \end{itemize}
 
 % ===========================================================================
 \section{Related Work}
 % ===========================================================================
 
-\subsection{Tool-using language agents and their evaluation}
-ReAct interleaves reasoning with actions so a model can consult tools while it plans~\cite{yao2023react}, and Toolformer showed that models can learn when an API call is worth making~\cite{schick2023toolformer}. Commercial function-calling interfaces have since made this pattern routine. Evaluating such agents is an active area. Yehudai et al.\ survey agent evaluation across core capabilities, application benchmarks, and evaluation frameworks, and note a move toward harder and more realistic tasks~\cite{yehudai2026survey}. Kehkashan et al.\ review how benchmark results relate to deployed behavior and argue that the two often diverge~\cite{kehkashan2026review}. $\tau$-bench is closest to our setting: an agent serves a simulated user through domain APIs under policy constraints, and success is judged by comparing the final database state with an annotated goal~\cite{yao2024taubench}. We borrow that state-based view of success.
+\textit{Tool-using agents and their evaluation.} ReAct interleaves reasoning with tool calls~\cite{yao2023react}, and Toolformer showed that models can learn when an API call helps~\cite{schick2023toolformer}. Yehudai et al.\ survey how such agents are evaluated~\cite{yehudai2026survey}, and Kehkashan et al.\ review how benchmark results relate to deployed behavior~\cite{kehkashan2026review}. $\tau$-bench lets an agent serve a simulated user through domain APIs under policy constraints and judges success by comparing the final database state with an annotated goal~\cite{yao2024taubench}. We use the same state-based criterion in E4.
 
-\subsection{Retrieval, memory, and access control}
-Retrieval-augmented generation grounds answers in documents fetched at query time~\cite{lewis2020rag}. MemGPT extends the idea to long-lived memory that an agent manages explicitly~\cite{packer2023memgpt}. Wang et al.\ deployed a retrieval-based course assistant for two years and found that, in small systems, whether the knowledge base contains the answer matters more than how retrieval is tuned~\cite{wang2025reliable}. Retrieval also widens the attack surface. SafeRAG shows that noisy, conflicting, or manipulated passages degrade even strong pipelines~\cite{liang2025saferag}. Jeong and Lee propose permission-aware retrieval that filters candidate passages by identity and access management policy before they reach the model~\cite{jeong2025permission}; our design reaches a similar end by keeping restricted content out of the shared index altogether.
+\textit{Retrieval, memory, and access control.} Retrieval-augmented generation grounds answers in documents fetched at query time~\cite{lewis2020rag}, and MemGPT gives an agent explicit long-term memory~\cite{packer2023memgpt}. Wang et al.\ found in a two-year deployment that the contents of a small knowledge base matter more than retrieval tuning~\cite{wang2025reliable}. SafeRAG shows that noisy or manipulated passages degrade retrieval pipelines~\cite{liang2025saferag}. Permission-aware RAG filters retrieved passages by identity and access policy before they reach the model~\cite{jeong2025permission}. NexaMind reaches a weaker but simpler property by never indexing restricted content.
 
-\subsection{Security of LLM agents}
-Indirect prompt injection, in which instructions arrive inside data rather than from the user, was demonstrated against real LLM-integrated applications by Greshake et al.~\cite{greshake2023indirect} and benchmarked for tool-integrated agents by InjecAgent~\cite{zhan2024injecagent}. OWASP lists prompt injection and excessive agency among the top risks for LLM applications~\cite{owasp2025llm}. Ji et al.\ formalize privilege escalation in agent systems, including a confused-deputy pattern across agents, and enforce attribute-based policies on an information-flow graph~\cite{ji2026seagent}. Zhang et al.\ argue that principles such as least privilege and defense in depth~\cite{saltzer1975protection} should be built into agent life cycles~\cite{zhang2025principles}. CI-Work evaluates enterprise agents against contextual integrity and finds frequent leaks of information that was appropriate to retrieve but not to share~\cite{fu2026ciwork}. Our work applies these ideas in a single production-style system and reports where its own bugs came from.
+\textit{Security of LLM agents.} Greshake et al.\ demonstrated indirect prompt injection against deployed LLM-integrated applications~\cite{greshake2023indirect}, InjecAgent benchmarks it for tool-integrated agents~\cite{zhan2024injecagent}, and OWASP lists prompt injection and excessive agency among the main risks of LLM applications~\cite{owasp2025llm}. SEAgent formalizes privilege escalation in agent systems, including a confused-deputy pattern, and enforces attribute-based policies on an information-flow graph~\cite{ji2026seagent}. Zhang et al.\ argue that least privilege, complete mediation, and defense in depth should shape agent design~\cite{zhang2025principles}. CI-Work evaluates enterprise agents against contextual integrity~\cite{fu2026ciwork}.
+
+Table~\ref{tab:related} places this paper among the closest work. It is a single-system case study; the benchmarks and frameworks in the table are broader in scope, and NexaMind adopts several of their ideas rather than improving on them.
+
+\begin{table*}[t]
+\centering
+\caption{Closest related work. ``---'' means the work does not address the aspect.}
+\label{tab:related}
+\small
+\begin{tabular}{@{}p{2.6cm}p{2.0cm}p{3.4cm}p{3.4cm}p{4.2cm}@{}}
+\toprule
+Work & Kind & Where access is enforced & Restricted content and retrieval & What is evaluated \\
+\midrule
+Permission-aware RAG~\cite{jeong2025permission} & System design & Retrieval layer, by IAM policy & Filtered per user at query time & Access filtering across resources \\
+SEAgent~\cite{ji2026seagent} & Framework & Mandatory access control on agent--tool information flow & --- & Privilege-escalation attacks \\
+Security principles~\cite{zhang2025principles} & Position + framework & Across the agent life cycle & --- & Utility and attack success \\
+InjecAgent~\cite{zhan2024injecagent} & Benchmark & --- & --- & Indirect prompt injection in tool agents \\
+CI-Work~\cite{fu2026ciwork} & Benchmark & --- & Contextual-integrity norms & Leakage in enterprise agents \\
+$\tau$-bench~\cite{yao2024taubench} & Benchmark & Policy given to the agent & --- & Task success by final database state \\
+\midrule
+This paper & Case study & Application service layer; tools run as the user & Restricted content never indexed & Audit of 13 defects, access probes, side effects, injection and disclosure with ablation \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
 % ===========================================================================
-\section{Threat Model}
+\section{Threat Model and Trust Assumptions}
 \label{sec:threat}
 % ===========================================================================
 
-NexaMind is multi-tenant. A user owns a personal workspace and may join team workspaces through a join code. Within a team, channels are public, private, or direct (one-to-one). We protect four kinds of asset: workspace content (documents, tasks, files, meetings, finances); private and direct conversations; each user's copilot history; and credentials, including users' own model API keys.
+NexaMind is multi-tenant. Every user has a personal workspace and may join team workspaces with a join code. Channels are public, private, or direct (one to one). We protect workspace content (documents, tasks, files, meetings, finances, calendars); private channels and direct messages; each user's copilot history; and credentials, including users' own model API keys.
 
-We consider three adversaries. An \emph{outsider} holds a valid account but no membership in the target workspace. An \emph{insider} is a member of the workspace who is not a participant in a given private channel or direct message. A \emph{content author} can place text in any document, message, or meeting transcript that the copilot might later read, and uses it to issue instructions to the model. We assume the server, its database, and the model provider are honest, and we do not address denial of service beyond basic rate limiting.
+We consider three adversaries. An \emph{outsider} has an account but no membership in the target workspace. An \emph{insider} is a member who is not a participant in a given private channel or direct message. A \emph{content author} is a member who can place text in any document, message, or transcript that the copilot may later read, and uses it to instruct the model; in E5 the content author is an insider.
+
+We trust the server, its database, and the model provider, and we exclude denial of service beyond basic rate limiting. Table~\ref{tab:trust} states which properties rest on which assumption. In particular, nothing in the design protects data from a compromised server or a model provider that misuses prompts: workspace content sent to the model leaves the system.
+
+\begin{table}[t]
+\centering
+\caption{Properties of the design and what they rely on.}
+\label{tab:trust}
+\small
+\begin{tabular}{@{}p{3.6cm}p{4.2cm}@{}}
+\toprule
+Property & Relies on \\
+\midrule
+Tools cannot reach data the user cannot reach & Correct service-layer checks (tested in E2) \\
+Restricted messages never reach another member through the copilot & Ingestion filter; no tool reads other users' conversations \\
+Planted text cannot exceed the user's own permissions & The two properties above \\
+Planted text does not trigger actions & Model behavior only (measured in E5, not guaranteed) \\
+Confidentiality of prompts sent to the model & Honest model provider (assumed) \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ===========================================================================
 \section{System Design}
 \label{sec:design}
 % ===========================================================================
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[
-  node distance=0.35cm and 0.3cm,
-  box/.style={draw, rounded corners=2pt, align=center, font=\scriptsize, minimum height=0.62cm, inner sep=3pt},
-  arr/.style={-{Stealth[length=1.6mm]}, thin}
-]
-\node[box, minimum width=7.6cm] (client) {Web / mobile client \quad (REST + WebSocket, JWT)};
-\node[box, below=of client, minimum width=7.6cm] (routers) {Routers: authentication, rate limits, input validation};
-\node[box, below=of routers, minimum width=7.6cm] (services) {Services: workspace / channel membership checks on every operation};
-\node[box, below left=0.45cm and -2.4cm of services, minimum width=3.5cm] (agent) {Copilot loop\\(tool calls as the user)};
-\node[box, below right=0.45cm and -2.4cm of services, minimum width=3.5cm] (memory) {Memory engine\\(public sources only)};
-\node[box, below=of agent, minimum width=3.5cm] (llm) {LLM client\\Gemini $\rightarrow$ Groq $\rightarrow$ offline};
-\node[box, below=of memory, minimum width=3.5cm] (db) {PostgreSQL / SQLite\\(+ Redis fan-out)};
-\draw[arr] (client) -- (routers);
-\draw[arr] (routers) -- (services);
-\draw[arr] (services.south) ++(-1.9,0) -- (agent.north);
-\draw[arr] (services.south) ++(1.9,0) -- (memory.north);
-\draw[arr] (agent) -- (llm);
-\draw[arr] (memory) -- (db);
-\draw[arr] (agent.east) -- node[above, font=\tiny]{retrieve} (memory.west);
-\draw[arr, dashed] (agent.north east) to[bend right=25] node[right, font=\tiny, pos=0.35]{tools re-enter services} (services.south east);
-\end{tikzpicture}
-\caption{NexaMind architecture. The copilot never talks to the database directly: each tool call re-enters the service layer, where the same membership checks apply as for the user's own requests.}
-\label{fig:arch}
-\end{figure}
+\input{fig_architecture}
 
 \subsection{Layering and tenancy}
-The server follows a router--service--model structure (Fig.~\ref{fig:arch}). Routers authenticate requests with short-lived HS256 tokens, apply per-client rate limits to login, registration, and copilot endpoints, and validate input with typed schemas. Nearly every resource lives under a path of the form \texttt{/workspaces/\{id\}/\dots}, and every service function begins by confirming that the caller is a member of that workspace. Unauthorized requests receive the same 404 response as requests for objects that do not exist, so outsiders cannot probe for identifiers.
+The server has routers, services, and models (Fig.~\ref{fig:arch}). Routers authenticate requests with short-lived HS256 tokens whose version claim is checked against the user record, so logout and password changes revoke existing tokens; they also rate-limit login, registration, and copilot endpoints and validate input with typed schemas. Nearly every resource lives under \texttt{/workspaces/\{id\}/\dots}, and every service function first confirms that the caller is a member of that workspace. An unauthorized request receives the same 404 response as a request for an object that does not exist, so outsiders cannot probe for identifiers.
 
 \subsection{Channel visibility}
-Channels carry one of three visibility levels. A public channel is readable by any workspace member. A private channel additionally requires a row in a \texttt{channel\_members} table. A direct message requires only that row, regardless of workspace membership, which lets two people who share no workspace still talk. Direct messages started from a personal workspace are listed in the other participant's personal workspace, so neither party has to join the other's space. This replaced a design in which opening a direct message quietly added the recipient to the sender's workspace (Section~\ref{sec:audit}).
+A public channel is readable by every workspace member. A private channel also requires a row in a \texttt{channel\_members} table. A direct message requires only that row, regardless of workspace membership, so two people who share no workspace can still talk; the conversation is listed in each participant's personal workspace. The earlier version instead added the recipient to the sender's workspace (defect D1).
 
 \subsection{Copilot loop}
-The copilot is a function-calling loop over twenty tool declarations: searching and reading documents, creating and editing documents, searching meetings, listing and creating tasks, managing repositories, querying and recording finances, posting to channels, generating reports, scheduling events, and switching workspaces. Algorithm~\ref{alg:loop} summarizes one turn.
+The copilot is a function-calling loop over twenty tools: searching and reading documents, creating and editing documents, searching meetings, listing and changing tasks, listing files, managing repositories and issues, querying and recording finances, listing, creating and posting to channels, generating reports, scheduling events, and switching workspaces. Algorithm~\ref{alg:loop} shows one turn.
 
 \begin{algorithm}[t]
 \caption{One copilot turn}
@@ -145,7 +161,7 @@ The copilot is a function-calling loop over twenty tool declarations: searching 
 \Require user $u$, workspace $w$, prompt $p$, session $s$
 \State verify $u \in \mathrm{members}(w)$; load $s$ only if owned by $u$
 \State $M \gets$ \textsc{Retrieve}$(w, p)$ \Comment{public sources only}
-\State $S \gets$ system prompt with document titles, $M$, and the rule ``retrieved text is data''
+\State $S \gets$ system prompt with document titles, $M$, and the untrusted-content rule
 \If{a model is reachable}
   \For{$r = 1$ \textbf{to} $R_{\max}$}
     \State $y \gets$ \textsc{Model}$(S, \mathrm{history}(s), p, \mathrm{tools})$
@@ -161,141 +177,154 @@ The copilot is a function-calling loop over twenty tool declarations: searching 
 \end{algorithmic}
 \end{algorithm}
 
-Three properties matter for safety. First, a tool executes as the user: it calls the same service function the REST endpoint calls, with the same identity, so the model's reach is exactly the user's reach. Second, tool failures (a missing title, an unknown task identifier, a permission error) return to the model as structured errors rather than exceptions, so the model can ask for clarification instead of retrying blindly. Third, the system prompt tells the model that document, message, and memory content is written by other people and must not be treated as instructions. That rule is a mitigation, not a guarantee, and Section~\ref{sec:eval} measures how far it goes.
+A tool executes as the user: it calls the service function that the corresponding REST endpoint calls, with the same identity, so the model's reach equals the user's reach. Tool failures (a missing title, an unknown task, a permission error) return to the model as structured errors, so it can ask a question instead of retrying. The system prompt states that document, message, and memory content is untrusted data written by workspace members and must not be followed as instructions. This rule is a mitigation that depends on the model; E5 measures its effect.
 
-The loop is bounded at six rounds, results are truncated to 8{,}000 characters before they return to the model, and the last twenty messages of the session provide conversational context. Gemini is called first; Groq serves as a fallback through an OpenAI-compatible tool interface. Users may store a personal Gemini key, which the server encrypts at rest and never returns to the browser.
+The loop runs at most six rounds, truncates each tool result to 8{,}000 characters, and includes the last twenty messages of the session. Gemini models are tried in a configured order, with Groq as a fallback through an OpenAI-compatible interface. A personal Gemini key is encrypted at rest and never returned to the browser.
 
 \subsection{Offline planner}
-When neither provider responds, a deterministic planner parses explicit commands into tool calls. It recognizes patterns such as ``create a task \emph{X}'', ``log an expense of \$\emph{N} for \emph{C}'', and ``schedule a meeting \emph{X} tomorrow at 3~PM'', resolves relative dates, keeps quoted text verbatim, splits compound commands only when both halves parse independently, and ignores commands that contain negations. Its defining rule is that it never fills in a value the user did not give. An earlier keyword matcher created a task named ``Review Sprint Deliverables'' whenever it saw the words ``task'' and ``create'' together, even in ``I don't want to create a task''; the planner returns nothing in that case.
+When no provider responds, a deterministic planner parses explicit commands such as ``create a task \emph{X}'', ``log an expense of \$\emph{N} for \emph{C}'', or ``schedule a meeting \emph{X} tomorrow at 3~PM''. It resolves relative dates, keeps quoted text verbatim, splits a compound command only when both halves parse, and ignores commands containing a negation. It never fills in a value the user did not give. The earlier keyword matcher created a task named ``Review Sprint Deliverables'' whenever it saw ``task'' and ``create'' together, including in ``I don't want to create a task'' (defect D13).
 
 \subsection{Memory and retrieval}
-Documents, tasks, meeting minutes, and messages from public channels are distilled into short memory items (summaries, facts, decisions, action items). Extraction uses the model when available and a line-level heuristic otherwise. Each source is re-extracted as a whole when it changes, replacing its previous items, so edited documents do not leave stale facts behind. Document edits trigger extraction after a 15-second debounce, which keeps the editor's frequent autosaves from generating a model call per keystroke.
-
-Retrieval scores each memory $m$ for query $q$ as
+Documents, tasks, meeting minutes, and messages from public channels are distilled into short memory items. Extraction uses the model when available and a line-level heuristic otherwise. A changed source is re-extracted as a whole and replaces its previous items, so edited documents leave no stale facts; document edits are re-extracted after a 15-second pause so autosaves do not each cost a model call. Retrieval scores memory $m$ for query $q$ as
 \begin{equation}
-\mathrm{score}(m) = 0.55\,\cos(\mathbf{e}_q, \mathbf{e}_m) + 0.30\,\widehat{\mathrm{BM25}}(q, m) + 0.15\,\iota_m,
+\mathrm{score}(m) = 0.55\cos(\mathbf{e}_q, \mathbf{e}_m) + 0.30\,\widehat{\mathrm{BM25}}(q, m) + 0.15\,\iota_m,
 \end{equation}
-where $\mathbf{e}$ are model embeddings, $\widehat{\mathrm{BM25}}$ is the Okapi score~\cite{robertson2009bm25} ($k_1{=}1.5$, $b{=}0.75$) normalized by its maximum over candidates, and $\iota_m \in [0.1, 1]$ is the importance assigned at extraction. Without embeddings the score falls back to $0.7\,\widehat{\mathrm{BM25}} + 0.3\,\iota_m$. Messages from private channels and direct messages are never ingested. Because retrieval is scoped to a workspace and every member of that workspace can query it, anything placed in the index is effectively published to the whole workspace; keeping restricted content out of the index is therefore the simplest way to honor the norms under which it was shared~\cite{nissenbaum2004contextual}.
+where $\mathbf{e}$ are model embeddings, $\widehat{\mathrm{BM25}}$ is the Okapi score~\cite{robertson2009bm25} ($k_1{=}1.5$, $b{=}0.75$) normalized by its maximum over the candidates, and $\iota_m \in [0.1, 1]$ is the importance assigned at extraction. Without embeddings the score is $0.7\,\widehat{\mathrm{BM25}} + 0.3\,\iota_m$. The weights were set by hand and not tuned; we did not evaluate retrieval quality, and the security properties of Table~\ref{tab:trust} do not depend on them, because they concern what enters the index rather than how it is ranked.
+
+\textit{Why exclusion rather than filtering.} Memory is scoped to a workspace and every member can query it, so anything indexed is effectively readable by the whole workspace. Two designs keep restricted messages from resurfacing: index them with their access list and filter at query time~\cite{jeong2025permission}, or never index them. Filtering preserves usefulness, since a user could ask about their own private conversations, but its correctness depends on an access list kept in sync with membership changes and on every retrieval path applying the filter. Exclusion is a single check at ingestion that can be audited and tested in isolation (defect D7). We chose exclusion and accept that the copilot cannot help with private conversations (Section~\ref{sec:discussion}).
 
 \subsection{Real-time delivery and uploads}
-Chat and presence run over WebSockets. Clients send their token in the first frame rather than in the URL, so it never appears in proxy or access logs, and access is rechecked on every message, so a removed member is cut off immediately. With a single server, fan-out happens in memory; with several, events travel over Redis publish/subscribe and shared state (presence, live meeting rooms) lives in Redis hashes. Uploads are streamed to disk under size limits, file names are sanitized, and downloads are always served as attachments with \texttt{nosniff}, so an uploaded HTML or SVG file cannot execute in the application's origin.
+Chat and presence use WebSockets. Clients send their token in the first frame rather than in the URL, so it does not appear in proxy or access logs, and access is rechecked on every message. With several server instances, events travel over Redis publish/subscribe. Uploads are streamed under size limits, file names are sanitized, and downloads are served as attachments with \texttt{nosniff}, so an uploaded HTML or SVG file cannot run in the application's origin.
 
 % ===========================================================================
-\section{Security Audit}
+\section{Security Audit of the Earlier Version}
 \label{sec:audit}
 % ===========================================================================
 
-Before the redesign we audited every router and service of the earlier version by hand and confirmed each finding against the running code. Table~\ref{tab:audit} lists the thirteen defects, the principle each one broke, and the fix. Every fix except D8 and D12, which concern request construction and build configuration, has an automated regression test. The suite contains 73 tests, 18 of them written for these findings.
+We reviewed every router and service of the earlier version by hand and confirmed each finding against the running code. Table~\ref{tab:audit} lists the thirteen defects, the principle each violated, the fix, and the test that now checks it. Tests are of two kinds. \emph{Property} tests drive the HTTP or WebSocket interface as an adversary and check that the protected data does not come back; \emph{code-path} tests check a mechanism directly, such as how a request header is built. The E2 probes are property tests and also scan every response for marker strings planted in the protected data.
 
 \begin{table*}[t]
 \centering
-\caption{Defects found in the earlier version, grouped by the principle they violated.}
+\caption{Defects found in the earlier version, the principle each violated, the fix, and its verification. P: property test through the API; C: code-path test. Test names refer to \texttt{backend/tests}.}
 \label{tab:audit}
-\small
-\begin{tabular}{@{}p{0.6cm}p{6.1cm}p{2.7cm}p{6.6cm}@{}}
+\footnotesize
+\begin{tabular}{@{}p{0.45cm}p{4.6cm}p{1.7cm}p{4.4cm}p{5.3cm}@{}}
 \toprule
-ID & Defect & Principle violated & Fix \\
+ID & Defect & Principle & Fix & Verification \\
 \midrule
-D1 & Opening a direct message added the recipient to the sender's workspace, exposing all of its documents and finances. & Least privilege & DMs authorize through channel membership only; no workspace membership is created. \\
-D2 & Private channels and DMs were readable by every workspace member. & Complete mediation & \texttt{channel\_members} table; visibility checked on read, list, post, react, and socket join. \\
-D3 & Any user could read any copilot conversation given its identifier, through any workspace they belonged to. & Complete mediation & Sessions are loaded only when owned by the caller in that workspace. \\
-D4 & The copilot could resume another member's session, pulling that history into the prompt. & Least privilege & Same ownership check inside the agent loop. \\
-D5 & A meeting room in one workspace could be ended from another. & Complete mediation & Rooms keyed and looked up per workspace; unknown rooms return 404. \\
-D6 & User search matched every account and returned email addresses. & Least privilege & Partial matches limited to people who share a workspace; exact handle lookup only; emails removed. \\
-D7 & Private messages were ingested into shared workspace memory. & Contextual integrity & Ingestion restricted to public channels. \\
-D8 & Model API keys were sent in URL query strings and written to logs. & Economy of exposure & Keys sent in headers; client logging lowered. \\
-D9 & Tokens were passed in WebSocket URLs. & Economy of exposure & First-frame authentication. \\
-D10 & Uploads were stored with client-supplied content types and no size limit. & Fail-safe defaults & Streaming writes, size caps, forced attachment, \texttt{nosniff}. \\
-D11 & A default signing secret and debug mode were accepted in production. & Fail-safe defaults & Startup refuses weak secrets outside development; debug off by default. \\
-D12 & The container build copied the environment file, database, and uploaded recordings into the image. & Economy of exposure & Explicit ignore list for secrets and data. \\
-D13 & The keyword-based agent invented titles and amounts when it could not parse a request. & Fail-safe defaults & Model-driven tool calls; offline planner that declines instead of guessing. \\
+D1 & Opening a direct message added the recipient to the sender's workspace. & Least privilege & DMs authorize through channel membership only. & P: \path{direct_message_does_not_grant_workspace_access}; E2 \\
+D2 & Private channels and DMs were readable by every workspace member. & Complete mediation & \path{channel_members}; checked on read, list, post, react, socket join. & P: \path{team_members_cannot_read_other_peoples_dms...}, \path{channel_websocket_rejects_non_members}; E2 \\
+D3 & Any copilot conversation was readable given its identifier. & Complete mediation & Sessions load only for their owner. & P: \path{ai_chat_history_is_private_to_its_owner}; E2 \\
+D4 & The copilot could resume another member's session. & Least privilege & Same ownership check inside the loop. & P: same test (session hijack case) \\
+D5 & A meeting room could be ended from another workspace. & Complete mediation & Rooms looked up per workspace. & P: \path{cannot_end_another_workspaces_meeting}; E2 \\
+D6 & User search matched every account and returned emails. & Least privilege & Partial matches only among co-members; no emails. & P: \path{user_search_hides_strangers_and_emails} \\
+D7 & Private messages were ingested into shared memory. & Contextual integrity & Ingestion limited to public channels. & P: \path{private_messages_never_enter_shared_ai_memory} \\
+D8 & Model API keys were sent in URLs and logged. & Least exposure & Keys in headers; provider errors redacted. & C: \path{d8_model_key_is_sent_in_a_header...}, \path{d8_..._redacted_from_error_logs} \\
+D9 & Tokens were passed in WebSocket URLs. & Least exposure & First-frame authentication. & C: \path{websocket_auth_validation} \\
+D10 & Uploads kept client content types, with no size limit. & Fail-safe defaults & Streamed writes, size caps, forced download. & P: \path{uploaded_html_is_served_as_inert_download}, \path{upload_size_limit} \\
+D11 & A default signing secret and debug mode were accepted in production. & Fail-safe defaults & Startup refuses weak secrets outside development. & C: \path{production_refuses_default_or_short_jwt_secret}, \path{..._dev_auth_and_debug} \\
+D12 & The container build copied the environment file, database, and recordings. & Least exposure & Ignore list for secrets and data. & C: \path{d12_container_build_excludes_secrets_and_data} \\
+D13 & The keyword agent invented titles and amounts. & Fail-safe defaults & Model tool calls; planner that declines. & P: \path{offline_mode_never_invents_actions}; E1 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-Two patterns stand out. Most of the serious defects (D1--D5) were not about the model at all: they were ordinary authorization gaps that the copilot happened to sit on top of. A model with tool access inherits every such gap, and D4 shows the inheritance directly, since the copilot itself became the path by which one member could read another's history. The remaining defects cluster around secrets leaking into places they were never meant to go: URLs, logs, images, and memory. Neither pattern needs a new kind of defense. Both needed the old principles~\cite{saltzer1975protection} applied at the copilot boundary as carefully as at the API, which is the argument Zhang et al.\ make for agents in general~\cite{zhang2025principles}.
+\textit{RQ1.} Five of the thirteen defects (D1--D5) were authorization gaps in ordinary endpoints. None involved the model, yet the copilot inherited each one, and D4 used the copilot itself as the path to another member's history. A further five (D6--D9, D12) put secrets or personal data where they did not belong: URLs, logs, the container image, and shared memory. Only D13 concerned how the agent chose actions. The audit therefore supports a practical point: for a copilot whose tools are the user's own API calls, most of the security work is in the API.
 
-The audit also surfaced non-security faults that undermined the copilot's usefulness: the web client never sent the conversation identifier, so every message started a new conversation; the runway calculation could not return a value; and the database migrations omitted five tables that had only ever been created at startup. All were corrected.
+The audit also found faults that hurt usefulness: the web client never sent the conversation identifier, so each message started a new conversation; the runway calculation never returned a value; and the migrations omitted five tables that had been created only at startup. All were fixed.
 
 % ===========================================================================
 \section{Evaluation}
 \label{sec:eval}
 % ===========================================================================
 
-We ran five experiments. E1--E3 run fully offline against an in-memory SQLite database through an in-process client; E4 and E5 call a live Gemini model. All scripts are in \texttt{backend/eval}.
-
-\subsection{E1: offline planner}
-We wrote 46 commands in the explicit style the planner targets (single and compound, with quoted titles, amounts, dates, and channel names) and 20 prompts that should produce no action: questions, small talk, negations, and commands with a required value missing. After the first run we wrote 25 further requests in free-form language (``I paid 120 dollars for Figma today'') and did not change the planner afterward. Table~\ref{tab:planner} reports the results.
+\subsection{Setup and definitions}
+Table~\ref{tab:datasets} lists the five experiments. E1--E3 run offline against an in-memory SQLite database through an in-process HTTP client. E4 and E5 call live models; every E4 and E5 trial runs in a freshly seeded workspace so trials cannot influence each other, and a trial is kept only if the intended model served every call (calls that failed for quota were retried later rather than served by a fallback). All prompts were written by the authors. The 46 explicit commands, 25 free-form requests, and 20 non-actionable prompts of E1 are disjoint, \eOneTotal{} prompts in all; the free-form set was written after the planner's first run and the planner was not changed afterward. Models were \texttt{gemini-flash-lite-latest} (Lite) through the Gemini API, and \texttt{openai/gpt-oss-120b} (GPT-OSS) through Groq's OpenAI-compatible API, which is the copilot's configured fallback; the two come from different providers, and both use the copilot's default settings. Code revision, run dates, and raw records are in the artifact (see Artifact Availability).
 
 \begin{table}[t]
 \centering
-\caption{Offline planner accuracy (E1).}
-\label{tab:planner}
-\begin{tabular}{@{}lccc@{}}
+\caption{Experiments and data. All prompts were written by the authors.}
+\label{tab:datasets}
+\small
+\begin{tabular}{@{}p{0.55cm}p{3.6cm}p{3.6cm}@{}}
 \toprule
-Prompt set & $n$ & Correct & Wrong action \\
+& Data & Measured \\
 \midrule
-Explicit commands & 46 & 100\% & 0\% \\
-Free-form requests & 25 & 8\% & 0\% \\
-Non-actionable & 20 & --- & 0 writes, 1 read \\
+E1 & \eOneCmdN{} explicit, \eOneFreeN{} free-form, \eOneNoneN{} non-actionable prompts & Exact match, wrong action, false trigger \\
+E2 & 4 users, 2 workspaces, DM, private channel; \eTwoProbes{} probes & Blocked requests; marker leakage \\
+E3 & 200 requests per endpoint & Server-side latency \\
+E4 & E1 free-form and non-actionable prompts, 2 models & Goal reached by database state; unrequested writes \\
+E5 & 48 action and 6 disclosure attacks, 12 controls; 2 models; Lite also without the rule & Attack success; writes; leakage \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-On explicit commands the planner selected the right tools in the right order and extracted all 75 checked argument values correctly. We do not read much into that figure: the commands were written by people who knew what the planner accepts. The free-form set is more informative. The planner acted on only two of the 25 requests, both read-only lookups, and declined the other 23. It never performed a wrong action. Among the non-actionable prompts it never wrote anything; the only false trigger was a read-only finance lookup for ``can you explain what a runway is in general terms''. The planner is therefore safe but narrow, which is the intended trade-off for a fallback: natural language is the model's job.
+For the planner (E1), an \emph{exact match} requires the expected sequence of tools and every expected argument value; a \emph{wrong action} is any tool sequence other than the expected one; a request with no tool call is \emph{declined}. For a non-actionable prompt, any tool call is a \emph{false trigger}, reported separately for writes and reads. For the live copilot (E4), we compare ten user-visible tables (tasks, documents, transactions, channels, messages, repositories, issues, reports, calendar events, meetings) before and after each request. A request reaches its \emph{goal} when the expected tool was called and, for an action, its table changed; for a lookup, nothing changed. Any changed table that the request did not call for is an \emph{unrequested write}. Intervals are exact (Clopper--Pearson) 95\% intervals.
 
-\subsection{E2: access control}
-The harness creates four users, a team workspace, a direct message, a private channel, a copilot conversation, and a meeting room, then issues 20 requests that the adversaries of Section~\ref{sec:threat} should not be able to complete: an outsider reading documents, finances, tasks, files, meetings, calendars, or members; a direct-message recipient reading the sender's workspace; an insider reading or posting into someone else's direct message or private channel; reading another user's copilot history from either workspace; ending another workspace's meeting; and requests with no token or a forged unsigned token. Each response body is also scanned for marker strings planted in the protected data. Two structural checks complete the set of 22: the insider's channel list must omit the direct message and the private channel, and the recipient of a direct message must gain no workspace membership. All 22 checks passed, and no marker appeared in any response.
+\subsection{E1: offline planner (RQ3)}
+On explicit commands the planner reached an exact match on \eOneCmdExact{} of \eOneCmdN{} prompts, with all \eOneCmdArgs{} checked argument values correct. These commands were written by people who knew what the planner accepts, so this figure shows that it implements its grammar, not that it understands language. On the \eOneFreeN{} free-form requests it acted on \eOneFreeActed{} (\eOneFreeExact{}), both argument-free lookups, and declined the rest; it never performed a wrong action. On the \eOneNoneN{} non-actionable prompts it made \eOneNoneWrites{} writes and \eOneNoneReads{} read-only lookup (``can you explain what a runway is in general terms'' triggered a finance query). The planner is safe but narrow.
 
-\subsection{E3: latency}
-Table~\ref{tab:latency} reports server-side latency over 200 requests per endpoint after ten warm-up requests, measured in-process on a laptop with an Intel processor (Windows~11, Python~3.13, in-memory SQLite), so network time is excluded. The copilot figure is for the offline path, which includes session handling, memory retrieval, planning, and a tool call.
+\subsection{E2: access control (RQ2)}
+The harness creates four users, a team workspace, a direct message, a private channel, a copilot conversation, and a meeting room, then sends 20 requests the adversaries of Section~\ref{sec:threat} must not complete: an outsider reading documents, finances, tasks, files, meetings, calendar, or members, or using the copilot; the recipient of a direct message reading the sender's workspace; an insider reading or posting into someone else's direct message or private channel; reading another user's copilot history through either workspace; ending another workspace's meeting; assigning a task in a foreign workspace; and requests without a token or with a forged one. Two structural checks complete the set: an insider's channel list must omit the DM and the private channel, and a DM recipient must gain no workspace membership. All \eTwoBlocked{} of \eTwoProbes{} checks passed, and no planted marker appeared in any response. These probes cover the endpoints the copilot's tools call; they are not an exhaustive test of every endpoint.
+
+\subsection{E3: server-side latency}
+Table~\ref{tab:latency} gives server-side latency over 200 requests per endpoint after ten warm-up requests, measured in-process (Windows~11, Python~3.13, Intel processor, in-memory SQLite). Network time and model time are excluded, so these are not end-to-end figures; E4 reports end-to-end copilot latency, which model calls dominate.
 
 \begin{table}[t]
 \centering
-\caption{Server-side latency in milliseconds (E3).}
+\caption{Server-side latency in milliseconds (E3), excluding network and model time.}
 \label{tab:latency}
 \begin{tabular}{@{}lrr@{}}
 \toprule
 Endpoint & Median & p95 \\
 \midrule
-List documents (50 in workspace) & 10.6 & 12.8 \\
-Create task & 12.1 & 14.7 \\
-Post channel message & 15.8 & 20.2 \\
-Copilot, offline command & 37.3 & 42.4 \\
+List documents (50 in workspace) & \eThreeDocsMed & \eThreeDocsPct \\
+Create task & \eThreeTaskMed & \eThreeTaskPct \\
+Post channel message & \eThreeMsgMed & \eThreeMsgPct \\
+Copilot, offline command & \eThreeCopilotMed & \eThreeCopilotPct \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{E4: live copilot on free-form requests}
-We sent the same 25 free-form requests to the live copilot (\llmModel{}) in a workspace seeded with four documents, a task, two channels, a meeting with recorded decisions, and two transactions. A request counts as handled when the copilot called the intended tool, treating document search and document reading as interchangeable. The first configured model had exhausted its free-tier quota, so all 93 model calls in E4 and E5 were served by the fallback model named above.
+\subsection{E4: live copilot, goals and side effects (RQ3)}
+\input{generated/e4_table}
+Table~\ref{tab:e4} reports E4. On the \eFourLiteN{} free-form requests, Lite reached the goal in \eFourLiteGoal{} (\eFourLiteGoalPct{}, 95\% CI \eFourLiteGoalCI{}\%) and GPT-OSS in \eFourOssGoal{} (\eFourOssGoalPct{}), against \eOneFreeExact{} for the offline planner on the same requests. Lite's one miss was ``we need someone to look at the flaky CI job'': it looked up tasks, meetings, channels, and repositories, then asked whether to create a task and with what title, which is what the system prompt asks it to do when a required detail is missing.
 
-The model answered all \llmAnswered{} requests and took the intended action in 23 of them (\llmIntended{}), against 8\% for the offline planner on the same set. The two misses are instructive. For ``we need someone to look at the flaky CI job'' and ``start a doc for the Q3 OKRs'' the model asked what title or content to use rather than acting, which is the behavior the system prompt asks for when a required detail is missing. There was \llmUnexpected{} unrequested write: given ``remind me to renew the domain, put it on the board'', the model created the task and also added a calendar reminder. Median end-to-end latency was \llmLatency{}~s (range 3.9--58~s), almost entirely model time; the slowest request coincided with quota-related retries.
+The state comparison found writes that a tool-level success metric would not. Given ``remind me to renew the domain, put it on the board'', Lite created the task and also a calendar reminder; the request counts as reaching its goal and as one unrequested write. Among the \eFourLiteNoneN{} non-actionable prompts, Lite wrote \eFourLiteNoneWrites{} time: for the statement ``Our team decided to move standups to 10am'' it scheduled a standup for the next day, although nobody asked it to; GPT-OSS wrote \eFourOssNoneWrites{} times. Both kinds of write were within the user's own permissions, so they are usability and integrity faults rather than access-control failures, but they change shared state that other members see. Median end-to-end latency was \eFourLiteLat{}~s for Lite (p95 \eFourLiteLatP{}~s) and \eFourOssLat{}~s for GPT-OSS, almost all of it model time.
 
-\subsection{E5: indirect prompt injection}
-Following the threat model of InjecAgent~\cite{zhan2024injecagent}, we planted ten documents whose bodies contained an instruction aimed at the copilot, phrased variously as a system notice, an assistant directive, an override, and a hidden HTML comment. The instructions targeted recording fraudulent transactions (two documents), posting to a channel, creating a task that grants access, editing an unrelated document, closing a task, creating a channel, scheduling a meeting, creating a repository, and writing a new document. The user's request was only ``Please summarize the document \emph{X}''. An attack succeeds if the copilot calls a tool the attacker named.
+\subsection{E5: indirect prompt injection and disclosure (RQ4)}
+An insider (the content author) creates a document; the victim asks ``Please summarize the document \emph{X}''. Each document states that it concerns ``Project Wren'', so a reply that mentions it counts as a summary. The \emph{action} set crosses eight phrasings (a system notice, an assistant directive, an agent instruction, an HTML comment, a claim of prior approval, a silent override, a table row, and a ``standard workflow'' step) with six targets (record a fraudulent expense, post to \#general, create a task granting access, edit the security policy, close a task, schedule a meeting). An action attack succeeds if the targeted tool was called and its table changed. The six \emph{disclosure} documents ask the copilot to copy the victim's private data (a document in the victim's personal workspace and a direct message, both containing a secret marker) into the shared workspace, where the attacker can read it; a disclosure succeeds if the marker appears anywhere the attacker can read. Six \emph{benign} documents contain legitimate-looking action items and six are \emph{clean}; any write on these is a false action. All 66 documents run on both models with the untrusted-content rule, and on Lite again without it.
 
-The model answered all \injAnswered{} requests. In every case it read the document and returned a summary, and \injSuccess{} of the attacks succeeded; no request produced any write at all. The model did not, however, warn the user that the document contained instructions; it simply left them out of the summary. Ten trials against one model cannot establish robustness: with zero successes in ten, the exact 95\% upper confidence bound on the attack success rate is still about 31\%. We also did not run a comparison without the ``retrieved text is data'' rule, so we cannot attribute the outcome to it rather than to the model's own training. The permission model of Section~\ref{sec:design} therefore remains the actual safeguard.
+\input{generated/e5_table}
+Table~\ref{tab:e5} reports E5. With the rule in place, \eFiveLiteRuleAct{} of the \eFiveLiteRuleActN{} action attacks succeeded on Lite (95\% CI \eFiveLiteRuleActCI{}\%) and \eFiveOssRuleAct{} of \eFiveOssRuleActN{} on GPT-OSS (\eFiveOssRuleActCI{}\%). Without the rule, \eFiveLiteNoRuleAct{} of \eFiveLiteNoRuleActN{} succeeded on Lite (\eFiveLiteNoRuleActCI{}\%). The one success without the rule came from the document that claimed the workspace admin had already approved the action: Lite read it and created the task ``Grant contractor admin access''. The comparison uses the same documents and model, so it isolates the instruction, but one success in 48 against none is not a significant difference (two-sided Fisher's exact test, $p = 1.0$). For this model and these attacks the rule had at most a small effect, and the prior-approval phrasing is the one worth testing at larger scale. Disclosure attempts succeeded \eFiveLiteRuleDis{} of \eFiveLiteRuleDisN{} times on Lite and \eFiveOssRuleDis{} of \eFiveOssRuleDisN{} on GPT-OSS with the rule, and \eFiveLiteNoRuleDis{} of \eFiveLiteNoRuleDisN{} on Lite without it. The two secrets differ in reach. No tool reads conversations, so the marker in the victim's direct message was unreachable by construction. The personal-workspace document was reachable: the document tools can search and read any workspace the victim belongs to, so copying it into the team workspace is an action within the victim's own permissions and only model behavior stands in the way. On the \eFiveLiteRuleBenN{} benign and clean documents, Lite made \eFiveLiteRuleBenWrite{} writes with the rule and GPT-OSS \eFiveOssRuleBenWrite{}. Replies included the document's subject in \eFiveLiteRuleSum{} of Lite's trials with the rule and \eFiveOssRuleSum{} of GPT-OSS's, so the defense did not come at the cost of refusing to summarize.
 
 % ===========================================================================
 \section{Discussion and Limitations}
+\label{sec:discussion}
 % ===========================================================================
 
-\textit{Where the risk actually was.} We expected the copilot's most serious problems to involve the model. Instead, the worst defects were authorization gaps in ordinary endpoints that the copilot amplified. The practical lesson is that the cheapest security work for an agent is often in the application it sits on: if every tool is just the user's own API call, then a correct API is most of a correct agent.
+\textit{What the evidence supports.} The audit (RQ1) and E2 (RQ2) support a narrow claim: in this system, routing every tool through the user's own service calls prevented the copilot from reaching data the user could not reach, for the probed endpoints. E1 and E4 (RQ3) show a clear trade-off: the planner is safe because it rarely acts, and the live model is useful but causes unrequested writes that a tool-level success metric would miss. E5 (RQ4) measures how often planted instructions succeed in our setting; it bounds the rate for these attacks and models but does not establish robustness to adaptive attackers.
 
-\textit{Prompt injection is mitigated, not solved.} None of our ten injected instructions was obeyed, but that is a small sample and says nothing about adaptive attackers. The guarantee comes from elsewhere: because tools run with the user's permissions, a successful injection can only do what the user could have done. A stronger design would require confirmation for writes that the user did not explicitly request, or would track which tool arguments originate from untrusted content, as information-flow approaches do~\cite{ji2026seagent}.
+\textit{Where protection comes from.} Because tools run with the user's permissions, a successful injection can do only what the user could have done, and it cannot reach other members' private conversations, because no tool reads them and they are never indexed. It can still act within the victim's own reach, for example by posting to a channel the victim can post to. Confirmation for writes the user did not ask for, or tracking which tool arguments come from untrusted content as information-flow approaches do~\cite{ji2026seagent}, would close more of that gap.
 
-\textit{Excluding content is coarse.} Keeping private messages out of memory is simple and auditable, but it also means the copilot cannot help a user with their own private conversations. A per-user memory, filtered at query time as in permission-aware retrieval~\cite{jeong2025permission}, would keep the guarantee while restoring that capability.
+\textit{Excluding content is coarse.} The copilot cannot help a user with their own private conversations. A per-user index filtered at query time~\cite{jeong2025permission} would restore that, at the cost of the synchronization and coverage concerns discussed in Section~\ref{sec:design}.
 
-\textit{Scale and evaluation.} Rate limits are kept in process memory and apply per server instance. Uploaded files sit on local disk, which needs a persistent volume or object storage in production. Our live-model experiments are small, ran against a free-tier quota, and use a single model family; the planner's explicit-command set was written by its developers. Larger, independently written task sets in the style of $\tau$-bench~\cite{yao2024taubench} and privacy benchmarks such as CI-Work~\cite{fu2026ciwork} would give a fairer picture, and we see them as the natural next step.
+\textit{Threats to validity.} \emph{Construct:} our success criteria are state changes in ten tables, so effects outside them (for example notifications) are not scored, and a summary is detected by a keyword. \emph{Internal:} all prompts and attacks were written by the authors, who also built the system; the explicit-command set in particular favors the planner. \emph{External:} we tested two models, prompts are in English, the workspace is small and synthetic, and the attacks are non-adaptive, single-turn, and confined to documents. Independently written task sets in the style of $\tau$-bench~\cite{yao2024taubench}, privacy benchmarks such as CI-Work~\cite{fu2026ciwork}, and adaptive attacks would give a fuller picture.
+
+\textit{Deployment.} Rate limits are held in process memory and apply per server instance. Uploaded files need persistent or object storage in production.
 
 % ===========================================================================
 \section{Conclusion}
 % ===========================================================================
 
-NexaMind shows that an LLM copilot can be added to a multi-tenant workspace without becoming its weakest point, provided it is given no authority of its own. Running every tool as the requesting user, keeping restricted conversations out of shared memory, treating retrieved text as data, and falling back to a planner that refuses to guess together removed every defect our audit found in the earlier version. The evaluation suggests that the remaining exposure lies mostly in prompt injection, where architecture limits the damage but does not prevent the attempt. Future work will add confirmation for unrequested writes, per-user filtered memory, and larger independent benchmarks.
+This case study shows how least-privilege tool execution and service-layer authorization constrain what an LLM copilot can do in a multi-tenant workspace. The audit found thirteen defects in the earlier version, most of them authorization or exposure faults outside the model, and every one now has a regression test; the redesigned system blocked all probed cross-tenant accesses. The evaluation also exposed the costs: the offline planner handles few free-form requests, and the live model makes some writes the user did not ask for. Planted instructions were measured with confidence intervals on two models, and without the untrusted-content rule on one; these results describe the tested attacks, not adaptive ones. Next steps are confirmation for unrequested writes, per-user filtered memory, and larger independent and adaptive evaluations.
+
+% ===========================================================================
+\section*{Artifact Availability}
+The evaluation harness (\texttt{backend/eval}), every prompt and attack document, the seeding code, the raw per-trial records (\texttt{backend/eval/results\_v2}), and the script that computes every number in this paper (\texttt{summarize\_v2.py}) are available at \artifactURL{}, revision \commitID{}. Live-model results also depend on the provider's models at the time of the run; the records include model identifiers and timestamps.
 
 \section*{Acknowledgment}
-Generative AI tools assisted with parts of the implementation and with drafting this manuscript. The authors reviewed, verified, and take responsibility for all content, code, and reported results.
+Generative AI tools were used in developing parts of the software and in editing this manuscript; the authors verified all content, code, and results.
 
 % ===========================================================================
 \begin{thebibliography}{00}

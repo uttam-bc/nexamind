@@ -1,0 +1,16 @@
+% Values from backend/eval/results_v2/summary.json.
+\begin{table*}[t]
+\centering
+\caption{Live Copilot requests scored by resulting database state.}
+\label{tab:e4}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+Model & Goal reached & 95\% CI & Asked first & Unrequested writes & Non-actionable writes & Median (s) \\
+\midrule
+Lite & 24/25 & [80, 100] & 1 & 1 & 1/20 & 4.0 \\
+GPT-OSS & 17/23 & [52, 90] & 5 & 0 & 1/20 & 2.0 \\
+\bottomrule
+\end{tabular}
+\end{table*}

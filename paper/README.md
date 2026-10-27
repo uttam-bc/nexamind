@@ -1,30 +1,34 @@
 # NexaMind paper
 
-`nexamind.tex` is a self-contained IEEE conference paper (IEEEtran, bibliography included).
+IEEE conference paper (IEEEtran, 8 pages, bibliography included).
+
+| File | What it is |
+|---|---|
+| `nexamind.tex` | The paper |
+| `fig_architecture.tex` | Fig. 1 (TikZ) |
+| `generated/results.tex` | Every reported number, as LaTeX macros |
+| `generated/e4_table.tex`, `generated/e5_table.tex` | Tables IV-V |
+
+Files in `generated/` are written by `backend/eval/summarize_v2.py` from the raw trial records. Never edit them by hand.
 
 ## Compile
 
-Upload `nexamind.tex` to Overleaf (it bundles every package used), or locally:
-
-```bash
-pdflatex nexamind.tex
-pdflatex nexamind.tex
-```
-
-Run it twice so cross-references and citations resolve.
+Upload the whole `paper/` folder to Overleaf, or locally run `pdflatex nexamind.tex` twice so references resolve.
 
 ## Before submitting
 
-- Replace the author block (names, department, university, email).
-- Check the venue's page limit and AI-use policy; adjust the Acknowledgment accordingly.
+- Fill in the author block, and `\commitID` / `\artifactURL` at the top of `nexamind.tex`.
+- Commit the code and the raw results, tag the commit, and use that tag as `\commitID`.
+- Check the venue's AI-use policy. IEEE requires AI-generated content to be disclosed in the acknowledgments.
 
-## Reproducing the numbers
+## Reproducing the numbers (from `backend/`)
 
-All results come from scripts in `backend/eval/` and are saved next to them.
-
-| Paper section | Command (from `backend/`) | Output |
+| Experiments | Command | Output |
 |---|---|---|
-| E1–E3 (planner, access control, latency) | `python -m eval.run_eval` | `eval/results.json` |
-| E4–E5 (live copilot, prompt injection) | `python -u -m eval.run_llm_eval` (needs `GEMINI_API_KEY`) | `eval/llm_results.json` |
+| E1-E3 (planner, access control, latency) | `python -m eval.run_eval` | `eval/results.json` |
+| E4-E5, model Lite | `python -m eval.run_llm_eval_v2 --provider gemini --model gemini-flash-lite-latest` | `eval/results_v2/*.jsonl` |
+| E5 without the untrusted-content rule | the same command with `--ablation` | `eval/results_v2/*-norule.jsonl` |
+| E4-E5, model Flash | `python -m eval.run_llm_eval_v2 --provider gemini --model gemini-3.5-flash` | `eval/results_v2/*.jsonl` |
+| Numbers and tables in the paper | `python -m eval.summarize_v2` | `../paper/generated/` |
 
-Latency depends on hardware; live-model results depend on which Gemini model the account's quota allows.
+Live runs need `GEMINI_API_KEY`. They append one record per trial, so a run stopped by a quota limit resumes where it stopped. Latency depends on hardware, and live results depend on the provider's models at the time of the run.

@@ -1,0 +1,35 @@
+% Architecture figure (Fig. 1). The copilot has no edge to the database: its only way to state is the
+% service layer, through the same calls (and membership checks) as the user's own requests.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\scriptsize,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=0.75cm, inner sep=3pt, fill=white},
+  trusted/.style={box, fill=gray!8},
+  arr/.style={-{Stealth[length=1.6mm]}, semithick},
+  lbl/.style={font=\tiny, fill=white, inner sep=1pt},
+]
+% Rows: client, routers, (copilot | services), (LLM | memory | database)
+\node[box, minimum width=8.2cm] (client) at (0, 0) {Web / mobile client\quad(REST + WebSocket, JWT)};
+\node[box, minimum width=8.2cm] (routers) at (0, -1.15) {Routers: authentication, rate limits, input validation};
+\node[box, minimum width=3.6cm] (agent) at (-2.3, -2.6) {Copilot loop\\(no privileges of its own)};
+\node[trusted, minimum width=3.6cm] (services) at (2.3, -2.6) {Services: workspace and\\channel membership checks};
+\node[box, minimum width=2.45cm] (llm) at (-2.85, -4.25) {LLM client\\Gemini $\rightarrow$ Groq\\$\rightarrow$ offline planner};
+\node[box, minimum width=2.45cm] (memory) at (0, -4.25) {Memory engine\\(public sources only)};
+\node[box, minimum width=2.45cm] (db) at (2.85, -4.25) {PostgreSQL / SQLite\\(+ Redis fan-out)};
+
+\draw[arr] (client) -- (routers);
+\draw[arr] ([xshift=-2.3cm]routers.south) -- node[lbl, right] {\texttt{/ai/chat}} (agent.north);
+\draw[arr] ([xshift=2.3cm]routers.south) -- node[lbl, right] {other API calls} (services.north);
+\draw[arr] (agent) -- node[lbl, above] {tool calls, as the user} (services);
+\draw[arr] (agent) -- (llm);
+\draw[arr] (agent.south east) -- node[lbl, left, pos=0.55] {retrieve} (memory.north west);
+\draw[arr, dashed] (services.south west) -- node[lbl, right, pos=0.45] {ingest} (memory.north east);
+\draw[arr] (services) -- (db);
+\draw[arr] (memory) -- (db);
+\end{tikzpicture}
+\caption{NexaMind architecture. The copilot has no path to the database: every tool call enters the service layer
+(shaded) with the requesting user's identity and passes the same membership checks as that user's own API calls.
+Only content from public channels, documents, tasks and meeting minutes is ingested into memory.}
+\label{fig:arch}
+\end{figure}
