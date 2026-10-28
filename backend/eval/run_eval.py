@@ -20,6 +20,7 @@ os.environ.update({
     "GROQ_API_KEY": "",
     "REDIS_URL": "",
     "RATE_LIMIT_ENABLED": "false",
+    "REQUIRE_EMAIL_VERIFICATION": "false",  # eval users live only in the in-memory database
     "RUN_BACKGROUND_JOBS": "false",
     "AUTO_CREATE_SCHEMA": "false",
     "UPLOAD_DIR": str(Path(__file__).parent / ".eval_uploads"),
@@ -136,8 +137,8 @@ async def evaluate_access_control() -> dict:
                      json={"content": "secret-private-marker"})
         chat = (await c.post(f"/workspaces/{tid}/ai/chat", headers=hx.h(alice["token"]),
                              json={"prompt": "secret-ai-marker notes"})).json()
-        room = (await c.post(f"/workspaces/{alice['personal']}/video/rooms", headers=hx.h(alice["token"]),
-                             json={"name": "Board"})).json()
+        meeting = (await c.post(f"/workspaces/{alice['personal']}/meetings/instant", headers=hx.h(alice["token"]),
+                                json={"title": "Board", "client_request_id": "eval-board-meeting"})).json()
 
         # A DM opened by Alice toward Mallory must not give Mallory access to Alice's personal workspace.
         await c.post(f"/workspaces/{alice['personal']}/channels/dm", headers=hx.h(alice["token"]),
@@ -163,8 +164,8 @@ async def evaluate_access_control() -> dict:
             ("team member reads others' AI chat", "GET", f"/workspaces/{tid}/ai/sessions/{chat['session_id']}", e, None),
             ("outsider reads AI chat via own workspace", "GET",
              f"/workspaces/{mallory['personal']}/ai/sessions/{chat['session_id']}", m, None),
-            ("outsider ends another workspace's video room", "POST",
-             f"/workspaces/{mallory['personal']}/video/rooms/{room['room_id']}/end", m, {}),
+            ("outsider ends another workspace's meeting", "POST",
+             f"/workspaces/{mallory['personal']}/meetings/{meeting['id']}/end", m, {"scope": "all"}),
             ("outsider assigns task to themselves in foreign workspace", "POST", f"/workspaces/{ap}/tasks", m,
              {"title": "x"}),
             ("anonymous reads documents", "GET", f"/workspaces/{ap}/documents", None, None),

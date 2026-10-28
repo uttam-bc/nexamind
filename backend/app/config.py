@@ -70,7 +70,7 @@ class Settings(BaseSettings):
         "gemini-2.5-flash",
     ]
     gemini_embedding_model: str = "gemini-embedding-001"
-    groq_chat_model: str = "llama-3.3-70b-versatile"
+    groq_chat_model: str = "openai/gpt-oss-120b"  # tool calling; llama-3.3-70b-versatile is no longer served to this key
     groq_transcription_model: str = "whisper-large-v3-turbo"
     agent_max_tool_rounds: int = 6
     # Background work: memory re-extraction after edits and recording transcription.

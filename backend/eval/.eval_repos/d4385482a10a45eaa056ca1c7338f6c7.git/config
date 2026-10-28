@@ -1,0 +1,17 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = true
+	symlinks = false
+	ignorecase = true
+	logAllRefUpdates = true
+[receive]
+	fsckObjects = true
+	maxInputSize = 314572800
+	denyDeleteCurrent = true
+[transfer]
+	fsckObjects = true
+[uploadpack]
+	allowFilter = true
+[gc]
+	auto = 6700

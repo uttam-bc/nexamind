@@ -24,6 +24,7 @@ import {
 import Logo from './ui/Logo';
 import ThemeToggle from './ui/ThemeToggle';
 import WorkspaceSwitch from './WorkspaceSwitch';
+import UserAvatar from './UserAvatar';
 import { notify } from '../context/ToastContext';
 import { originOf } from '../lib/viewTransition';
 
@@ -230,10 +231,7 @@ export default function Sidebar({
             aria-expanded={menu === 'account'}
             className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors duration-fast hover:bg-slate-100"
           >
-            <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-700">
-              {(user?.name || 'U').slice(0, 1).toUpperCase()}
-              <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${presenceColors[userPresence] || presenceColors.online}`} />
-            </span>
+            <UserAvatar user={user} size="md" presence={userPresence} showPresence />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">{user?.name || 'You'}</span>
               <span className="block truncate text-xs capitalize text-slate-500">{userPresence}</span>

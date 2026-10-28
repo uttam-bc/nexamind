@@ -1,0 +1,448 @@
+{
+  "environment": {
+    "python": "3.13.3",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 189 Stepping 1, GenuineIntel",
+    "database": "SQLite (in-memory, aiosqlite)"
+  },
+  "planner": {
+    "command_syntax": {
+      "prompts": 46,
+      "tool_sequence_accuracy": 1.0,
+      "exact_match_accuracy": 1.0,
+      "argument_accuracy": 1.0,
+      "argument_checks": 75,
+      "no_action_rate": 0.0,
+      "wrong_action_rate": 0.0,
+      "failures": []
+    },
+    "paraphrases": {
+      "prompts": 25,
+      "tool_sequence_accuracy": 0.08,
+      "exact_match_accuracy": 0.08,
+      "argument_accuracy": 0.0,
+      "argument_checks": 7,
+      "no_action_rate": 0.92,
+      "wrong_action_rate": 0.0,
+      "failures": [
+        {
+          "prompt": "remind me to renew the domain, put it on the board",
+          "expected": [
+            [
+              "create_task",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "we need someone to look at the flaky CI job",
+          "expected": [
+            [
+              "create_task",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "can you jot down a task for updating the README",
+          "expected": [
+            [
+              "create_task",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "put 'Prepare investor deck' on our kanban",
+          "expected": [
+            [
+              "create_task",
+              {
+                "title": "Prepare investor deck"
+              }
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "I paid 120 dollars for Figma today",
+          "expected": [
+            [
+              "create_transaction",
+              {
+                "amount": 120.0
+              }
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "we got paid $5,000 by Acme Corp",
+          "expected": [
+            [
+              "create_transaction",
+              {
+                "type": "income",
+                "amount": 5000.0
+              }
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "note down that AWS cost us 310 this month",
+          "expected": [
+            [
+              "create_transaction",
+              {
+                "amount": 310.0
+              }
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "spent $60 on team lunch, please record it",
+          "expected": [
+            [
+              "create_transaction",
+              {
+                "amount": 60.0
+              }
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "start a doc for the Q3 OKRs",
+          "expected": [
+            [
+              "create_document",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "I want a page where we keep interview questions",
+          "expected": [
+            [
+              "create_document",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "add 'Use feature flags' to the engineering principles doc",
+          "expected": [
+            [
+              "edit_document",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "pull up the security policy",
+          "expected": [
+            [
+              "get_document",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "what does the onboarding doc say about laptops?",
+          "expected": [
+            [
+              "get_document",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "let's meet with design on Thursday at 2pm about the logo",
+          "expected": [
+            [
+              "create_calendar_event",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "block 4pm tomorrow for a 1:1 with Sam",
+          "expected": [
+            [
+              "create_calendar_event",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "tell #general that the office is closed Monday",
+          "expected": [
+            [
+              "post_channel_message",
+              {
+                "channel_name": "general"
+              }
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "let everyone in engineering know the build is green",
+          "expected": [
+            [
+              "post_channel_message",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "we need a channel for the hackathon",
+          "expected": [
+            [
+              "create_channel",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "spin up a repo for the analytics pipeline",
+          "expected": [
+            [
+              "create_repo",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "are we profitable?",
+          "expected": [
+            [
+              "search_finance",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "anything in our docs about refunds?",
+          "expected": [
+            [
+              "search_documents",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "take me to the Marketing team space",
+          "expected": [
+            [
+              "switch_workspace",
+              {}
+            ]
+          ],
+          "got": []
+        },
+        {
+          "prompt": "move 'Fix login bug' to done",
+          "expected": [
+            [
+              "update_task_status",
+              {}
+            ]
+          ],
+          "got": []
+        }
+      ]
+    },
+    "non_actionable_prompts": 20,
+    "false_write_actions": 0,
+    "false_read_only_actions": 1,
+    "false_actions": [
+      {
+        "prompt": "can you explain what a runway is in general terms",
+        "got": [
+          [
+            "search_finance",
+            {}
+          ]
+        ]
+      }
+    ]
+  },
+  "access_control": {
+    "probes": 22,
+    "blocked": 22,
+    "results": [
+      {
+        "probe": "outsider reads documents",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider reads a document by id",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider reads finances",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider reads finance summary",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider lists tasks",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider lists files",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider lists meetings",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider lists calendar",
+        "status": 403,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider lists members",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider uses copilot",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "DM target reads sender's workspace docs",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "team member reads others' DM",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "team member posts into others' DM",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "team member reads private channel",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "team member reads others' AI chat",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider reads AI chat via own workspace",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider ends another workspace's video room",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "outsider assigns task to themselves in foreign workspace",
+        "status": 404,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "anonymous reads documents",
+        "status": 401,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "forged token reads documents",
+        "status": 401,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "team member's channel list hides DM and private channel",
+        "status": 200,
+        "leaked": false,
+        "blocked": true
+      },
+      {
+        "probe": "DM target gains no workspace membership",
+        "status": 200,
+        "leaked": false,
+        "blocked": true
+      }
+    ]
+  },
+  "latency": {
+    "GET documents (50 docs)": {
+      "median_ms": 10.6,
+      "p95_ms": 12.76,
+      "iterations": 200
+    },
+    "POST task": {
+      "median_ms": 12.12,
+      "p95_ms": 14.7,
+      "iterations": 200
+    },
+    "POST channel message": {
+      "median_ms": 15.76,
+      "p95_ms": 20.21,
+      "iterations": 200
+    },
+    "Copilot offline command": {
+      "median_ms": 37.34,
+      "p95_ms": 42.42,
+      "iterations": 200
+    }
+  }
+}

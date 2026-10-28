@@ -33,6 +33,7 @@ import LandingPage from './pages/LandingPage';
 import CreateGroupModal from './components/CreateGroupModal';
 import BootScreen from './components/BootScreen';
 import Logo from './components/ui/Logo';
+import { getStoredAvatar } from './lib/avatarStorage';
 import WorkspaceSwitch from './components/WorkspaceSwitch';
 import { useDialogManager } from './lib/dialogManager';
 import { roomTransition, originOf } from './lib/viewTransition';
@@ -134,6 +135,8 @@ export default function App() {
     try {
       // In parallel: on a distant server each round trip costs a few hundred milliseconds.
       const [userData, wsList] = await Promise.all([api.getMe(), api.listWorkspaces()]);
+      const storedAvatar = getStoredAvatar(userData?.id);
+      if (storedAvatar && userData) userData.avatar_url = storedAvatar;
       setUser(userData);
       setWorkspaces(wsList);
 
@@ -320,6 +323,8 @@ export default function App() {
       <LandingPage
         onLoginSuccess={(newToken, userData) => {
           setToken(newToken);
+          const storedAvatar = getStoredAvatar(userData?.id);
+          if (storedAvatar && userData) userData.avatar_url = storedAvatar;
           setUser(userData);
           setAuthToken(newToken);
         }}

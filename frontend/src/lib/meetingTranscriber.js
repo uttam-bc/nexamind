@@ -41,6 +41,7 @@ export class MeetingTranscriber {
     this.error = null;
     this.uploaded = 0;
     this.failed = []; // chunks that exhausted their retries
+    this.failedText = []; // text segments that exhausted their retries
     this.queue = [];
     this._uploading = false;
     this._track = null;
@@ -53,6 +54,7 @@ export class MeetingTranscriber {
     this._levelTimer = null;
     this._chunk = { heard: false, startedAt: 0 }; // speech seen during the chunk being recorded
     this._lastLoud = 0;
+    this._lastOffset = 0;
   }
 
   _set(changes) {
@@ -67,12 +69,17 @@ export class MeetingTranscriber {
       mode: this.mode,
       uploaded: this.uploaded,
       pending: this.queue.length,
-      failed: this.failed.length,
+      failed: this.failed.length + this.failedText.length,
+      audioFailed: this.failed.length,
+      textFailed: this.failedText.length,
     };
   }
 
   _offset() {
-    return Math.max(0, Date.now() - this.startedAt);
+    const raw = Math.max(0, Date.now() - this.startedAt);
+    const monotonic = Math.max(raw, this._lastOffset || 0);
+    this._lastOffset = monotonic;
+    return monotonic;
   }
 
   /** Start (or keep going with a new microphone track). */
@@ -258,6 +265,13 @@ export class MeetingTranscriber {
       c.attempts = 0;
     });
     this.queue.push(...chunks);
+
+    const texts = this.failedText.splice(0);
+    texts.forEach((item) => {
+      item.attempts = 0;
+      this._sendText(item);
+    });
+
     this._set({ status: 'retrying', error: null });
     this._drain();
   }
@@ -328,7 +342,8 @@ export class MeetingTranscriber {
   }
 
   async _sendText(item) {
-    for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt += 1) {
+    const startAttempt = item.attempts || 0;
+    for (let attempt = startAttempt; attempt <= RETRY_DELAYS.length; attempt += 1) {
       try {
         await api.addTranscriptSegment(this.workspaceId, this.meetingId, {
           text: item.text,
@@ -340,9 +355,14 @@ export class MeetingTranscriber {
         this.onChange?.(this.snapshot());
         return;
       } catch {
+        item.attempts = attempt + 1;
         if (attempt < RETRY_DELAYS.length) await sleep(RETRY_DELAYS[attempt]);
+        if (!navigator.onLine) {
+          await new Promise((resolve) => window.addEventListener('online', resolve, { once: true }));
+        }
       }
     }
+    this.failedText.push(item);
     this._set({ status: 'error', error: 'Some phrases could not be saved to the transcript.' });
   }
 

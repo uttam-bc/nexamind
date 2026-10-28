@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1260" viewBox="0 0 1800 1260" role="img" aria-labelledby="title desc">
+<title id="title">NexaMind — System Architecture</title>
+<desc id="desc">High-contrast, publication-ready system architecture diagram for NexaMind 2.0 with dark typography, sharp lines, and non-overlapping routing.</desc>
+
+<defs>
+  <!-- Sharp, bold arrow markers -->
+  <marker id="arrowBlack" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+    <path d="M1 2 L12 7 L1 12 Z" fill="#000000"/>
+  </marker>
+  <marker id="arrowBlue" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+    <path d="M1 2 L12 7 L1 12 Z" fill="#1d4ed8"/>
+  </marker>
+  <marker id="arrowSlate" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+    <path d="M1 2 L12 7 L1 12 Z" fill="#334155"/>
+  </marker>
+
+  <style>
+    text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      fill: #000000;
+    }
+    .doc-title { font-size: 36px; font-weight: 800; fill: #000000; letter-spacing: -0.5px; }
+    .doc-sub { font-size: 17px; font-weight: 600; fill: #1e293b; }
+    .sec-tag { font-size: 15px; font-weight: 800; fill: #000000; letter-spacing: 1.2px; }
+    .card-head { font-size: 20px; font-weight: 700; fill: #000000; }
+    .card-body { font-size: 15px; font-weight: 600; fill: #0f172a; }
+    .card-sub { font-size: 13.5px; font-weight: 500; fill: #334155; }
+    .card-meta { font-size: 12.5px; font-weight: 600; fill: #475569; }
+    .line-label { font-size: 13px; font-weight: 700; fill: #000000; }
+    .line-label-blue { font-size: 13px; font-weight: 700; fill: #1d4ed8; }
+
+    /* High-contrast crisp border styling */
+    .card-box {
+      fill: #ffffff;
+      stroke: #0f172a;
+      stroke-width: 2.2;
+      rx: 14;
+    }
+    .tier-box {
+      fill: #ffffff;
+      stroke: #0f172a;
+      stroke-width: 2.8;
+      rx: 20;
+    }
+    .banner-box {
+      fill: #f8fafc;
+      stroke: #0f172a;
+      stroke-width: 1.8;
+      rx: 10;
+    }
+
+    /* Crisp connector paths */
+    .wire-black {
+      fill: none;
+      stroke: #000000;
+      stroke-width: 3.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      marker-end: url(#arrowBlack);
+    }
+    .wire-blue {
+      fill: none;
+      stroke: #1d4ed8;
+      stroke-width: 3.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      marker-end: url(#arrowBlue);
+    }
+    .wire-dash {
+      fill: none;
+      stroke: #334155;
+      stroke-width: 2.6;
+      stroke-dasharray: 9 7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      marker-end: url(#arrowSlate);
+    }
+  </style>
+</defs>
+
+<!-- Pure White Background -->
+<rect width="1800" height="1260" fill="#ffffff"/>
+
+<!-- Title Header -->
+<text x="60" y="65" class="doc-title">NexaMind — System Architecture</text>
+<text x="60" y="98" class="doc-sub">Architecture traced from the NexaMind 2.0 source and Render deployment configuration</text>
+
+<!-- ========================================================================= -->
+<!-- 1. CLIENT APPLICATIONS TIER (y: 135 to 295)                               -->
+<!-- ========================================================================= -->
+<text x="60" y="150" class="sec-tag">CLIENT APPLICATIONS</text>
+
+<!-- Web Client -->
+<rect x="60" y="170" width="510" height="125" class="card-box"/>
+<text x="85" y="208" class="card-head">Web Client</text>
+<text x="85" y="238" class="card-body">React 19 · Vite · Tailwind CSS</text>
+<text x="85" y="265" class="card-sub">Browser UI, workspace state and authenticated API calls</text>
+
+<!-- Mobile Client -->
+<rect x="620" y="170" width="510" height="125" class="card-box"/>
+<text x="645" y="208" class="card-head">Mobile Client</text>
+<text x="645" y="238" class="card-body">React Native · Expo</text>
+<text x="645" y="265" class="card-sub">Mobile workspace views and bearer-token API calls</text>
+
+<!-- Meeting Media Engine -->
+<rect x="1180" y="170" width="560" height="125" class="card-box"/>
+<text x="1205" y="208" class="card-head">Meeting Media in the Clients</text>
+<text x="1205" y="238" class="card-body">WebRTC Peer Connections (Audio / Video)</text>
+<text x="1205" y="265" class="card-sub">API provides signalling &amp; ICE configuration; media is peer-to-peer</text>
+
+
+<!-- ========================================================================= -->
+<!-- 2. RENDER · DOCKER API SERVICE (x: 50 to 1150, y: 395 to 895)             -->
+<!-- ========================================================================= -->
+<rect x="50" y="395" width="1100" height="500" class="tier-box"/>
+<text x="75" y="430" class="sec-tag">RENDER · DOCKER API SERVICE (FASTAPI)</text>
+
+<!-- FastAPI application Box -->
+<rect x="75" y="455" width="1050" height="90" class="card-box"/>
+<text x="100" y="492" class="card-head">FastAPI Application</text>
+<text x="100" y="522" class="card-body">CORS · Security Headers · Authentication Dependencies · Request Validation · Error Handling · /health</text>
+
+<!-- Arrow: FastAPI -> Routers -->
+<path d="M 600 545 V 590" class="wire-black"/>
+
+<!-- API Routers Box -->
+<rect x="75" y="595" width="1050" height="92" class="card-box"/>
+<text x="100" y="632" class="card-head">API Routers</text>
+<text x="100" y="662" class="card-body">Auth · Workspaces · Documents · Projects/Tasks · Channels · Files · Meetings · Calendar · Finance · AI · Reports · Repositories</text>
+
+<!-- Arrow: Routers -> Service Layer -->
+<path d="M 600 687 V 730" class="wire-black"/>
+
+<!-- Service Layer Box -->
+<rect x="75" y="735" width="1050" height="105" class="card-box"/>
+<text x="100" y="772" class="card-head">Service Layer &amp; Domain Logic</text>
+<text x="100" y="802" class="card-body">Workspace/Domain Logic · Permissions · AI Agent Orchestration &amp; Tools · Document/File Handling</text>
+<text x="100" y="826" class="card-sub">Meetings / Transcription · Notifications · Calendar · Finance · Repositories · Background Jobs</text>
+
+<!-- ORM Banner -->
+<rect x="75" y="850" width="1050" height="32" class="banner-box"/>
+<text x="95" y="871" class="card-meta">SQLAlchemy Async Models + Pydantic Schemas · Database session commits on success and rolls back on errors</text>
+
+
+<!-- ========================================================================= -->
+<!-- 3. DATA & FILES TIER (x: 1220 to 1740, y: 395 to 895)                     -->
+<!-- ========================================================================= -->
+<text x="1220" y="430" class="sec-tag">DATA &amp; FILES</text>
+
+<!-- Relational Database -->
+<rect x="1220" y="455" width="520" height="150" class="card-box"/>
+<text x="1245" y="495" class="card-head">Relational Database</text>
+<text x="1245" y="528" class="card-body">PostgreSQL on Render (Production)</text>
+<text x="1245" y="555" class="card-sub">SQLite for Local Development</text>
+<text x="1245" y="582" class="card-meta">Users · Workspaces · Content · Tasks · Meetings · Financial Records</text>
+
+<!-- File and Repository Storage -->
+<rect x="1220" y="635" width="520" height="130" class="card-box"/>
+<text x="1245" y="675" class="card-head">File &amp; Repository Storage</text>
+<text x="1245" y="708" class="card-body">Configured Local Disk by Default</text>
+<text x="1245" y="738" class="card-sub">Optional S3-compatible bucket (Cloudflare R2 / AWS S3) when configured</text>
+
+<!-- Redis (Optional) -->
+<rect x="1220" y="795" width="520" height="95" class="card-box"/>
+<text x="1245" y="835" class="card-head">Redis (Optional)</text>
+<text x="1245" y="865" class="card-sub">Shared WebSocket presence and channel event broadcast across API instances</text>
+
+
+<!-- ========================================================================= -->
+<!-- 4. CONNECTED PROVIDERS & REAL-TIME SERVICES (y: 990 to 1140)             -->
+<!-- ========================================================================= -->
+<text x="60" y="965" class="sec-tag">CONNECTED PROVIDERS &amp; REAL-TIME SERVICES</text>
+
+<!-- AI Providers -->
+<rect x="60" y="990" width="390" height="145" class="card-box"/>
+<text x="85" y="1030" class="card-head">AI Providers</text>
+<text x="85" y="1062" class="card-body">Google Gemini · Groq</text>
+<text x="85" y="1090" class="card-sub">Copilot Loop, Embeddings and Transcription</text>
+<text x="85" y="1115" class="card-meta">User or server API keys, when configured</text>
+
+<!-- WebSocket Services -->
+<rect x="490" y="990" width="390" height="145" class="card-box"/>
+<text x="515" y="1030" class="card-head">WebSocket Services</text>
+<text x="515" y="1062" class="card-body">Real-Time Chat · Presence · Signalling</text>
+<text x="515" y="1090" class="card-sub">Redis pub/sub is used when configured</text>
+<text x="515" y="1115" class="card-meta">Connections authenticate with token</text>
+
+<!-- Email & Identity -->
+<rect x="920" y="990" width="390" height="145" class="card-box"/>
+<text x="945" y="1030" class="card-head">Email &amp; Identity</text>
+<text x="945" y="1062" class="card-body">Gmail SMTP for Email &amp; OTP</text>
+<text x="945" y="1090" class="card-sub">Google Sign-In via Google Identity Services</text>
+<text x="945" y="1115" class="card-meta">Verified OAuth 2.0 token claims</text>
+
+<!-- WebRTC Connection Setup -->
+<rect x="1350" y="990" width="390" height="145" class="card-box"/>
+<text x="1375" y="1030" class="card-head">WebRTC Connection Setup</text>
+<text x="1375" y="1062" class="card-body">STUN / TURN ICE Relays</text>
+<text x="1375" y="1090" class="card-sub">NAT Traversal for Restricted Networks</text>
+<text x="1375" y="1115" class="card-meta">TURN credentials are configuration-dependent</text>
+
+
+<!-- ========================================================================= -->
+<!-- 5. CONNECTOR WIRES (CLEAN ORTHOGONAL ROUTING - ZERO OVERLAPS)              -->
+<!-- ========================================================================= -->
+
+<!-- 1. Web Client -> FastAPI (enters at x: 310) -->
+<path d="M 315 295 V 355 H 420 V 450" class="wire-blue"/>
+<rect x="330" y="342" width="130" height="22" rx="4" fill="#ffffff"/>
+<text x="335" y="358" class="line-label-blue">HTTPS · REST API</text>
+
+<!-- 2. Mobile Client -> FastAPI (enters at x: 875) -->
+<path d="M 875 295 V 450" class="wire-blue"/>
+<rect x="885" y="355" width="130" height="22" rx="4" fill="#ffffff"/>
+<text x="890" y="371" class="line-label-blue">HTTPS · REST API</text>
+
+<!-- 3. WebRTC Signalling: Meeting Media -> Backend (enters via open gutter at x: 1110) -->
+<path d="M 1380 295 V 355 H 1080 V 450" class="wire-dash"/>
+<rect x="1170" y="342" width="150" height="22" rx="4" fill="#ffffff"/>
+<text x="1175" y="358" class="line-label">WebSocket Signalling</text>
+
+<!-- 4. Service Layer -> Relational Database (via open alley x: 1185) -->
+<path d="M 1125 755 H 1185 V 530 H 1215" class="wire-black"/>
+<rect x="1132" y="742" width="105" height="20" rx="4" fill="#ffffff"/>
+<text x="1135" y="756" class="line-label">SQL Queries</text>
+
+<!-- 5. Service Layer -> File & Repo Storage (via open alley x: 1185) -->
+<path d="M 1125 790 H 1185 V 700 H 1215" class="wire-black"/>
+<rect x="1132" y="778" width="95" height="20" rx="4" fill="#ffffff"/>
+<text x="1135" y="792" class="line-label">File IO / Git</text>
+
+<!-- 6. Service Layer -> Redis (via open alley x: 1185) -->
+<path d="M 1125 825 H 1185 V 842 H 1215" class="wire-dash"/>
+<rect x="1132" y="812" width="60" height="20" rx="4" fill="#ffffff"/>
+<text x="1135" y="826" class="line-label">Pub/Sub</text>
+
+<!-- 7. Service Layer -> AI Providers (Vertical drop at x: 255) -->
+<path d="M 255 840 V 985" class="wire-blue"/>
+<rect x="265" y="915" width="75" height="22" rx="4" fill="#ffffff"/>
+<text x="270" y="931" class="line-label-blue">AI Service</text>
+
+<!-- 8. Service Layer -> WebSocket Manager (Vertical drop at x: 685) -->
+<path d="M 685 840 V 985" class="wire-blue"/>
+<rect x="695" y="915" width="135" height="22" rx="4" fill="#ffffff"/>
+<text x="700" y="931" class="line-label-blue">WebSocket Dispatch</text>
+
+<!-- 9. Service Layer -> Email & Identity (Vertical drop at x: 1040) -->
+<path d="M 1040 840 V 985" class="wire-dash"/>
+<rect x="1050" y="915" width="125" height="22" rx="4" fill="#ffffff"/>
+<text x="1055" y="931" class="line-label">SMTP / OAuth Call</text>
+
+<!-- 10. WebRTC Client -> WebRTC ICE Relays (Clear right gutter at x: 1750) -->
+<path d="M 1600 295 V 345 H 1760 V 955 H 1545 V 985" class="wire-dash"/>
+<rect x="1650" y="333" width="100" height="22" rx="4" fill="#ffffff"/>
+<text x="1655" y="349" class="line-label">ICE Discovery</text>
+
+
+<!-- ========================================================================= -->
+<!-- 6. DEPLOYMENT FOOTNOTE                                                    -->
+<!-- ========================================================================= -->
+<rect x="60" y="1170" width="1680" height="52" class="banner-box"/>
+<text x="85" y="1202" class="card-meta">Deployment: Render static site serves the built web client; Render Docker service runs the API; managed Render PostgreSQL stores application records. Optional integrations are shown dashed.</text>
+
+</svg>

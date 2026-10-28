@@ -38,6 +38,7 @@ import { AttachButton, AttachmentTray, DropZone } from './chat/AttachmentCompose
 import FilePickerDialog from './chat/FilePickerDialog';
 import { startCall } from './calls/CallManager';
 import MessageAttachments from './chat/MessageAttachments';
+import UserAvatar from './UserAvatar';
 import { notify, confirmDialog } from '../context/ToastContext';
 
 const PAGE_SIZE = 100;
@@ -693,9 +694,7 @@ export default function Channels({
         {/* User Presence Footer */}
         <div className="p-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
           <div className="flex items-center gap-2 truncate">
-            <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
-              {user?.name ? user.name.slice(0, 2).toUpperCase() : 'ME'}
-            </div>
+            <UserAvatar user={user} size="sm" />
             <div className="min-w-0">
               <span className="font-bold text-slate-900 block truncate">{user?.name}</span>
               <span className="text-xs tabular-nums text-indigo-600 block truncate">

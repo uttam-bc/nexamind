@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import {
   AlertTriangle,
   Captions,
+  Check,
+  Copy,
   Hand,
   Loader2,
   Maximize2,
@@ -14,6 +16,7 @@ import {
   MoreHorizontal,
   PhoneOff,
   RefreshCw,
+  Search,
   Send,
   Users,
   Video,
@@ -560,42 +563,123 @@ export function ChatPanel({ messages, userId, onSend, onRetry, base, workspaceId
 
 function TranscriptPanel({ segments, enabled, status, isHost, onToggle, onRetry }) {
   const endRef = useRef(null);
+  const [query, setQuery] = useState('');
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
-  }, [segments.length]);
+    if (!query) {
+      endRef.current?.scrollIntoView({ block: 'end' });
+    }
+  }, [segments.length, query]);
+
+  const filtered = query.trim()
+    ? segments.filter(
+        (s) =>
+          (s.text && s.text.toLowerCase().includes(query.toLowerCase())) ||
+          (s.speaker_name && s.speaker_name.toLowerCase().includes(query.toLowerCase()))
+      )
+    : segments;
+
+  const handleCopyAll = () => {
+    if (!segments.length) return;
+    const formatted = segments
+      .map((s) => `[${formatDuration(s.offset_ms / 1000)}] ${s.speaker_name}: ${s.text}`)
+      .join('\n');
+    navigator.clipboard?.writeText(formatted).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="p-3 border-b border-slate-700 space-y-2 text-sm">
+      <div className="p-3 border-b border-slate-700 space-y-2.5 text-sm bg-slate-900/40">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${enabled && status?.status === 'recording' ? 'bg-rose-500 animate-pulse' : 'bg-slate-500'}`} />
-            {!enabled ? 'Transcription is off' : status?.mode === 'browser' ? 'Transcribing (browser speech recognition)' : 'Transcribing'}
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${enabled && status?.status === 'recording' ? 'bg-rose-500 animate-pulse' : 'bg-slate-500'}`} />
+            <span className="text-xs sm:text-sm font-semibold truncate text-slate-200">
+              {!enabled ? 'Transcription is off' : status?.mode === 'browser' ? 'Transcribing (browser)' : 'Transcribing (server)'}
+            </span>
           </span>
-          {isHost && (
-            <button type="button" onClick={onToggle} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600">
-              {enabled ? 'Turn off' : 'Turn on'}
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {segments.length > 0 && (
+              <button
+                type="button"
+                onClick={handleCopyAll}
+                title="Copy entire transcript"
+                className="text-xs font-semibold px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 transition-colors"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? 'Copied' : 'Copy'}</span>
+              </button>
+            )}
+            {isHost && (
+              <button type="button" onClick={onToggle} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-colors">
+                {enabled ? 'Turn off' : 'Turn on'}
+              </button>
+            )}
+          </div>
         </div>
+
+        {enabled && (
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search transcript..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full bg-slate-800/80 border border-slate-700 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-200"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+
         {enabled && status?.error && (
-          <div className="flex items-start gap-2 text-amber-300 text-xs" role="alert">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
+          <div className="flex items-start gap-2 text-amber-300 text-xs bg-amber-950/40 border border-amber-800/50 p-2 rounded-lg" role="alert">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
             <span className="flex-1">{status.error}</span>
             {status.failed > 0 && (
-              <button type="button" onClick={onRetry} className="font-bold underline">
+              <button type="button" onClick={onRetry} className="font-bold underline text-amber-300 hover:text-amber-200">
                 Retry
               </button>
             )}
           </div>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
-        {segments.length === 0 && <p className="text-sm text-slate-400 text-center mt-8">Nothing transcribed yet.</p>}
-        {segments.map((s) => (
-          <p key={s.id} className="text-sm">
-            <span className="text-slate-500 font-mono text-xs mr-1.5">{formatDuration(s.offset_ms / 1000)}</span>
-            <strong className="text-indigo-300">{s.speaker_name}:</strong> {s.text}
-          </p>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+        {segments.length === 0 && (
+          <div className="text-center py-10 space-y-2">
+            <Captions className="w-8 h-8 text-slate-600 mx-auto" />
+            <p className="text-sm text-slate-400 font-medium">Nothing transcribed yet.</p>
+            <p className="text-xs text-slate-500">Words spoken during the meeting will stream here in real time.</p>
+          </div>
+        )}
+
+        {segments.length > 0 && filtered.length === 0 && (
+          <p className="text-xs text-slate-400 text-center py-6">No lines match "{query}".</p>
+        )}
+
+        {filtered.map((s) => (
+          <div key={s.id || s.client_segment_id || `${s.offset_ms}-${s.text}`} className="text-sm group hover:bg-slate-800/30 p-1.5 rounded-lg transition-colors">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-slate-400 font-mono text-[11px] bg-slate-800 px-1.5 py-0.5 rounded">
+                {formatDuration(s.offset_ms / 1000)}
+              </span>
+              <strong className="text-indigo-300 font-medium text-xs">{s.speaker_name}</strong>
+              <span className="text-[10px] text-slate-500 ml-auto hidden group-hover:inline-block">Verified attribution</span>
+            </div>
+            <p className="text-slate-200 pl-1 text-sm leading-relaxed">{s.text}</p>
+          </div>
         ))}
         <div ref={endRef} />
       </div>
@@ -683,7 +767,18 @@ export default function MeetingRoom({ workspaceId, meeting: initialMeeting, user
         addMessage(msg.message);
         if (panelRef.current !== 'chat' && msg.message.sender_id !== String(user?.id)) setUnread((n) => n + 1);
       } else if (msg.type === 'transcript_segment') {
-        setSegments((prev) => (prev.some((s) => s.id === msg.segment.id) ? prev : [...prev, msg.segment].sort((a, b) => a.offset_ms - b.offset_ms)));
+        setSegments((prev) => {
+          const seg = msg.segment;
+          if (!seg) return prev;
+          const exists = prev.some(
+            (s) =>
+              (s.id && s.id === seg.id) ||
+              (s.client_segment_id && seg.client_segment_id && s.client_segment_id === seg.client_segment_id) ||
+              (s.speaker_name === seg.speaker_name && Math.abs((s.offset_ms || 0) - (seg.offset_ms || 0)) < 200 && s.text === seg.text)
+          );
+          if (exists) return prev;
+          return [...prev, seg].sort((a, b) => (a.offset_ms || 0) - (b.offset_ms || 0));
+        });
       } else if (msg.type === 'transcription') {
         setTranscription((t) => ({ ...t, enabled: msg.enabled }));
         notify(`${msg.by} turned transcription ${msg.enabled ? 'on' : 'off'}.`, 'info');

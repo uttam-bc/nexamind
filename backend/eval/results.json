@@ -386,7 +386,7 @@
         "blocked": true
       },
       {
-        "probe": "outsider ends another workspace's video room",
+        "probe": "outsider ends another workspace's meeting",
         "status": 404,
         "leaked": false,
         "blocked": true
@@ -425,23 +425,23 @@
   },
   "latency": {
     "GET documents (50 docs)": {
-      "median_ms": 10.6,
-      "p95_ms": 12.76,
+      "median_ms": 3.53,
+      "p95_ms": 8.85,
       "iterations": 200
     },
     "POST task": {
-      "median_ms": 12.12,
-      "p95_ms": 14.7,
+      "median_ms": 3.5,
+      "p95_ms": 5.48,
       "iterations": 200
     },
     "POST channel message": {
-      "median_ms": 15.76,
-      "p95_ms": 20.21,
+      "median_ms": 7.64,
+      "p95_ms": 17.2,
       "iterations": 200
     },
     "Copilot offline command": {
-      "median_ms": 37.34,
-      "p95_ms": 42.42,
+      "median_ms": 8.02,
+      "p95_ms": 26.74,
       "iterations": 200
     }
   }
